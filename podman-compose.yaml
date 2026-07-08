@@ -1,0 +1,61 @@
+version: "3.8"
+
+services:
+
+  ecommerce_fraud:
+    image: postgres:15
+    container_name: ecommerce_fraud
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: Master#123
+      POSTGRES_DB: ecommerce_fraud
+    ports:
+      - "5434:5432"
+    volumes:
+      - ecommerce_fraud_data:/var/lib/postgresql/data
+      - ./init_scripts/ecommerce_fraud:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ecommerce_fraud"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fraud_net
+
+  superset:
+    image: apache/superset:3.0.0
+    container_name: superset
+    restart: unless-stopped
+    environment:
+      SUPERSET_SECRET_KEY: "supersecretkey1234567890"
+      SUPERSET_FEATURE_ENABLE_TEMPLATE_PROCESSING: "true"
+    command: >
+      /bin/bash -c "
+      superset db upgrade &&
+      superset fab create-admin \
+        --username admin \
+        --firstname Admin \
+        --lastname User \
+        --email admin@admin.com \
+        --password admin || true &&
+      superset init &&
+      superset run -h 0.0.0.0 -p 8088
+      "
+    ports:
+      - "8088:8088"
+    volumes:
+      - superset_home:/app/superset_home
+    networks:
+      - fraud_net
+    depends_on:
+      ecommerce_fraud:
+        condition: service_healthy
+
+networks:
+  fraud_net:
+    driver: bridge
+
+volumes:
+  superset_home:
+  ecommerce_fraud_data:
