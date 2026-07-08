@@ -1,25 +1,10 @@
 # Fraud Analysis and Detection — Streamlit POC
 
-A modular Streamlit app with three portals (Customer, Fraud Analyst, Admin)
+A app with three portals (Customer, Fraud Analyst, Admin)
 backed by PostgreSQL via psycopg2, evaluating orders against a 10-rule
 fraud engine.
 
-## Setup
-
-```bash
-pip install -r requirements.txt
-cp .env.example .env   # then fill in your DB credentials
-psql -U <user> -d <db> -f database/schema.sql
-streamlit run app.py
 ```
-
-## Demo credentials (seeded)
-
-| Portal   | Username / ID | Password    |
-|----------|----------------|-------------|
-| Customer | U1001–U1005    | password123 |
-| Analyst  | analyst        | secure123   |
-| Admin    | admin          | admin123    |
 
 ## Architecture
 
