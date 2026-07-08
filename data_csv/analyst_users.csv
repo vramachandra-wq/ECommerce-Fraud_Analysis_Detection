@@ -1,0 +1,11 @@
+analyst_id,employee_name,username,password,role,created_at
+A0,John Smith,admin,admin123,Admin,2026-01-04 08:00:00
+A1,Jane Doe,analyst,secure123,Senior Fraud Analyst,2026-01-07 12:00:00
+A2,Radhika Sharaf,radhikasharaf76,secure123,Lead Fraud Analyst,2026-01-10 16:00:00
+A3,Urishilla Goda,urishillagoda74,secure123,Fraud Analyst,2026-01-12 21:00:00
+A4,Warhi Shroff,warhishroff84,secure123,Senior Fraud Analyst,2026-01-15 02:00:00
+A5,Tejas Naidu,tejasnaidu84,secure123,Senior Fraud Analyst,2026-01-17 07:00:00
+A6,Jason Mallick,jasonmallick83,secure123,Admin,2026-01-19 12:00:00
+A7,Keya Shetty,keyashetty17,secure123,Senior Fraud Analyst,2026-01-21 17:00:00
+A8,Pahal Balakrishnan,pahalbalakrishnan78,secure123,Admin,2026-01-23 22:00:00
+A9,Yug Gopal,yuggopal41,secure123,Admin,2026-01-26 03:00:00
