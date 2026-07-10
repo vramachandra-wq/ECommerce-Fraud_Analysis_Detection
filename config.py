@@ -14,3 +14,14 @@ DB_CONFIG = {
 
 # R001 hold window, in minutes (kept configurable rather than hardcoded in the engine)
 R001_HOLD_MINUTES = 180
+
+# Groq configuration
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+GROQ_SQL_MODEL = os.getenv("GROQ_SQL_MODEL", "openai/gpt-oss-120b")
+GROQ_REPAIR_MODEL = os.getenv("GROQ_REPAIR_MODEL", "openai/gpt-oss-120b")
+GROQ_SUMMARY_MODEL = os.getenv("GROQ_SUMMARY_MODEL", "openai/gpt-oss-120b")
+
+# App configuration
+MAX_HISTORY = 8
+MAX_STORED_MESSAGES = 100
+MARKDOWN_PREVIEW_ROWS = 15

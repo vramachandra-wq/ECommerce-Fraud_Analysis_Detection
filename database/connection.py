@@ -43,3 +43,21 @@ def get_cursor(commit: bool = False):
             raise
         finally:
             cur.close()
+
+def get_pooled_connection():
+    """
+    Get a connection from the pool.
+    Wrapper for chatbot_fixed.py compatibility.
+    """
+    pool = get_pool()
+    return pool.getconn()
+
+
+def release_pooled_connection(conn):
+    """
+    Return a connection to the pool.
+    Wrapper for chatbot_fixed.py compatibility.
+    """
+    if conn is not None:
+        pool = get_pool()
+        pool.putconn(conn)

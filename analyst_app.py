@@ -2,9 +2,13 @@ import streamlit as st
 from portals.analyst_dashboard import render as render_dashboard
 from portals.admin_panel import render as render_admin_panel
 from database.connection import get_cursor
+from portals.analytic_AI_chatbot import render as render_ai_chatbot
+from config import GROQ_API_KEY
+
 from auth.analyst_auth import (
     PAGE_ADMIN_PANEL,
     PAGE_FRAUD_DASHBOARD,
+    PAGE_AI_CHATBOT,
     PAGE_LABELS,
     authenticate_analyst,
     get_granted_pages,
@@ -65,8 +69,10 @@ def main():
     page_renderers = {
         PAGE_FRAUD_DASHBOARD: render_dashboard,
         PAGE_ADMIN_PANEL: render_admin_panel,
+        PAGE_AI_CHATBOT: render_ai_chatbot,
+
     }
-    available = [p for p in (PAGE_FRAUD_DASHBOARD, PAGE_ADMIN_PANEL) if p in granted]
+    available = [p for p in (PAGE_FRAUD_DASHBOARD, PAGE_ADMIN_PANEL, PAGE_AI_CHATBOT) if p in granted]
 
     if not available:
         st.warning("You don't have access to any pages yet. Contact an Admin to request access.")

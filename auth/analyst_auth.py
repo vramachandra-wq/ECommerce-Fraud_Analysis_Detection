@@ -26,11 +26,14 @@ def is_admin(analyst: dict) -> bool:
 # in sync with the pages actually rendered by analyst_app.py.
 PAGE_FRAUD_DASHBOARD = "FRAUD_DASHBOARD"
 PAGE_ADMIN_PANEL = "ADMIN_PANEL"
-ALL_PAGES = [PAGE_FRAUD_DASHBOARD, PAGE_ADMIN_PANEL]
+PAGE_AI_CHATBOT = "ai_chatbot"
+
+ALL_PAGES = [PAGE_FRAUD_DASHBOARD, PAGE_ADMIN_PANEL,PAGE_AI_CHATBOT]
 
 PAGE_LABELS = {
     PAGE_FRAUD_DASHBOARD: "Fraud Analyst Dashboard",
     PAGE_ADMIN_PANEL: "Admin Control Panel",
+    PAGE_AI_CHATBOT : "Analytic Ai Chatbot"
 }
 
 
