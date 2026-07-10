@@ -2,27 +2,100 @@
 import sys
 from pathlib import Path
 import requests
-
+import time
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from datetime import datetime
 
 import plotly.express as px
 import streamlit as st
-
-from auth.analyst_auth import ALL_PAGES, PAGE_LABELS
+from config import API_BASE_URL, API_TIMEOUT
 from database.connection import get_cursor
+from auth.analyst_auth import ALL_PAGES, PAGE_LABELS
 from fraud_engine.auto_approval import sync_expired_holds
 from portals.analyst_dashboard import render_queue_and_review
 from utils.queries import (
     get_active_blacklist_entry,
+    get_active_phone_blacklist_entry,
+    get_active_email_blacklist_entry,
     get_analyst_performance,
     get_kpis,
     get_orders_over_time,
     get_permission_matrix,
     get_recent_orders,
-    get_rule_stats,
+    get_rule_stats
 )
+
+
+def _build_api_url(path: str) -> str:
+    return f"{API_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
+
+
+def _send_api_request(method: str, endpoint: str, payload: dict):
+    try:
+        if method.lower() == "post":
+            response = requests.post(_build_api_url(endpoint), json=payload, timeout=API_TIMEOUT)
+        elif method.lower() == "put":
+            response = requests.put(_build_api_url(endpoint), json=payload, timeout=API_TIMEOUT)
+        else:
+            raise ValueError(f"Unsupported API method: {method}")
+    except requests.exceptions.RequestException as exc:
+        st.error(f"API request failed: {exc}")
+        return None
+
+    if response.status_code != 200:
+        st.error(f"API error ({response.status_code}): {response.text}")
+        return None
+
+    return response
+
+
+@st.dialog("Confirm Create Analyst")
+def confirm_create_analyst(payload: dict):
+    st.markdown("### Create New Analyst — Confirm Details")
+    st.json(payload)
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Create Analyst Account", type="primary", use_container_width=True):
+            with st.spinner("Creating analyst account..."):
+                resp = _send_api_request("post", "create-analyst", payload)
+            if resp is not None:
+                st.success(f"✅ Analyst {payload.get('employee_name')} created.")
+                time.sleep(1)
+                st.rerun()
+    with col2:
+        if st.button("Cancel", use_container_width=True):
+            st.rerun()
+
+
+@st.dialog("Confirm Blacklist Action")
+def confirm_blacklist_action(endpoint: str, payload: dict, entity_label: str):
+    st.warning(f"Are you sure you want to blacklist {entity_label}?")
+    st.json(payload)
+    if st.button(f"Confirm Blacklist", type="primary", use_container_width=True):
+        with st.spinner("Applying blacklist..."):
+            resp = _send_api_request("post", endpoint, payload)
+        if resp is not None:
+            st.success(f"{entity_label} blacklisted.")
+            time.sleep(1)
+            st.rerun()
+    if st.button("Cancel", use_container_width=True):
+        st.rerun()
+
+
+@st.dialog("Confirm Whitelist Action")
+def confirm_whitelist_action(endpoint: str, payload: dict, entity_label: str):
+    st.warning(f"Are you sure you want to whitelist {entity_label}? This will remove it from the blacklist.")
+    st.json(payload)
+    if st.button(f"Confirm Whitelist", type="primary", use_container_width=True):
+        with st.spinner("Removing from blacklist..."):
+            resp = _send_api_request("put", endpoint, payload)
+        if resp is not None:
+            st.success(f"{entity_label} whitelisted.")
+            time.sleep(1)
+            st.rerun()
+    if st.button("Cancel", use_container_width=True):
+        st.rerun()
 
 
 def _tab_user_management():
@@ -51,26 +124,14 @@ def _tab_user_management():
         elif not confirm:
             st.warning("Please check the confirmation box to proceed with creation.")
         else:
-            try:
-
-                response = requests.post(
-                    "http://127.0.0.1:8000/create-analyst",
-                    json={
-                        "analyst_id": analyst_id,
-                        "employee_name": employee_name,
-                        "username": username,
-                        "password": password,
-                        "role": role,
-                    },
-                )
-
-                if response.status_code == 200:
-                    st.success(f"✅ Analyst **{employee_name}** ({analyst_id}) created successfully.")
-                else:
-                    st.error(response.text)
-
-            except Exception as e:
-                st.error(f"Could not create analyst: {e}")
+            payload = {
+                "analyst_id": analyst_id,
+                "employee_name": employee_name,
+                "username": username,
+                "password": password,
+                "role": role,
+            }
+            confirm_create_analyst(payload)
 
 
     st.markdown("#### 📈 Analyst Performance")
@@ -79,82 +140,95 @@ def _tab_user_management():
     st.dataframe(perf_df, use_container_width=True, hide_index=True)
 
 
-def _tab_ip_blacklist(analyst: dict):
-    st.markdown("### 🛡️ IP Blacklist Management")
-    st.caption("Check, blacklist, or whitelist suspicious IP addresses.")
+def _tab_blacklists(analyst: dict):
+    st.markdown("### 🛡️ Entity Blacklist Management")
+    st.caption("Check, blacklist, or whitelist IP addresses, phone numbers, and emails.")
     
-    col_lookup, _ = st.columns([1, 1])
-    with col_lookup:
-        ip_address = st.text_input("IP Address Lookup", placeholder="e.g. 203.0.113.111", key="blacklist_lookup_ip")
-        if st.button("🔍 Check Status", key="blacklist_check_btn"):
-            st.session_state.blacklist_checked_ip = ip_address.strip()
+    t_ip, t_phone, t_email = st.tabs(["🌐 IP Address", "📱 Phone Number", "📧 Email"])
+    
+    # --- IP TAB ---
+    with t_ip:
+        col_lookup, _ = st.columns([1, 1])
+        with col_lookup:
+            ip_address = st.text_input("IP Lookup", placeholder="e.g. 203.0.113.111", key="ip_lookup")
+            if st.button("🔍 Check IP", key="btn_check_ip"):
+                st.session_state.blacklist_checked_ip = ip_address.strip()
 
-    st.divider()
+        checked_ip = st.session_state.get("blacklist_checked_ip")
+        if checked_ip:
+            st.divider()
+            with get_cursor() as (conn, cur):
+                entry = get_active_blacklist_entry(cur, checked_ip)
 
-    checked_ip = st.session_state.get("blacklist_checked_ip")
-    if not checked_ip:
-        st.info("Enter an IP address above and click **Check Status** to see if it's blacklisted.")
-        return
-
-    with get_cursor() as (conn, cur):
-        entry = get_active_blacklist_entry(cur, checked_ip)
-
-    if entry:
-        st.error(f"🚫 **{checked_ip}** is currently blacklisted.")
-        
-        info_col1, info_col2, info_col3 = st.columns(3)
-        info_col1.metric("Reason", entry['reason'])
-        info_col2.metric("Blacklisted By", entry['blacklisted_by_name'] or entry['blacklisted_by'])
-        info_col3.metric("Blacklisted Date", str(entry['blacklisted_at']).split()[0])
-
-        st.markdown("#### Remove from Blacklist")
-        confirm_whitelist = st.checkbox(f"⚠️ I confirm I want to whitelist **{checked_ip}**.")
-        if st.button("Whitelist IP Address", type="primary", key="whitelist_btn"):
-            if not confirm_whitelist:
-                st.warning("Please check the confirmation box to proceed with whitelisting.")
+            if entry:
+                st.error(f"🚫 **{checked_ip}** is currently blacklisted.")
+                st.write(f"**Reason:** {entry['reason']} | **By:** {entry['blacklisted_by_name'] or entry['blacklisted_by']} | **Date:** {str(entry['blacklisted_at']).split()[0]}")
+                if st.button("Whitelist IP", type="primary", key="whitelist_ip"):
+                    payload = {"removed_by": analyst["analyst_id"], "removed_at": str(datetime.now()), "blacklist_id": entry["blacklist_id"]}
+                    confirm_whitelist_action("whitelist-ip", payload, f"IP {checked_ip}")
             else:
-                response = requests.put(
-                    "http://127.0.0.1:8000/whitelist-ip",
-                    json={
-                        "removed_by": analyst["analyst_id"],
-                        "removed_at": str(datetime.now()),
-                        "blacklist_id": entry["blacklist_id"],
-                    },
-                )
+                st.success(f"✅ **{checked_ip}** is safe.")
+                with st.form("form_bl_ip"):
+                    reason = st.text_area("Reason")
+                    if st.form_submit_button("Blacklist IP", type="primary") and reason:
+                        payload = {"ip_address": checked_ip, "reason": reason, "blacklisted_by": analyst["analyst_id"]}
+                        confirm_blacklist_action("blacklist-ip", payload, f"IP {checked_ip}")
 
-                if response.status_code != 200:
-                    st.error(response.text)
+    # --- PHONE TAB ---
+    with t_phone:
+        col_lookup, _ = st.columns([1, 1])
+        with col_lookup:
+            phone = st.text_input("Phone Lookup", placeholder="e.g. +919876543210", key="phone_lookup")
+            if st.button("🔍 Check Phone", key="btn_check_phone"):
+                st.session_state.blacklist_checked_phone = phone.strip()
 
-                st.success(f"✅ {checked_ip} has been successfully removed from the blacklist.")
-                st.rerun()
-    else:
-        st.success(f"✅ **{checked_ip}** is not currently blacklisted.")
-        
-        with st.form("blacklist_ip_form"):
-            st.markdown("#### Add to Blacklist")
-            reason = st.text_area("Blacklist Reason (required)", placeholder="e.g. Repeated chargeback attempts...")
-            confirm_blacklist = st.checkbox(f"⚠️ I confirm I want to blacklist **{checked_ip}**.")
-            submitted = st.form_submit_button("Blacklist This IP", type="primary")
-            
-        if submitted:
-            if not reason.strip():
-                st.error("A reason is required to blacklist an IP address.")
-            elif not confirm_blacklist:
-                st.warning("Please check the confirmation box to proceed with blacklisting.")
+        checked_phone = st.session_state.get("blacklist_checked_phone")
+        if checked_phone:
+            st.divider()
+            with get_cursor() as (conn, cur):
+                entry = get_active_phone_blacklist_entry(cur, checked_phone)
+
+            if entry:
+                st.error(f"🚫 **{checked_phone}** is currently blacklisted.")
+                st.write(f"**Reason:** {entry['reason']} | **By:** {entry['blacklisted_by_name'] or entry['blacklisted_by']} | **Date:** {str(entry['blacklisted_at']).split()[0]}")
+                if st.button("Whitelist Phone", type="primary", key="whitelist_phone"):
+                    payload = {"removed_by": analyst["analyst_id"], "removed_at": str(datetime.now()), "blacklist_id": entry["blacklist_id"]}
+                    confirm_whitelist_action("whitelist-phone", payload, f"Phone {checked_phone}")
             else:
-                response = requests.post(
-                    "http://127.0.0.1:8000/blacklist-ip",
-                    json={
-                        "ip_address": checked_ip,
-                        "reason": reason.strip(),
-                        "blacklisted_by": analyst["analyst_id"],
-                    },
-                )
+                st.success(f"✅ **{checked_phone}** is safe.")
+                with st.form("form_bl_phone"):
+                    reason = st.text_area("Reason")
+                    if st.form_submit_button("Blacklist Phone", type="primary") and reason:
+                        payload = {"phone_number": checked_phone, "reason": reason, "blacklisted_by": analyst["analyst_id"]}
+                        confirm_blacklist_action("blacklist-phone", payload, f"Phone {checked_phone}")
 
-                if response.status_code != 200:
-                    st.error(response.text)
-                st.success(f"🚫 {checked_ip} has been blacklisted.")
-                st.rerun()
+    # --- EMAIL TAB ---
+    with t_email:
+        col_lookup, _ = st.columns([1, 1])
+        with col_lookup:
+            email = st.text_input("Email Lookup", placeholder="e.g. fraud@example.com", key="email_lookup")
+            if st.button("🔍 Check Email", key="btn_check_email"):
+                st.session_state.blacklist_checked_email = email.strip()
+
+        checked_email = st.session_state.get("blacklist_checked_email")
+        if checked_email:
+            st.divider()
+            with get_cursor() as (conn, cur):
+                entry = get_active_email_blacklist_entry(cur, checked_email)
+
+            if entry:
+                st.error(f"🚫 **{checked_email}** is currently blacklisted.")
+                st.write(f"**Reason:** {entry['reason']} | **By:** {entry['blacklisted_by_name'] or entry['blacklisted_by']} | **Date:** {str(entry['blacklisted_at']).split()[0]}")
+                if st.button("Whitelist Email", type="primary", key="whitelist_email"):
+                    payload = {"removed_by": analyst["analyst_id"], "removed_at": str(datetime.now()), "blacklist_id": entry["blacklist_id"]}
+                    confirm_whitelist_action("whitelist-email", payload, f"Email {checked_email}")
+            else:
+                st.success(f"✅ **{checked_email}** is safe.")
+                with st.form("form_bl_email"):
+                    reason = st.text_area("Reason")
+                    if st.form_submit_button("Blacklist Email", type="primary") and reason:
+                        payload = {"email": checked_email, "reason": reason, "blacklisted_by": analyst["analyst_id"]}
+                        confirm_blacklist_action("blacklist-email", payload, f"Email {checked_email}")
 
 
 def _tab_permissions(analyst: dict):
@@ -202,23 +276,23 @@ def _tab_permissions(analyst: dict):
         if not confirm_perms:
             st.warning("Please check the confirmation box to save these permissions.")
         else:
-            for page_key, granted in selections.items():
-                response = requests.put(
-                    "http://127.0.0.1:8000/permissions",
-                    json={
+            with st.spinner(f"Updating permissions for {selected_analyst['employee_name']}..."):
+                response = _send_api_request(
+                    "put",
+                    "permissions/bulk",
+                    {
                         "analyst_id": target_id,
-                        "page_key": page_key,
-                        "granted": granted,
+                        "permissions": selections,
                         "granted_by": analyst["analyst_id"],
-                        "granted_at": str(datetime.now())
                     },
                 )
 
-                if response.status_code != 200:
-                    st.error(response.text)
-                    return
-            st.success(f"✅ Permissions successfully updated for {selected_analyst['employee_name']}.")
-            st.rerun()
+            if response is not None and response.status_code == 200:
+                st.success(f"✅ Permissions successfully updated for {selected_analyst['employee_name']}.")
+                time.sleep(1)
+                st.rerun()
+            elif response is not None:
+                st.error(f"Failed to update: {response.text}")
 
 
 def _tab_analytics():
@@ -315,7 +389,7 @@ def _tab_analytics():
                 "flagged_reason": st.column_config.TextColumn(
                     "Flagged Reason", 
                     help="The rule or reason that flagged the order",
-                    width="large"  # Expands the column width for lengthier text
+                    width="large"
                 ),
             }
         )
@@ -324,6 +398,7 @@ def _tab_analytics():
 
 
 def _tab_rule_stats():
+    """Displays visual analytics and a table for how often rules are firing."""
     st.markdown("### 📋 Rule Trigger Statistics")
     st.caption("Visibility into which automated fraud rules are firing most frequently.")
     
@@ -341,8 +416,142 @@ def _tab_rule_stats():
         )
         st.plotly_chart(fig, use_container_width=True)
         
-    st.dataframe(rule_df, use_container_width=True, hide_index=True)
+        st.dataframe(rule_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No rule trigger data available to display.")
 
+
+@st.dialog("Confirm Rule Update")
+def _confirm_rule_update(payload, rule_id):
+    """Modal dialog to confirm changes before sending to the API."""
+    st.warning(f"Are you sure you want to apply these changes to **{rule_id}**?")
+    
+    # Show the analyst exactly what they are submitting
+    st.json(payload)
+    
+    # Layout the confirmation and cancel buttons side-by-side
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Yes, Update Rule", type="primary", use_container_width=True):
+            with st.spinner("Updating..."):
+                resp = _send_api_request("put", "update-rule", payload)
+
+            if resp is not None and resp.status_code == 200:
+                st.success("Rule updated successfully!")
+                time.sleep(1.5)  # Brief pause so the user can read the success message
+                st.rerun()
+            elif resp is not None:
+                st.error(f"Failed: {resp.status_code} - {resp.text}")
+                
+    with col2:
+        if st.button("Cancel", use_container_width=True):
+            st.rerun() # Closes the modal without doing anything
+
+
+def _tab_rule_management():
+    """Provides a dynamic form to update rule actions, thresholds, and time windows."""
+    st.markdown("### ⚙️ Rule Configuration Management")
+    st.caption("Adjust actions, thresholds, and time windows for e-commerce fraud detection rules.")
+    
+    # 1. Fetch current rules 
+    with get_cursor() as (conn, cur):
+        cur.execute("""
+            SELECT rule_id, rule_name, rule_description, rule_type, 
+                   action, threshold_value, time_interval_value, time_interval_unit 
+            FROM master.rule_master 
+            ORDER BY rule_id
+        """)
+        cols = [desc[0] for desc in cur.description]
+        rules_data = [dict(zip(cols, row)) for row in cur.fetchall()]
+        
+    if not rules_data:
+        st.info("No rules found in the database.")
+        return
+        
+    # 2. UI: Select a rule
+    rule_options = {f"{r['rule_id']} - {r['rule_name']}": r for r in rules_data}
+    selected_rule_label = st.selectbox("Select Rule to Modify", options=list(rule_options.keys()))
+    selected_rule = rule_options[selected_rule_label]
+    
+    st.divider()
+    
+    st.markdown(f"**Description:** {selected_rule['rule_description']}")
+    st.markdown(f"**Detection Type:** `{selected_rule['rule_type']}`")
+    
+    is_r001 = selected_rule['rule_id'] == 'R001'
+    is_blacklist = 'blacklist' in selected_rule['rule_name'].lower()
+    
+    # 3. Edit Form
+    with st.form(f"edit_form_{selected_rule['rule_id']}"):
+        st.subheader("Configuration Parameters")
+        
+        # 4. Handle Action Locking
+        if is_r001:
+            st.info("🔒 **Action is locked to HOLD** for the P2 iPhone 16 Rule.")
+            new_action = 'HOLD'
+        elif is_blacklist:
+            st.error("🔒 **Action is strictly locked to REJECTED** for Blacklist entities.")
+            new_action = 'REJECTED'
+        else:
+            col_action, _ = st.columns([1, 1])
+            with col_action:
+                actions = ['HOLD', 'REVIEW', 'REJECTED', 'PASS']
+                current_action = selected_rule['action']
+                action_idx = actions.index(current_action) if current_action in actions else 0
+                new_action = st.selectbox("Rule Action", actions, index=action_idx)
+        
+        # 5. Handle Metrics (Split logic for Linkage vs Velocity/Behavioral)
+        requires_interval = (selected_rule['rule_type'] in ['VELOCITY', 'BEHAVIORAL'] or is_r001) and not is_blacklist
+        requires_threshold = (selected_rule['rule_type'] in ['VELOCITY', 'BEHAVIORAL', 'LINKAGE']) and not is_blacklist
+        
+        col_thresh, col_val, col_unit = st.columns(3)
+        
+        with col_thresh:
+            if requires_threshold:
+                current_threshold = float(selected_rule['threshold_value']) if selected_rule['threshold_value'] is not None else 0.0
+                new_threshold = st.number_input("Threshold", min_value=0.0, value=current_threshold, step=1.0)
+            else:
+                st.info("Threshold N/A")
+                new_threshold = None
+                
+        with col_val:
+            if requires_interval:
+                current_interval_val = int(selected_rule['time_interval_value']) if selected_rule['time_interval_value'] is not None else 1
+                new_interval_val = st.number_input("Time Interval", min_value=1, value=current_interval_val, step=1)
+            else:
+                if not requires_threshold: 
+                    st.info("Interval N/A")
+                new_interval_val = None
+                
+        with col_unit:
+            if requires_interval:
+                units = ['MINUTE', 'HOUR', 'DAY', 'WEEK']
+                current_unit = selected_rule['time_interval_unit'] if selected_rule['time_interval_unit'] else 'MINUTE'
+                unit_idx = units.index(current_unit) if current_unit in units else 0
+                new_unit = st.selectbox("Unit", units, index=unit_idx)
+            else:
+                new_unit = None
+                
+        submit = st.form_submit_button("Review Changes", type="primary")
+        
+        # 6. Trigger the Modal Confirmation
+        if submit:
+            payload = {
+                "rule_id": selected_rule['rule_id'],
+                "action": new_action,
+                "threshold_value": new_threshold,
+                "time_interval_value": new_interval_val,
+                "time_interval_unit": new_unit
+            }
+            _confirm_rule_update(payload, selected_rule['rule_id'])
+
+
+@st.cache_data(ttl=300)
+def sync_database_holds():
+    """Caches the database synchronization to prevent it from firing on every UI rerun."""
+    with get_cursor(commit=True) as (conn, cur):
+        sync_expired_holds(conn, cur)
+        
 
 def render():
     analyst = st.session_state.get("analyst")
@@ -353,22 +562,40 @@ def render():
     st.header(f"⚙️ Admin Control Panel")
     st.caption(f"Logged in as: **{analyst['employee_name']}** ({analyst['role']})")
 
-    with get_cursor(commit=True) as (conn, cur):
-        sync_expired_holds(conn, cur)
+    # Run the cached synchronization task
+    sync_database_holds()
 
     tab_overrides, tab_blacklist, tab_permissions, tab_users, tab_analytics, tab_rules = st.tabs(
-        ["⚖️ Review Queue (Override)", "🛡️ IP Blacklist", "🔐 Analyst Permissions", "👥 User Management", "📊 Analytics", "📋 Rule Stats"]
+        [
+            "⚖️ Review Queue (Override)", 
+            "🛡️ Entity Blacklists", 
+            "🔐 Analyst Permissions", 
+            "👥 User Management", 
+            "📊 Analytics", 
+            "📋 Rule Management"
+        ]
     )
     
     with tab_overrides:
         render_queue_and_review(analyst)
+        
     with tab_blacklist:
-        _tab_ip_blacklist(analyst)
+        _tab_blacklists(analyst)
+        
     with tab_permissions:
         _tab_permissions(analyst)
+        
     with tab_users:
         _tab_user_management()
+        
     with tab_analytics:
         _tab_analytics()
+        
     with tab_rules:
+        # 1. Display the charts and stats first
         _tab_rule_stats()
+        
+        st.divider() 
+        
+        # 2. Display the configuration management form below
+        _tab_rule_management()

@@ -1,52 +1,69 @@
-"""Orchestrates rule evaluation and resolves the final order disposition.
-
-Conflict resolution: when multiple rules trigger with different actions,
-the STRICTEST outcome wins (REJECTED > ON_HOLD > PENDING_REVIEW), and all
-triggered rules' reasons are combined into a single flagged_reason string.
-
-delay_minutes is set to 180 only when R001 triggers AND the resolved
-final status is ON_HOLD. If a stricter rule (e.g. R007 -> REJECTED)
-overrides R001's hold, there is no waiting window to honor, so
-delay_minutes is 0.
-"""
-
-from config import R001_HOLD_MINUTES
+from typing import Dict, Any, List, Optional
 from fraud_engine.rules import RULE_CHECKS
 
-RULE_ACTION_MAP = {
-    "R001": "ON_HOLD",
-    "R002": "PENDING_REVIEW",
-    "R003": "PENDING_REVIEW",
-    "R004": "PENDING_REVIEW",
-    "R005": "PENDING_REVIEW",
-    "R006": "PENDING_REVIEW",
-    "R007": "REJECTED",
-    "R008": "PENDING_REVIEW",
-    "R009": "PENDING_REVIEW",
-    "R010": "PENDING_REVIEW",
-}
-
-STATUS_PRIORITY = {
+STATUS_PRIORITY: Dict[str, int] = {
     "REJECTED": 3,
     "ON_HOLD": 2,
     "PENDING_REVIEW": 1,
     "APPROVED": 0,
 }
 
+# Maps database ENUM/VARCHAR actions to internal application statuses[cite: 7]
+DB_ACTION_TO_STATUS: Dict[str, str] = {
+    "REJECTED": "REJECTED",
+    "HOLD": "ON_HOLD",
+    "REVIEW": "PENDING_REVIEW",
+    "PASS": "APPROVED",  
+    "APPROVE": "APPROVED"   
+}
 
-def evaluate_order(cursor, ctx: dict) -> dict:
-    """Run every rule against ctx and return the resolved disposition.
+# In-memory cache to minimize database hits[cite: 7]
+_RULE_METADATA_CACHE: Dict[str, Dict[str, Any]] = {}
 
-    Returns a dict with keys:
-        order_status, delay_minutes, flagged_reason, triggered_rules, is_fraud
-    """
-    triggered = []
+def _get_rule_metadata(cursor: Any, rule_id: str) -> Dict[str, Any]:
+    """Fetches rule actions and intervals directly from the master.rule_master table[cite: 7]."""
+    if rule_id not in _RULE_METADATA_CACHE:
+        cursor.execute(
+            """
+            SELECT action, time_interval_value, time_interval_unit 
+            FROM master.rule_master 
+            WHERE rule_id = %s
+            """,
+            (rule_id,)
+        )
+        row = cursor.fetchone()
+        
+        if row:
+            action_str = row[0].upper() if row[0] else "REVIEW"
+            interval_val = row[1] or 0
+            interval_unit = (row[2] or "MINUTE").upper()
+            
+            # Convert everything to minutes[cite: 7]
+            if interval_unit == "HOUR":
+                delay_minutes = interval_val * 60
+            elif interval_unit == "DAY":
+                delay_minutes = interval_val * 1440
+            else:
+                delay_minutes = interval_val # Defaults to MINUTE
+                
+            _RULE_METADATA_CACHE[rule_id] = {
+                "action": DB_ACTION_TO_STATUS.get(action_str, "PENDING_REVIEW"),
+                "delay_minutes": delay_minutes
+            }
+        else:
+            _RULE_METADATA_CACHE[rule_id] = {"action": "PENDING_REVIEW", "delay_minutes": 0}
+            
+    return _RULE_METADATA_CACHE[rule_id]
+
+
+def evaluate_order(cursor: Any, ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """Run all rules against the order context and return the resolved disposition[cite: 7]."""
+    triggered: List[Dict[str, str]] = []
     
-    # Collect all triggered rules as dictionaries for the order_rule_hits table
     for rule_id, check_fn in RULE_CHECKS:
         is_triggered, reason = check_fn(cursor, ctx)
-        if is_triggered:
-            # Extract a short name before the "—" if it exists, else default to rule_id
+        if is_triggered and reason:
+            # Shorten name if possible[cite: 7]
             rule_name = reason.split("—")[0].strip() if "—" in reason else rule_id
             triggered.append({
                 "rule_id": rule_id,
@@ -63,27 +80,39 @@ def evaluate_order(cursor, ctx: dict) -> dict:
             "is_fraud": False,
         }
 
-    # Determine the strictest final status
     final_status = "PENDING_REVIEW"
+    delay_minutes = 0
+
+    # Resolve strictness conflict[cite: 7]
     for rule in triggered:
-        action = RULE_ACTION_MAP[rule["rule_id"]]
+        meta = _get_rule_metadata(cursor, rule["rule_id"])
+        action = meta["action"]
+        
         if STATUS_PRIORITY[action] > STATUS_PRIORITY[final_status]:
             final_status = action
+            
+        if action == "ON_HOLD":
+            delay_minutes = max(delay_minutes, meta["delay_minutes"])
 
-    # Calculate delays and combined legacy reasons using the dictionary structure
-    triggered_ids = [rule["rule_id"] for rule in triggered]
-    delay_minutes = R001_HOLD_MINUTES if ("R001" in triggered_ids and final_status == "ON_HOLD") else 0
+    # Discard delay if stricter outcome found[cite: 7]
+    if final_status == "REJECTED":
+        delay_minutes = 0
+
     combined_reason = "; ".join(rule["rule_description"] for rule in triggered)
-
-    # Only an immediate REJECTED disposition (R007) is fraud at submission
-    # time. ON_HOLD / PENDING_REVIEW remain is_fraud=FALSE (schema default)
-    # until an analyst (or the 180-min auto-approval sweep) resolves them.
     is_fraud = final_status == "REJECTED"
 
     return {
         "order_status": final_status,
         "delay_minutes": delay_minutes,
         "flagged_reason": combined_reason,
-        "triggered_rules": triggered,  # Now returns the list of dicts required for bulk insert
+        "triggered_rules": triggered, 
         "is_fraud": is_fraud,
     }
+
+def clear_metadata_cache(rule_id: Optional[str] = None):
+    """Clears cached rule metadata[cite: 7]."""
+    global _RULE_METADATA_CACHE
+    if rule_id and rule_id in _RULE_METADATA_CACHE:
+        del _RULE_METADATA_CACHE[rule_id]
+    else:
+        _RULE_METADATA_CACHE.clear()

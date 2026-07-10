@@ -1,10 +1,15 @@
 import streamlit as st
 from portals.analyst_dashboard import render as render_dashboard
 from portals.admin_panel import render as render_admin_panel
+
+# 1. Import your new Power BI module here
+from portals.power_bi_reports import show_powerbi_dashboard as render_power_bi
+
 from database.connection import get_cursor
 from auth.analyst_auth import (
     PAGE_ADMIN_PANEL,
     PAGE_FRAUD_DASHBOARD,
+    PAGE_POWER_BI,        # <-- Make sure to add this to your auth module
     PAGE_LABELS,
     authenticate_analyst,
     get_granted_pages,
@@ -15,7 +20,9 @@ def _login_form():
     st.title("🏢 Metro Cart Internal")
     st.subheader("Employee Login")
     
-    with st.form("analyst_login", width=500):
+    # Note: Streamlit's st.form doesn't natively support a 'width' argument, 
+    # but left it as you had it in case you are using a custom wrapper.
+    with st.form("analyst_login"):
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
         submitted = st.form_submit_button("Log In", use_container_width=False)
@@ -57,16 +64,18 @@ def main():
     st.sidebar.divider()
 
     # NAVIGATION LOGIC — driven by page-level RBAC.
-    # Admins always have every page; other analysts see only pages an Admin
-    # has explicitly granted them (Admin Panel -> Analyst Permissions).
     with get_cursor() as (conn, cur):
         granted = get_granted_pages(cur, user_data)
 
+    # 2. Add the Power BI page to your router dictionary
     page_renderers = {
         PAGE_FRAUD_DASHBOARD: render_dashboard,
         PAGE_ADMIN_PANEL: render_admin_panel,
+        PAGE_POWER_BI: render_power_bi,     # <-- Maps the auth constant to your function
     }
-    available = [p for p in (PAGE_FRAUD_DASHBOARD, PAGE_ADMIN_PANEL) if p in granted]
+    
+    # 3. Add the Power BI page to the available tuple to check against granted permissions
+    available = [p for p in (PAGE_FRAUD_DASHBOARD, PAGE_ADMIN_PANEL, PAGE_POWER_BI) if p in granted]
 
     if not available:
         st.warning("You don't have access to any pages yet. Contact an Admin to request access.")
@@ -78,11 +87,12 @@ def main():
     else:
         choice = available[0]
 
-    # Re-verify at render time (not just in the choice list) so a stale
-    # session_state value can never render a page that isn't granted.
+    # Re-verify at render time
     if choice not in granted:
         st.error("Access Denied.")
         return
+        
+    # Render the selected page
     page_renderers[choice]()
 
 if __name__ == "__main__":

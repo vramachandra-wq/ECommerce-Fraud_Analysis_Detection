@@ -1,127 +1,269 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from typing import Optional, Dict
+from datetime import datetime
 import psycopg2
+from psycopg2.extras import execute_batch
 from config import DB_CONFIG
+
+# Note: Adjust these import paths as needed
+from fraud_engine.rules import clear_interval_cache
+from fraud_engine.engine import clear_metadata_cache
 
 router = APIRouter()
 
 
+# --- PYDANTIC MODELS ---
+
+class AnalystCreate(BaseModel):
+    analyst_id: str
+    employee_name: str
+    username: str
+    password: str
+    role: str
+
+class BlacklistRequest(BaseModel):
+    reason: str
+    blacklisted_by: str
+
+class IPBlacklist(BlacklistRequest):
+    ip_address: str
+
+class PhoneBlacklist(BlacklistRequest):
+    phone_number: str
+
+class EmailBlacklist(BlacklistRequest):
+    email: str
+
+class WhitelistRequest(BaseModel):
+    blacklist_id: int
+    removed_by: str
+    removed_at: str
+
+class BulkPermissionUpdate(BaseModel):
+    analyst_id: str
+    permissions: Dict[str, bool]
+    granted_by: str
+
+class RuleUpdate(BaseModel):
+    rule_id: str
+    action: str
+    threshold_value: Optional[float] = None
+    time_interval_value: Optional[int] = None
+    time_interval_unit: Optional[str] = None
+
+
+# --- ANALYST ENDPOINTS ---
+
 @router.post("/create-analyst")
-async def create_analyst(request: Request):
+def create_analyst(data: AnalystCreate):
+    try:
+        with psycopg2.connect(**DB_CONFIG) as conn:
+            with conn.cursor() as cur:
+                # TODO: In production, hash data.password using passlib/bcrypt before inserting!
+                cur.execute(
+                    """
+                    INSERT INTO master.analyst_users
+                    (analyst_id, employee_name, username, password, role)
+                    VALUES (%s,%s,%s,%s,%s)
+                    """,
+                    (data.analyst_id, data.employee_name, data.username, data.password, data.role),
+                )
+        return {"message": f"Analyst {data.employee_name} Created"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    data = await request.json()
 
-    conn = psycopg2.connect(**DB_CONFIG)
-    cur = conn.cursor()
-
-    cur.execute(
-        """
-        INSERT INTO master.analyst_users
-        (analyst_id, employee_name, username, password, role)
-        VALUES (%s,%s,%s,%s,%s)
-        """,
-        (
-            data["analyst_id"],
-            data["employee_name"],
-            data["username"],
-            data["password"],
-            data["role"],
-        ),
-    )
-
-    conn.commit()
-
-    cur.close()
-    conn.close()
-
-    return {"message": "Analyst Created"}
+# --- IP BLACKLIST ENDPOINTS ---
 
 @router.post("/blacklist-ip")
-async def blacklist_ip(request: Request):
+def blacklist_ip(data: IPBlacklist):
+    try:
+        with psycopg2.connect(**DB_CONFIG) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO master.ip_blacklist (ip_address, reason, blacklisted_by)
+                    VALUES (%s,%s,%s)
+                    """,
+                    (data.ip_address, data.reason, data.blacklisted_by),
+                )
+        return {"message": "IP Blacklisted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    data = await request.json()
-
-    conn = psycopg2.connect(**DB_CONFIG)
-    cur = conn.cursor()
-
-    cur.execute(
-        """
-        INSERT INTO master.ip_blacklist (ip_address, reason, blacklisted_by)
-        VALUES (%s,%s,%s)
-        """,
-        (
-            data["ip_address"],
-            data["reason"],
-            data["blacklisted_by"],
-        ),
-    )
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    return {"message": "IP Blacklisted"}
 
 @router.put("/whitelist-ip")
-async def whitelist_ip(request: Request):
+def whitelist_ip(data: WhitelistRequest):
+    try:
+        with psycopg2.connect(**DB_CONFIG) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE master.ip_blacklist
+                    SET is_active = FALSE,
+                        removed_by = %s,
+                        removed_at = %s
+                    WHERE blacklist_id = %s
+                    """,
+                    (data.removed_by, data.removed_at, data.blacklist_id),
+                )
+        return {"message": "IP Whitelisted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    data = await request.json()
 
-    conn = psycopg2.connect(**DB_CONFIG)
-    cur = conn.cursor()
+# --- PHONE BLACKLIST ENDPOINTS ---
 
-    cur.execute(
-        """
-        UPDATE master.ip_blacklist
-        SET is_active = FALSE,
-            removed_by = %s,
-            removed_at = %s
-        WHERE blacklist_id = %s
-        """,
-        (
-            data["removed_by"],
-            data["removed_at"],
-            data["blacklist_id"],
-        ),
-    )
+@router.post("/blacklist-phone")
+def blacklist_phone(data: PhoneBlacklist):
+    try:
+        with psycopg2.connect(**DB_CONFIG) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO master.phone_blacklist (phone_number, reason, blacklisted_by)
+                    VALUES (%s,%s,%s)
+                    ON CONFLICT (phone_number) DO UPDATE SET
+                        is_active = TRUE,
+                        reason = EXCLUDED.reason,
+                        blacklisted_by = EXCLUDED.blacklisted_by,
+                        blacklisted_at = CURRENT_TIMESTAMP
+                    """,
+                    (data.phone_number, data.reason, data.blacklisted_by),
+                )
+        return {"message": "Phone Blacklisted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    conn.commit()
 
-    cur.close()
-    conn.close()
+@router.put("/whitelist-phone")
+def whitelist_phone(data: WhitelistRequest):
+    try:
+        with psycopg2.connect(**DB_CONFIG) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE master.phone_blacklist
+                    SET is_active = FALSE, 
+                        removed_by = %s, 
+                        removed_at = %s
+                    WHERE blacklist_id = %s
+                    """,
+                    (data.removed_by, data.removed_at, data.blacklist_id),
+                )
+        return {"message": "Phone Whitelisted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    return {"message":"Whitelisted"}
 
-@router.put("/permissions")
-async def update_permissions(request: Request):
+# --- EMAIL BLACKLIST ENDPOINTS ---
 
-    data = await request.json()
+@router.post("/blacklist-email")
+def blacklist_email(data: EmailBlacklist):
+    try:
+        with psycopg2.connect(**DB_CONFIG) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO master.email_blacklist (email, reason, blacklisted_by)
+                    VALUES (%s,%s,%s)
+                    ON CONFLICT (email) DO UPDATE SET
+                        is_active = TRUE,
+                        reason = EXCLUDED.reason,
+                        blacklisted_by = EXCLUDED.blacklisted_by,
+                        blacklisted_at = CURRENT_TIMESTAMP
+                    """,
+                    (data.email, data.reason, data.blacklisted_by),
+                )
+        return {"message": "Email Blacklisted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    conn = psycopg2.connect(**DB_CONFIG)
-    cur = conn.cursor()
 
-    cur.execute(
-        """
-        INSERT INTO master.analyst_permissions
-        (analyst_id,page_key,granted,granted_by,granted_at)
-        VALUES (%s,%s,%s,%s,%s)
-        ON CONFLICT (analyst_id,page_key)
-        DO UPDATE SET
-            granted=EXCLUDED.granted,
-            granted_by=EXCLUDED.granted_by,
-            granted_at=EXCLUDED.granted_at
-        """,
-        (
-            data["analyst_id"],
-            data["page_key"],
-            data["granted"],
-            data["granted_by"],
-            data["granted_at"],
-        ),
-    )
+@router.put("/whitelist-email")
+def whitelist_email(data: WhitelistRequest):
+    try:
+        with psycopg2.connect(**DB_CONFIG) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE master.email_blacklist
+                    SET is_active = FALSE, 
+                        removed_by = %s, 
+                        removed_at = %s
+                    WHERE blacklist_id = %s
+                    """,
+                    (data.removed_by, data.removed_at, data.blacklist_id),
+                )
+        return {"message": "Email Whitelisted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    conn.commit()
 
-    cur.close()
-    conn.close()
+# --- PERMISSIONS AND RULES ---
 
-    return {"message":"Permission Updated"}
+@router.put("/permissions/bulk")
+def update_permissions_bulk(payload: BulkPermissionUpdate):
+    timestamp = datetime.now()
+    
+    # Prepare list of tuples for batch execution
+    data_to_insert = [
+        (payload.analyst_id, page_key, granted, payload.granted_by, timestamp)
+        for page_key, granted in payload.permissions.items()
+    ]
+
+    try:
+        with psycopg2.connect(**DB_CONFIG) as conn:
+            with conn.cursor() as cur:
+                execute_batch(
+                    cur, 
+                    """
+                    INSERT INTO master.analyst_permissions
+                    (analyst_id, page_key, granted, granted_by, granted_at)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (analyst_id, page_key)
+                    DO UPDATE SET
+                        granted = EXCLUDED.granted,
+                        granted_by = EXCLUDED.granted_by,
+                        granted_at = EXCLUDED.granted_at
+                    """, 
+                    data_to_insert
+                )
+        return {"message": f"Successfully updated {len(payload.permissions)} permissions."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/update-rule")
+def update_rule(data: RuleUpdate):
+    try:
+        with psycopg2.connect(**DB_CONFIG) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE master.rule_master 
+                    SET action = %s, 
+                        threshold_value = %s, 
+                        time_interval_value = %s, 
+                        time_interval_unit = %s
+                    WHERE rule_id = %s
+                    """,
+                    (
+                        data.action,
+                        data.threshold_value,
+                        data.time_interval_value,
+                        data.time_interval_unit,
+                        data.rule_id
+                    )
+                )
+                
+        # Clear the in-memory caches so the engine picks up the new config instantly
+        clear_interval_cache(data.rule_id)
+        clear_metadata_cache(data.rule_id)
+        
+        return {"message": f"Rule {data.rule_id} updated successfully"}
+        
+    except Exception as e:
+        print(f"Backend Error updating rule: {str(e)}") 
+        raise HTTPException(status_code=500, detail=str(e))
