@@ -1,18 +1,15 @@
-"""Customer login for the Customer Portal.
-
-NOTE: master.customers.password is a plain VARCHAR with plaintext seed
-values, per the given schema. This demo app compares passwords directly
-against that column. Do not reuse this pattern for real credentials -
-in production, add a hashed-password column and verify with e.g. bcrypt.
-"""
+from typing import Optional, Dict, Any
 
 CUSTOMER_FIELDS = [
     "user_id", "customer_name", "email", "phone_number",
     "default_address", "program_id",
 ]
 
-
-def authenticate_customer(cursor, user_id: str, password: str):
+def authenticate_customer(cursor, user_id: str, password: str) -> Optional[Dict[str, Any]]:
+    """
+    Validates customer credentials against the database.
+    Returns a dictionary of customer details if successful, otherwise None.
+    """
     cursor.execute(
         """
         SELECT user_id, customer_name, email, phone_number, default_address, program_id

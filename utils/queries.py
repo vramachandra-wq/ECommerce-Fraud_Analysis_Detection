@@ -1,28 +1,38 @@
 """Shared read queries used by more than one portal."""
 
 import pandas as pd
+from typing import Any, List, Dict, Optional
+
+# --- HELPER TO CONVERT CURSOR ROWS TO DICTS ---
+def _row_to_dict(cursor: Any, row: Any) -> Dict[str, Any]:
+    """Converts a single database row into a dictionary using cursor description."""
+    cols = [d.name for d in cursor.description]
+    return dict(zip(cols, row))
 
 
-def list_products(cursor):
+def list_products(cursor: Any) -> List[tuple]:
+    """Lists all available products."""
     cursor.execute(
         "SELECT product_id, product_name, category, price FROM master.products ORDER BY product_name"
     )
     return cursor.fetchall()
 
 
-def list_programs(cursor):
+def list_programs(cursor: Any) -> List[tuple]:
+    """Lists all available programs."""
     cursor.execute("SELECT program_id, program_name FROM master.program_master ORDER BY program_id")
     return cursor.fetchall()
 
 
-def list_devices(cursor):
+def list_devices(cursor: Any) -> List[tuple]:
+    """Lists all available devices."""
     cursor.execute(
         "SELECT device_id, device_name, device_type FROM master.device_master ORDER BY device_id"
     )
     return cursor.fetchall()
 
 
-def get_queue_orders(cursor):
+def get_queue_orders(cursor: Any) -> pd.DataFrame:
     """Orders awaiting analyst action (ON_HOLD or PENDING_REVIEW)."""
     cursor.execute(
         """
@@ -37,31 +47,21 @@ def get_queue_orders(cursor):
     return pd.DataFrame(cursor.fetchall(), columns=cols)
 
 
-def get_order_detail(cursor, order_id: str):
+def get_order_detail(cursor: Any, order_id: str) -> Optional[Dict[str, Any]]:
+    """Fetches details for a specific order."""
     cursor.execute("SELECT * FROM master.orders WHERE order_id = %s", (order_id,))
     row = cursor.fetchone()
-    if not row:
-        return None
-    cols = [d.name for d in cursor.description]
-    return dict(zip(cols, row))
+    return _row_to_dict(cursor, row) if row else None
 
 
-def get_recent_orders(cursor, limit: int = 100):
+def get_recent_orders(cursor: Any, limit: int = 100) -> pd.DataFrame:
+    """Fetches recent orders for the analytics dashboard."""
     cursor.execute(
         """
         SELECT
-            order_id, 
-            user_id, 
-            customer_name, 
-            product_name, 
-            quantity,
-            amount,
-            order_status,
-            delay_minutes,
-            is_fraud,
-            order_timestamp,
-            order_approved_at,
-            order_rejected_at
+            order_id, user_id, customer_name, product_name, quantity,
+            amount, order_status, delay_minutes, is_fraud,
+            order_timestamp, order_approved_at, order_rejected_at
         FROM master.orders
         ORDER BY order_timestamp DESC
         LIMIT %s
@@ -72,7 +72,8 @@ def get_recent_orders(cursor, limit: int = 100):
     return pd.DataFrame(cursor.fetchall(), columns=cols)
 
 
-def get_kpis(cursor):
+def get_kpis(cursor: Any) -> Dict[str, Any]:
+    """Calculates high-level platform fraud and order metrics."""
     cursor.execute("SELECT COUNT(*) FROM master.orders")
     total_orders = cursor.fetchone()[0]
     cursor.execute("SELECT COUNT(*) FROM master.orders WHERE is_fraud = TRUE")
@@ -88,15 +89,12 @@ def get_kpis(cursor):
     }
 
 
-def get_rule_stats(cursor):
-    """Counts how often each rule is triggered using the order_rule_hits table."""
+def get_rule_stats(cursor: Any) -> pd.DataFrame:
+    """Counts how often each rule is triggered."""
     cursor.execute(
         """
         SELECT 
-            r.rule_id, 
-            r.rule_name, 
-            r.action, 
-            r.threshold_value, 
+            r.rule_id, r.rule_name, r.action, r.threshold_value, 
             COUNT(h.hit_id) AS times_triggered 
         FROM master.rule_master r
         LEFT JOIN master.order_rule_hits h ON r.rule_id = h.rule_id
@@ -108,57 +106,8 @@ def get_rule_stats(cursor):
     return pd.DataFrame(cursor.fetchall(), columns=cols)
 
 
-def log_order_rule_hits(cur, order_id: str, triggered_rules: list):
-    """
-    Inserts all triggered rules for a specific order into master.order_rule_hits.
-    Cleans the raw reason string to separate the clean rule name and description.
-    """
-    if not triggered_rules:
-        return
-
-    insert_query = """
-        INSERT INTO master.order_rule_hits (order_id, rule_id, rule_name, rule_description)
-        VALUES (%s, %s, %s, %s)
-    """
-    
-    values = []
-    for rule in triggered_rules:
-        # 1. Safely extract the rule_id and the raw reason string, regardless of input format
-        if isinstance(rule, dict):
-            rule_id = rule.get("rule_id", "UNKNOWN")
-            raw_reason = rule.get("rule_description", "")
-        elif isinstance(rule, tuple) and len(rule) >= 2:
-            rule_id = rule[0]
-            raw_reason = rule[1]
-        elif isinstance(rule, str):
-            rule_id = rule
-            raw_reason = f"{rule}: Unknown rule — Triggered"
-        else:
-            continue
-
-        # 2. STRING CLEANING LOGIC
-        # Extract the name part (everything before the em-dash "—")
-        name_part = raw_reason.split("—")[0].strip() if "—" in raw_reason else raw_reason
-        
-        # Clean the name (remove the "R002: " prefix)
-        clean_name = name_part.split(":", 1)[-1].strip() if ":" in name_part else name_part
-        
-        # Extract the description part (everything after the em-dash "—")
-        clean_desc = raw_reason.split("—", 1)[-1].strip() if "—" in raw_reason else raw_reason
-
-        # 3. Append the perfectly cleaned data
-        values.append((order_id, rule_id, clean_name, clean_desc))
-
-    # Execute the bulk insert
-    if values:
-        try:
-            cur.executemany(insert_query, values)
-        except Exception as e:
-            print(f"DEBUG: Database rejected order_rule_hits insert. Error: {e}")
-
-
-def get_active_blacklist_entry(cursor, ip_address: str):
-    """The currently-active blacklist row for an IP, if any, joined to the analyst name."""
+def get_active_blacklist_entry(cursor: Any, ip_address: str) -> Optional[Dict[str, Any]]:
+    """Gets active IP blacklist entry."""
     cursor.execute(
         """
         SELECT b.blacklist_id, b.ip_address, b.reason, b.blacklisted_by,
@@ -170,14 +119,43 @@ def get_active_blacklist_entry(cursor, ip_address: str):
         (ip_address,),
     )
     row = cursor.fetchone()
-    if not row:
-        return None
-    cols = [d.name for d in cursor.description]
-    return dict(zip(cols, row))
+    return _row_to_dict(cursor, row) if row else None
 
 
-def get_orders_over_time(cursor):
-    """Daily order counts for the current calendar month (for the Analytics line chart)."""
+def get_active_phone_blacklist_entry(cursor: Any, phone_number: str) -> Optional[Dict[str, Any]]:
+    """Gets active Phone blacklist entry."""
+    cursor.execute(
+        """
+        SELECT b.blacklist_id, b.phone_number, b.reason, b.blacklisted_by,
+               a.employee_name AS blacklisted_by_name, b.blacklisted_at
+        FROM master.phone_blacklist b
+        LEFT JOIN master.analyst_users a ON a.analyst_id = b.blacklisted_by
+        WHERE b.phone_number = %s AND b.is_active = TRUE
+        """,
+        (phone_number,),
+    )
+    row = cursor.fetchone()
+    return _row_to_dict(cursor, row) if row else None
+
+
+def get_active_email_blacklist_entry(cursor: Any, email: str) -> Optional[Dict[str, Any]]:
+    """Gets active Email blacklist entry."""
+    cursor.execute(
+        """
+        SELECT b.blacklist_id, b.email, b.reason, b.blacklisted_by,
+               a.employee_name AS blacklisted_by_name, b.blacklisted_at
+        FROM master.email_blacklist b
+        LEFT JOIN master.analyst_users a ON a.analyst_id = b.blacklisted_by
+        WHERE b.email = %s AND b.is_active = TRUE
+        """,
+        (email,),
+    )
+    row = cursor.fetchone()
+    return _row_to_dict(cursor, row) if row else None
+
+
+def get_orders_over_time(cursor: Any) -> pd.DataFrame:
+    """Daily order counts for the current calendar month."""
     cursor.execute(
         """
         SELECT date_trunc('day', order_timestamp)::date AS order_date, COUNT(*) AS order_count
@@ -192,8 +170,8 @@ def get_orders_over_time(cursor):
     return pd.DataFrame(cursor.fetchall(), columns=cols)
 
 
-def get_permission_matrix(cursor):
-    """Every non-admin analyst with their currently granted page permissions."""
+def get_permission_matrix(cursor: Any) -> List[Dict[str, Any]]:
+    """Gets all analysts and their granted page permissions."""
     cursor.execute(
         """
         SELECT analyst_id, employee_name, username, role
@@ -217,13 +195,12 @@ def get_permission_matrix(cursor):
     return analysts
 
 
-def get_analyst_performance(cursor):
+def get_analyst_performance(cursor: Any) -> pd.DataFrame:
+    """Calculates analyst review statistics."""
     cursor.execute(
         """
         SELECT 
-            a.analyst_id, 
-            a.employee_name,
-            a.role,
+            a.analyst_id, a.employee_name, a.role,
             COUNT(o.order_id) AS orders_reviewed,
             COUNT(o.order_id) FILTER (WHERE o.order_status = 'REJECTED') AS orders_rejected
         FROM master.analyst_users a
@@ -233,5 +210,4 @@ def get_analyst_performance(cursor):
         """
     )
     cols = [d.name for d in cursor.description]
-
     return pd.DataFrame(cursor.fetchall(), columns=cols)

@@ -1,15 +1,8 @@
-"""Lazy (on-demand) resolution of expired R001 holds.
+from typing import Any
 
-There is no persistent background worker in this app. Instead, this
-sweep runs at the top of the Analyst Dashboard and Admin Panel (and
-optionally the Customer Portal) every time the page loads/reruns. Any
-ON_HOLD order whose 180-minute window has elapsed, and that no analyst
-has since rejected, is auto-approved.
-"""
-
-
-def sync_expired_holds(conn, cursor) -> int:
-    """Auto-approve ON_HOLD orders whose hold window has elapsed.
+def sync_expired_holds(conn: Any, cursor: Any) -> int:
+    """
+    Auto-approve ON_HOLD orders whose hold window has elapsed.
 
     Returns the number of orders auto-approved.
     """
@@ -26,5 +19,4 @@ def sync_expired_holds(conn, cursor) -> int:
         """
     )
     updated = cursor.rowcount
-    conn.commit()
     return updated

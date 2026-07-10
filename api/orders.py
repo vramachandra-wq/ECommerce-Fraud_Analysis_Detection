@@ -1,13 +1,53 @@
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+from typing import List, Optional
 import psycopg2
+from psycopg2.extras import execute_batch
 from config import DB_CONFIG
 
 router = APIRouter()
 
-@router.post("/create-order")
-async def create_order(request: Request):
-    data = await request.json()
+# --- PYDANTIC MODELS ---
 
+class RuleHit(BaseModel):
+    rule_id: str
+    rule_name: str
+    rule_description: str
+
+class CreateOrderRequest(BaseModel):
+    order_id: str
+    user_id: str
+    program_id: str
+    product_id: str
+    category: str
+    product_name: str
+    quantity: int
+    amount: float
+    ip_address: str
+    device_id: str
+    customer_name: str
+    email: str
+    address: str
+    street: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: str = "India"
+    zip_code: Optional[str] = None
+    phone_number: str
+    order_timestamp: str 
+    delay_minutes: int
+    is_fraud: bool
+    flagged_reason: Optional[str] = None
+    order_status: str
+    order_approved_at: Optional[str] = None
+    order_rejected_at: Optional[str] = None
+    triggered_rules: List[RuleHit] = Field(default_factory=list)
+
+
+# --- ENDPOINTS ---
+
+@router.post("/create-order")
+def create_order(data: CreateOrderRequest):
     try:
         # Using 'with' automatically handles conn.commit() on success 
         # and conn.rollback() & conn.close() on failure/exit.
@@ -33,50 +73,31 @@ async def create_order(request: Request):
                     )
                     """,
                     (
-                        data["order_id"], 
-                        data["user_id"], 
-                        data["program_id"], 
-                        data["product_id"], 
-                        data["category"], 
-                        data["product_name"], 
-                        data["quantity"], 
-                        data["amount"], 
-                        data["ip_address"], 
-                        data["device_id"], 
-                        data["customer_name"], 
-                        data["email"], 
-                        data["address"], 
-                        data.get("street"), 
-                        data.get("city"), 
-                        data.get("state"), 
-                        data.get("country", "India"), 
-                        data.get("zip_code"),
-                        data["phone_number"], 
-                        data["order_timestamp"],
-                        data["delay_minutes"], 
-                        data["is_fraud"], 
-                        data["flagged_reason"], 
-                        data["order_status"], 
-                        data["order_approved_at"], 
-                        data["order_rejected_at"]
+                        data.order_id, data.user_id, data.program_id, data.product_id, data.category,
+                        data.product_name, data.quantity, data.amount, data.ip_address, data.device_id,
+                        data.customer_name, data.email, data.address, 
+                        data.street, data.city, data.state, data.country, data.zip_code, 
+                        data.phone_number, data.order_timestamp,
+                        data.delay_minutes, data.is_fraud, data.flagged_reason, data.order_status,
+                        data.order_approved_at, data.order_rejected_at
                     ),
                 )
 
-                # 2. Insert rule hits (if any exist)
-                # Using .get() safely handles cases where triggered_rules might be empty
-                for rule in data.get("triggered_rules", []):
-                    cur.execute(
+                # 2. Insert rule hits efficiently using batch processing
+                if data.triggered_rules:
+                    rules_data = [
+                        (data.order_id, rule.rule_id, rule.rule_name, rule.rule_description)
+                        for rule in data.triggered_rules
+                    ]
+                    
+                    execute_batch(
+                        cur,
                         """
                         INSERT INTO master.order_rule_hits
                         (order_id, rule_id, rule_name, rule_description)
                         VALUES (%s,%s,%s,%s)
                         """,
-                        (
-                            data["order_id"],
-                            rule["rule_id"],
-                            rule["rule_name"],
-                            rule["rule_description"],
-                        ),
+                        rules_data
                     )
 
         return {"message": "Order Created successfully"}
