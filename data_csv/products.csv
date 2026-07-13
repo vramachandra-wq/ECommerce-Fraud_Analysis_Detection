@@ -1,0 +1,101 @@
+product_id,product_name,category,price,created_at
+PROD-9989,Google Pixel Fold Ultra,Electronics,160855.83,2026-01-01 15:33:43
+PROD-9986,Laptop Cooling Pad Max,Peripherals,3126.93,2026-01-02 10:45:09
+PROD-9994,Apple Gift Card ₹2000 Max,Vouchers,2126.91,2026-01-03 05:23:02
+PROD-9903,Mechanical Keyboard K3,Peripherals,7500.0,2026-01-03 18:16:45
+PROD-9946,USB-C Dock,Peripherals,7999.0,2026-01-04 10:47:56
+PROD-9943,Panasonic Microwave,Appliances,16999.0,2026-01-06 18:20:41
+PROD-9951,Wireless Mouse,Peripherals,2499.0,2026-01-07 18:13:50
+PROD-9922,Noise Cancelling Headset,Peripherals,8999.0,2026-01-08 06:22:47
+PROD-9915,Digital In-Game Currency Pack (10k Credits),Vouchers,4500.0,2026-01-09 18:34:55
+PROD-9910,"E-Gift Voucher ₹10,000",Vouchers,10000.0,2026-01-11 06:49:51
+PROD-9902,PlayStation 5 Pro,Electronics,69900.0,2026-01-12 03:25:12
+PROD-9988,Samsung Washing Machine Business Edition,Appliances,62238.67,2026-01-12 03:56:07
+PROD-9998,Wooden Wardrobe Business Edition,Furniture,37501.62,2026-01-13 13:02:35
+PROD-9908,Ergonomic Office Chair,Furniture,18500.0,2026-01-14 21:08:48
+PROD-9968,Shoe Rack,Furniture,4999.0,2026-01-14 21:21:44
+PROD-9966,27-inch Monitor,Peripherals,18999.0,2026-01-15 04:54:53
+PROD-9929,HD Webcam,Peripherals,4999.0,2026-01-17 04:45:19
+PROD-9925,Coffee Table,Furniture,7499.0,2026-01-17 22:46:55
+PROD-9916,Apple Gift Card ₹2000,Vouchers,2000.0,2026-01-21 16:11:12
+PROD-9952,Steam Wallet ₹2000,Vouchers,2000.0,2026-01-21 19:37:32
+PROD-9958,Gaming Mouse,Peripherals,2999.0,2026-01-21 23:27:20
+PROD-9981,Kent Water Purifier,Appliances,18999.0,2026-01-22 15:03:15
+PROD-9937,TV Unit,Furniture,13999.0,2026-01-22 15:44:25
+PROD-9907,Sony WH-1000XM5 Headphones,Peripherals,29990.0,2026-01-23 00:07:07
+PROD-9944,Wireless Keyboard,Peripherals,3999.0,2026-01-23 13:43:14
+PROD-9928,Amazon Gift Card ₹500,Vouchers,500.0,2026-01-25 02:27:02
+PROD-9906,iPad Pro 13-inch M4,Electronics,129900.0,2026-01-25 02:38:21
+PROD-9969,Study Table,Furniture,9999.0,2026-01-25 06:41:01
+PROD-9973,Samsung Galaxy S25+,Electronics,104999.0,2026-01-26 20:13:56
+PROD-9967,USB Hub,Peripherals,1499.0,2026-01-27 01:12:55
+PROD-9918,Standing Desk,Furniture,24999.0,2026-01-27 06:06:12
+PROD-9950,Samsung Washing Machine,Appliances,52999.0,2026-01-27 07:52:53
+PROD-9932,Bosch Dishwasher,Appliances,61999.0,2026-01-27 13:01:26
+PROD-9905,Sony 75-inch 4K Ultra HD TV,Appliances,189900.0,2026-01-28 00:51:53
+PROD-9957,LG Refrigerator,Appliances,68999.0,2026-01-31 21:15:09
+PROD-9948,Laptop Cooling Pad,Peripherals,2499.0,2026-01-31 23:03:31
+PROD-9939,Samsung Galaxy S25,Electronics,84999.0,2026-02-01 19:38:00
+PROD-9980,Apple AirPods Pro 3,Electronics,29999.0,2026-02-05 11:30:46
+PROD-9992,Apple AirPods Pro 3 Max,Electronics,30587.55,2026-02-06 15:16:56
+PROD-9931,Portable SSD 2TB,Peripherals,16999.0,2026-02-07 04:11:42
+PROD-9961,Samsung Galaxy S25 Ultra,Electronics,134999.0,2026-02-08 17:53:20
+PROD-9979,Apple Watch Ultra 3,Electronics,89999.0,2026-02-09 02:40:14
+PROD-9949,Mechanical Keyboard,Peripherals,6999.0,2026-02-09 06:46:54
+PROD-9976,ASUS Vivobook,Electronics,65999.0,2026-02-11 22:19:23
+PROD-9965,Google Play Voucher ₹1000,Vouchers,1000.0,2026-02-14 21:12:08
+PROD-9930,Daikin AC 1.5 Ton,Appliances,45999.0,2026-02-15 05:08:39
+PROD-9985,Wooden Wardrobe Ultra,Furniture,35756.62,2026-02-15 18:38:07
+PROD-9960,Dell Inspiron 15,Electronics,74999.0,2026-02-18 19:17:35
+PROD-9990,Mechanical Keyboard Max,Peripherals,8515.59,2026-02-19 14:59:02
+PROD-9926,Canon EOS R10,Electronics,99999.0,2026-02-22 04:38:10
+PROD-9972,Gaming Controller,Peripherals,5499.0,2026-02-22 15:54:29
+PROD-9914,Smart Security Camera Pack,Electronics,24999.0,2026-02-23 06:47:46
+PROD-9999,Bosch Dishwasher Limited Edition,Appliances,69212.51,2026-02-23 17:08:06
+PROD-9936,Garmin Fenix 8,Electronics,79999.0,2026-02-24 09:47:13
+PROD-9971,Lenovo ThinkPad X1,Electronics,179999.0,2026-02-24 20:04:57
+PROD-9954,Executive Chair,Furniture,25999.0,2026-02-25 09:37:31
+PROD-9978,Google Pixel 10,Electronics,84999.0,2026-02-26 23:43:48
+PROD-9975,Monitor Arm,Peripherals,3999.0,2026-02-27 02:11:02
+PROD-9984,Garmin Fenix 8 Business Edition,Electronics,95052.29,2026-02-28 05:44:01
+PROD-10000,TV Unit Pro,Furniture,15884.47,2026-03-01 05:27:58
+PROD-9923,Google Play Voucher ₹500,Vouchers,500.0,2026-03-01 11:22:41
+PROD-9983,Noise Cancelling Headset Business Edition,Peripherals,8894.41,2026-03-03 06:03:18
+PROD-9924,Wooden Wardrobe,Furniture,32999.0,2026-03-03 23:36:23
+PROD-9901,iPhone 16 Pro Max,Electronics,145000.0,2026-03-04 09:58:20
+PROD-9934,Lenovo Legion Pro,Electronics,169999.0,2026-03-04 11:18:27
+PROD-9964,Portable SSD 1TB,Peripherals,9999.0,2026-03-04 17:57:12
+PROD-9921,Amazon Gift Card ₹5000,Vouchers,5000.0,2026-03-05 06:01:54
+PROD-9959,Bluetooth Speaker,Peripherals,6999.0,2026-03-05 23:16:58
+PROD-9917,GoPro Hero 14,Electronics,45999.0,2026-03-07 09:37:16
+PROD-9911,Hardware Crypto Wallet,Electronics,12500.0,2026-03-08 00:49:26
+PROD-9920,OnePlus 13,Electronics,69999.0,2026-03-08 16:46:53
+PROD-9938,Philips Air Fryer,Appliances,12999.0,2026-03-08 19:16:00
+PROD-9935,Nintendo Switch OLED,Electronics,34999.0,2026-03-09 03:32:00
+PROD-9919,OnePlus Pad 3,Electronics,44999.0,2026-03-10 11:21:35
+PROD-9956,Dell XPS 15,Electronics,189999.0,2026-03-12 00:51:41
+PROD-9927,Spotify Premium Voucher,Vouchers,1199.0,2026-03-13 02:59:18
+PROD-9909,34-inch Ultrawide Monitor,Peripherals,42000.0,2026-03-13 20:06:08
+PROD-9912,NVIDIA GeForce RTX 5090 GPU,Electronics,195000.0,2026-03-14 05:52:51
+PROD-9904,MacBook Pro 16 M3 Max,Electronics,349900.0,2026-03-14 07:56:16
+PROD-9970,Dining Table,Furniture,27999.0,2026-03-14 15:57:00
+PROD-9974,Bookshelf,Furniture,8999.0,2026-03-14 20:40:06
+PROD-9987,Daikin AC 1.5 Ton Limited Edition,Appliances,57943.83,2026-03-15 05:40:19
+PROD-9982,Dyson Vacuum Cleaner Max,Appliances,50521.75,2026-03-15 17:06:00
+PROD-9941,Netflix Gift Card,Vouchers,1499.0,2026-03-16 22:18:01
+PROD-9942,IFB Dryer,Appliances,31999.0,2026-03-17 16:12:39
+PROD-9947,Canon EOS R8,Electronics,149999.0,2026-03-20 11:53:33
+PROD-9997,Canon EOS R10 2026 Edition,Electronics,120615.56,2026-03-21 13:28:19
+PROD-9945,Amazon Gift Card ₹1000,Vouchers,1000.0,2026-03-22 02:56:19
+PROD-9995,Daikin AC 1.5 Ton Pro,Appliances,57846.16,2026-03-23 01:55:16
+PROD-9991,HD Webcam Business Edition,Peripherals,5843.11,2026-03-24 01:13:54
+PROD-9940,Prestige Induction Cooktop,Appliances,3999.0,2026-03-24 03:59:14
+PROD-9955,Steam Wallet ₹1000,Vouchers,1000.0,2026-03-27 10:05:04
+PROD-9996,Steam Wallet ₹1000 Plus,Vouchers,970.27,2026-03-27 13:54:38
+PROD-9962,DJI Mini 4 Pro,Electronics,89999.0,2026-03-28 05:27:40
+PROD-9913,Premium Wireless Soundbar System,Appliances,55000.0,2026-03-28 22:55:44
+PROD-9977,ASUS ROG Zephyrus,Electronics,179999.0,2026-03-29 12:04:44
+PROD-9953,Google Pixel Fold,Electronics,159999.0,2026-03-30 23:45:40
+PROD-9963,Office Chair,Furniture,17999.0,2026-03-31 03:03:01
+PROD-9993,Garmin Fenix 8 Max,Electronics,102696.71,2026-03-31 21:25:37
+PROD-9933,Dyson Vacuum Cleaner,Appliances,44999.0,2026-04-01 04:19:03

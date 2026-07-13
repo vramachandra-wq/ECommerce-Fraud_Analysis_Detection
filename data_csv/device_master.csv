@@ -1,0 +1,51 @@
+device_id,device_name,device_type,created_at
+DEV-WIN-X9,Analyst Workstation Console,Desktop,2026-01-01 10:00:00
+DEV-MOB-I16,iOS Mobile Checkout Client,Mobile,2026-01-01 16:00:00
+DEV-UNKNOWN,Generic Web Session Header,Web,2026-01-01 22:00:00
+DEV-MAC-B22,Apple MacBook Pro M-Series,Laptop,2026-01-02 04:00:00
+DEV-AND-S24,Samsung Galaxy Android Node,Mobile,2026-01-02 10:00:00
+DEV-TAB-AP9,iPad Pro Checkout Terminal,Tablet,2026-01-02 16:00:00
+DEV-BOT-PY8,Headless Python Request Script,Bot,2026-01-02 22:00:00
+DEV-EMU-AD0,Genymotion Android Emulator,Emulator,2026-01-03 04:00:00
+DEV-LAP-09,Acer Predator Helios 1,Laptop,2026-01-03 10:00:00
+DEV-DES-10,Apple MacBook Air 2,Desktop,2026-01-03 14:00:00
+DEV-MOB-11,Windows Sandbox Worker 3,Mobile,2026-01-03 18:00:00
+DEV-EMU-12,Samsung Galaxy Book 4,Emulator,2026-01-03 22:00:00
+DEV-LAP-13,Microsoft Surface Pro 5,Laptop,2026-01-04 02:00:00
+DEV-EMU-14,Mozilla Firefox Browser Session 6,Emulator,2026-01-04 06:00:00
+DEV-WEB-15,Mozilla Firefox Browser Session 7,Web,2026-01-04 10:00:00
+DEV-LAP-16,Microsoft Surface Pro 8,Laptop,2026-01-04 14:00:00
+DEV-TAB-17,Dell OptiPlex 9,Tablet,2026-01-04 18:00:00
+DEV-TAB-18,Roku Streaming Stick 10,Tablet,2026-01-04 22:00:00
+DEV-MOB-19,Roku Streaming Stick 11,Mobile,2026-01-05 02:00:00
+DEV-DES-20,OnePlus Pad 12,Desktop,2026-01-05 06:00:00
+DEV-TAB-21,Dell OptiPlex 13,Tablet,2026-01-05 10:00:00
+DEV-TAB-22,OnePlus 14,Tablet,2026-01-05 14:00:00
+DEV-LAP-23,Automation Webhook Worker 15,Laptop,2026-01-05 18:00:00
+DEV-DES-24,Apple MacBook Air 16,Desktop,2026-01-05 22:00:00
+DEV-MOB-25,Roku Streaming Stick 17,Mobile,2026-01-06 02:00:00
+DEV-WEB-26,NVIDIA Shield TV 18,Web,2026-01-06 06:00:00
+DEV-MOB-27,Lenovo ThinkCentre 19,Mobile,2026-01-06 10:00:00
+DEV-DES-28,Google Pixel Tablet 20,Desktop,2026-01-06 14:00:00
+DEV-TAB-29,Asus Zenbook 21,Tablet,2026-01-06 18:00:00
+DEV-MOB-30,Android Emulator Runtime 22,Mobile,2026-01-06 22:00:00
+DEV-EMU-31,iPad Air 23,Emulator,2026-01-07 02:00:00
+DEV-MOB-32,Lenovo ThinkPad 24,Mobile,2026-01-07 06:00:00
+DEV-TAB-33,Apple MacBook Air 25,Tablet,2026-01-07 10:00:00
+DEV-WEB-34,Acer Veriton 26,Web,2026-01-07 14:00:00
+DEV-LAP-35,Android Emulator Runtime 27,Laptop,2026-01-07 18:00:00
+DEV-WEB-36,Dell Inspiron 28,Web,2026-01-07 22:00:00
+DEV-DES-37,Windows Sandbox Worker 29,Desktop,2026-01-08 02:00:00
+DEV-WEB-38,Motorola Edge 30,Web,2026-01-08 06:00:00
+DEV-EMU-39,Acer Veriton 31,Emulator,2026-01-08 10:00:00
+DEV-MOB-40,Razer Blade 32,Mobile,2026-01-08 14:00:00
+DEV-LAP-41,Google Pixel Tablet 33,Laptop,2026-01-08 18:00:00
+DEV-TAB-42,Android Emulator Runtime 34,Tablet,2026-01-08 22:00:00
+DEV-EMU-43,Chrome Headless Client 35,Emulator,2026-01-09 02:00:00
+DEV-WEB-44,Android Emulator Runtime 36,Web,2026-01-09 06:00:00
+DEV-EMU-45,Acer Predator Helios 37,Emulator,2026-01-09 10:00:00
+DEV-LAP-46,Dell OptiPlex 38,Laptop,2026-01-09 14:00:00
+DEV-TAB-47,Dell OptiPlex 39,Tablet,2026-01-09 18:00:00
+DEV-DES-48,Lenovo ThinkPad 40,Desktop,2026-01-09 22:00:00
+DEV-DES-49,Asus Zenbook 41,Desktop,2026-01-10 02:00:00
+DEV-BOT-50,Chrome Headless Client 42,Bot,2026-01-10 06:00:00
