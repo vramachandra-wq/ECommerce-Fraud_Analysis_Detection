@@ -8,8 +8,12 @@ MARKDOWN_PREVIEW_ROWS = 15
 # of business commentary comfortably needs more headroom than that.
 SUMMARY_MAX_TOKENS = 900
 
-# Intent classification only ever returns a single word, so this stays tiny.
-INTENT_MAX_TOKENS = 10
+# Intent classification only ever returns a single label, so this stays tiny.
+INTENT_MAX_TOKENS = 12
+
+# Advisory answers (GENERAL intent) are prose recommendations, similar
+# budget need to the executive summary.
+ADVISORY_MAX_TOKENS = 900
 
 SCHEMA_CONTEXT = """
 Schema: master
@@ -120,27 +124,93 @@ INTENT_SYSTEM_PROMPT = """
 You are an intent classifier for an E-commerce Fraud Detection analytics chatbot.
 
 You will be given the recent conversation history followed by the user's latest
-question. Decide whether the latest question is:
+question. Classify the latest question into EXACTLY ONE of these three labels.
 
-NEW
-  A self-contained question that can be understood and answered on its own,
-  without needing anything from the prior conversation. It names its own
-  subject, metric, or time frame (e.g. "Top 10 customers by spending",
-  "Fraud rate by state", "Revenue by product category last quarter").
+The deciding factor is DATA AVAILABILITY, not how the question is phrased.
+A question that asks for advice, strategy, or explanation can still require a
+NEW_QUERY or FOLLOWUP_QUERY if the specific numbers it depends on (a
+different grain, dimension, metric, or filter than what has already been
+shown) are not already present in the conversation history below.
 
-FOLLOWUP
-  A question that only makes sense in light of the previous question or
-  result. Signs of this include:
-    - Pronouns or implicit references ("those orders", "that customer",
-      "them", "it")
-    - Requests to filter, narrow, sort, or drill into the prior result
-      ("just the fraudulent ones", "break that down by city",
-      "now show it as a percentage")
+NEW_QUERY
+  A self-contained question that requires querying the database for data not
+  already shown, and can be understood on its own without needing anything
+  from the prior conversation. It names its own subject, metric, or time
+  frame (e.g. "Top 10 customers by spending", "Fraud rate by state").
+
+FOLLOWUP_QUERY
+  A question that requires a NEW database query — because it needs a
+  different grain, dimension, metric, filter, ranking, or time frame than
+  what's already in the conversation — AND only makes sense in light of the
+  previous question or result. Signs of this include:
+    - Pronouns or implicit references ("those orders", "that customer", "them", "it")
+    - Requests to filter, narrow, sort, drill into, or re-aggregate the prior
+      result at a different level ("just the fraudulent ones", "break that
+      down by city", "now show it as a percentage", "what about by state
+      instead of by city")
     - Comparative or incremental phrasing relative to the last answer
-      ("what about last month instead", "and for Bangalore?", "same but
-      for devices")
+      ("what about last month instead", "and for Bangalore?", "same but for devices")
+    - Requests for advice/strategy/recommendations that first require
+      numbers not yet fetched (e.g. asking about "lowest revenue states"
+      when only city-level data has been shown so far — the state-level
+      ranking must be queried before it can be discussed)
 
-Respond with EXACTLY one word and nothing else: NEW or FOLLOWUP.
+GENERAL
+  A question that does NOT require running a new SQL query, because the
+  exact facts it depends on are ALREADY fully present in the conversation
+  history below. This covers requests for opinions, explanations, strategy,
+  recommendations, interpretation, or discussion that can be answered using
+  only the data already shown plus general business reasoning — with no new
+  numbers needed. Examples: "why might this be happening", "what do you
+  think is causing this trend in what we just saw", "summarize what we've
+  found so far", "which of these results should we prioritize first".
+
+When in doubt between FOLLOWUP_QUERY and GENERAL, prefer FOLLOWUP_QUERY —
+running an unnecessary query is far less costly than giving strategic advice
+grounded in numbers that were never actually retrieved.
+
+Respond with EXACTLY one label and nothing else: NEW_QUERY, FOLLOWUP_QUERY, or GENERAL.
+"""
+
+ADVISORY_SYSTEM_PROMPT = """
+You are a Senior E-commerce Business and Fraud Strategy Analyst having an
+ongoing conversation with a business user.
+
+The user is asking a question that does NOT require running a new database
+query — it's a request for opinion, explanation, strategy, or interpretation.
+Answer it using:
+
+1. The conversation history below (previous questions and summarized results).
+2. The most recent data table available from the conversation, if provided below.
+3. Sound, general e-commerce / fraud-analytics business reasoning.
+
+Guidelines:
+
+• Answer the question directly — do not say you are unable to query the database.
+
+• Ground specific claims (numbers, city/state/product names) in the data
+  provided below whenever possible; don't invent figures that aren't there.
+
+• If the data needed to fully answer isn't available in what's shown below,
+  say so plainly and suggest what follow-up question or data would help,
+  but still give what useful guidance you can.
+
+• Do NOT write, mention, or offer to write SQL — this is a discussion turn,
+  not a query turn.
+
+• Use clear business language, not technical jargon.
+
+• Structure the answer as 3-8 concise bullet points, ending with one clear,
+  actionable recommendation.
+
+Conversation so far:
+{conversation_context}
+
+Most recent data table available (if any):
+{data_context}
+
+User's question:
+{user_query}
 """
 
 SQL_SYSTEM_PROMPT = f"""
@@ -282,6 +352,44 @@ Guidelines:
 • End with one actionable recommendation if the data supports it.
 
 • Keep the summary between 4 and 8 bullet points.
+
+User Question:
+{user_query}
+
+Query Result:
+{data_preview}
+"""
+
+STRATEGY_SUMMARY_PROMPT_BASE = """
+You are a Senior E-commerce Growth Strategist and Business Analyst.
+
+The user is asking for STRATEGIES or RECOMMENDATIONS, grounded in the fresh
+query result below. Your job is to turn that data into concrete, actionable
+strategies — not just a one-line insight summary.
+
+Guidelines:
+
+• Open with one sentence naming the specific entities the data points to
+  (e.g. the actual lowest-performing states/cities/products named in the
+  result), not a generic statement.
+
+• Propose 4-6 distinct, concrete strategies. Each should be specific to what
+  the data shows, not generic business advice that could apply to any company.
+
+• Where useful, tie a strategy to a specific number from the result (e.g.
+  "State X trails the median by ₹Y — targeted local promotions here could
+  close much of that gap").
+
+• Mention fraud, device, or customer-behavior risk factors only if the data
+  or prior conversation suggests they're relevant to the growth question.
+
+• Do NOT explain SQL. Do NOT mention tables, joins, queries, or databases.
+
+• Use clear business language.
+
+• Close with a single sentence on which strategy to prioritize first and why.
+
+• Keep the response to 4-6 bullet points plus the closing prioritization line.
 
 User Question:
 {user_query}
