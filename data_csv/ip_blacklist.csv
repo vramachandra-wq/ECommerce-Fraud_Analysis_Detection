@@ -1,0 +1,31 @@
+ip_address,reason,blacklisted_at
+8.8.8.8,Known fraud source,2026-01-11 08:00:00
+1.1.1.1,Chargeback activity,2026-01-15 13:00:00
+208.67.222.222,Bot traffic detected,2026-01-19 18:00:00
+8.8.4.4,TOR exit node,2026-01-23 23:00:00
+208.67.220.220,Credential stuffing attacks,2026-01-28 04:00:00
+9.9.9.9,Multiple fraud incidents,2026-02-01 09:00:00
+81.41.149.14,Card testing pattern,2026-02-05 14:00:00
+89.75.42.59,Address verification bypass,2026-02-07 21:00:00
+239.6.252.204,Clear fraud cluster,2026-02-10 04:00:00
+73.172.144.136,Suspicious account takeover,2026-02-12 11:00:00
+146.207.96.34,Address verification bypass,2026-02-14 18:00:00
+97.51.163.78,Known abusive bot,2026-02-17 01:00:00
+209.129.47.120,Velocity abuse,2026-02-19 08:00:00
+197.231.139.36,High-risk browser fingerprint,2026-02-21 15:00:00
+74.91.27.0,Repeated failed logins,2026-02-23 22:00:00
+73.162.36.66,Suspicious account takeover,2026-02-26 05:00:00
+88.171.71.121,Card testing pattern,2026-02-28 12:00:00
+167.237.200.217,Clear fraud cluster,2026-03-02 19:00:00
+191.81.147.99,Card testing pattern,2026-03-05 02:00:00
+54.199.214.251,Proxy network activity,2026-03-07 09:00:00
+211.244.164.156,Address verification bypass,2026-03-09 16:00:00
+69.104.244.39,Address verification bypass,2026-03-11 23:00:00
+178.56.72.74,Clear fraud cluster,2026-03-14 06:00:00
+35.36.82.18,Suspicious account takeover,2026-03-16 13:00:00
+157.157.2.143,Chargeback feedback loop,2026-03-18 20:00:00
+61.65.150.255,Proxy network activity,2026-03-21 03:00:00
+12.254.246.132,Address verification bypass,2026-03-23 10:00:00
+57.197.157.250,Proxy network activity,2026-03-25 17:00:00
+13.112.14.165,Suspicious account takeover,2026-03-28 00:00:00
+105.206.30.79,Velocity abuse,2026-03-30 07:00:00
