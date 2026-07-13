@@ -1,6 +1,8 @@
 import streamlit as st
+from ui import apply_theme, render_app_shell
 from portals.analyst_dashboard import render as render_dashboard
 from portals.admin_panel import render as render_admin_panel
+from portals.ai_chatbot import render as render_ai_chatbot
 
 # 1. Import your new Power BI module here
 from portals.power_bi_reports import show_powerbi_dashboard as render_power_bi
@@ -8,9 +10,11 @@ from portals.power_bi_reports import show_powerbi_dashboard as render_power_bi
 from database.connection import get_cursor
 from auth.analyst_auth import (
     PAGE_ADMIN_PANEL,
+    PAGE_AI_CHATBOT,
     PAGE_FRAUD_DASHBOARD,
     PAGE_POWER_BI,        # <-- Make sure to add this to your auth module
     PAGE_LABELS,
+    ALL_PAGES,
     authenticate_analyst,
     get_granted_pages,
     is_admin,
@@ -42,10 +46,12 @@ def _login_form():
 
 def main():
     st.set_page_config(
-        page_title="Metro Cart - Internal Portal", 
+        page_title="Metro Cart - Internal Portal",
         layout="wide"
     )
-    
+    apply_theme()
+    render_app_shell("Metro Cart PRO", "Fraud Analyst Workspace")
+
     # Render main login if the base analyst session is missing
     if "analyst" not in st.session_state:
         _login_form()
@@ -72,10 +78,11 @@ def main():
         PAGE_FRAUD_DASHBOARD: render_dashboard,
         PAGE_ADMIN_PANEL: render_admin_panel,
         PAGE_POWER_BI: render_power_bi,     # <-- Maps the auth constant to your function
+        PAGE_AI_CHATBOT: render_ai_chatbot,
     }
     
     # 3. Add the Power BI page to the available tuple to check against granted permissions
-    available = [p for p in (PAGE_FRAUD_DASHBOARD, PAGE_ADMIN_PANEL, PAGE_POWER_BI) if p in granted]
+    available = [p for p in ALL_PAGES if p in granted]
 
     if not available:
         st.warning("You don't have access to any pages yet. Contact an Admin to request access.")

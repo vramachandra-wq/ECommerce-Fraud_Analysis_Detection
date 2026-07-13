@@ -57,13 +57,14 @@ def _send_api_request(method: str, path: str, **kwargs):
 def inject_dashboard_css():
     st.markdown("""
         <style>
+        /* Use the global variables defined by ui/style.py so light/dark themes stay consistent */
         .dashboard-card {
-            background-color: var(--background-color);
-            color: var(--text-color);
+            background-color: var(--card-bg);
+            color: var(--text);
             border-radius: 8px;
             padding: 20px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
-            border: 1px solid var(--secondary-background-color);
+            box-shadow: none !important;
+            border: 1px solid var(--border);
             margin-bottom: 20px;
         }
         .status-badge {
@@ -72,12 +73,12 @@ def inject_dashboard_css():
             font-size: 0.85em;
             font-weight: 600;
             display: inline-block;
-            text-shadow: 0 1px 1px rgba(0,0,0,0.2);
+            text-shadow: none;
         }
-        .status-PENDING_REVIEW { background-color: #f59e0b; color: #ffffff; border: 1px solid #d97706; }
-        .status-ON_HOLD { background-color: #3b82f6; color: #ffffff; border: 1px solid #2563eb; }
-        .status-APPROVED { background-color: #10b981; color: #ffffff; border: 1px solid #059669; }
-        .status-REJECTED { background-color: #ef4444; color: #ffffff; border: 1px solid #dc2626; }
+        .status-PENDING_REVIEW { background-color: #f59e0b; color: #0f172a; border: 1px solid rgba(217,119,6,0.15); }
+        .status-ON_HOLD { background-color: #3b82f6; color: #ffffff; border: 1px solid rgba(37,99,235,0.12); }
+        .status-APPROVED { background-color: #10b981; color: #ffffff; border: 1px solid rgba(5,150,105,0.12); }
+        .status-REJECTED { background-color: #ef4444; color: #ffffff; border: 1px solid rgba(220,38,38,0.12); }
         </style>
     """, unsafe_allow_html=True)
 
@@ -321,7 +322,7 @@ def render_queue_and_review(analyst: dict):
             "order_id": "Order ID",
             "customer_name": "Customer",
             "product_name": "Product",
-            "amount": st.column_config.NumberColumn("Amount", format="₹%.2f"),
+            "amount": st.column_config.NumberColumn("Amount", format="₹ %.2f"),
             "order_status": "Status",
             "order_timestamp": st.column_config.DatetimeColumn("Placed At", format="D MMM YYYY, h:mm a"),
         },

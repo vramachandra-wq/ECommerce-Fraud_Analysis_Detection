@@ -63,23 +63,32 @@ def confirm_place_order(payload: dict, customer_session_key: str = "customer"):
     st.divider()
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("Complete Purchase", type="primary", use_container_width=True):
-            with st.spinner("Completing your purchase..."):
-                resp = _send_api_request("post", "create-order", json=payload)
-            if not resp:
+        # Use a distinct key and label to avoid widget collisions with the
+        # order form's "Complete Purchase" button which opens this dialog.
+        if st.button("Confirm Purchase", type="primary", use_container_width=True, key="confirm_purchase"):
+            try:
+                with st.spinner("Completing your purchase..."):
+                    resp = _send_api_request("post", "create-order", json=payload)
+                if not resp:
+                    st.error("Failed to call order API. See logs or backend.")
+                    return
+
+                # Update session state after success
+                st.session_state[customer_session_key]["customer_name"] = payload.get("customer_name")
+                st.session_state[customer_session_key]["email"] = payload.get("email")
+                st.session_state[customer_session_key]["phone_number"] = payload.get("phone_number")
+                st.session_state[customer_session_key]["street"] = payload.get("street")
+                st.session_state[customer_session_key]["city"] = payload.get("city")
+                st.session_state[customer_session_key]["state"] = payload.get("state")
+                st.session_state[customer_session_key]["zip_code"] = payload.get("zip_code")
+                st.session_state[customer_session_key]["country"] = payload.get("country")
+                st.session_state["last_order_id"] = payload.get("order_id")
+
+                time.sleep(0.25)
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Error while completing order: {exc}")
                 return
-            # Update session state after success
-            st.session_state[customer_session_key]["customer_name"] = payload.get("customer_name")
-            st.session_state[customer_session_key]["email"] = payload.get("email")
-            st.session_state[customer_session_key]["phone_number"] = payload.get("phone_number")
-            st.session_state[customer_session_key]["street"] = payload.get("street")
-            st.session_state[customer_session_key]["city"] = payload.get("city")
-            st.session_state[customer_session_key]["state"] = payload.get("state")
-            st.session_state[customer_session_key]["zip_code"] = payload.get("zip_code")
-            st.session_state[customer_session_key]["country"] = payload.get("country")
-            st.session_state["last_order_id"] = payload.get("order_id")
-            time.sleep(0.5)
-            st.rerun()
     with col2:
         if st.button("Cancel", use_container_width=True):
             st.rerun()
@@ -98,7 +107,13 @@ def fetch_form_options():
 
 
 def _login_form():
-    st.title("🛒 Metro Cart")
+    # Placeholder hero banner — swap the URL below for a real banner image.
+    # Suggested image: a wide e-commerce storefront banner showing shopping
+    # bags, gift boxes, or a "big sale" graphic in Metro Cart's red/blue brand colors.
+    st.image(
+        "images//banner_3.png",
+        use_container_width=True,
+    )
     st.subheader("Customer Login")
     
     with st.form("customer_login"):
@@ -117,12 +132,17 @@ def _login_form():
 
 
 def _order_form():
+
     customer = st.session_state.customer
     
     col_header, col_logout = st.columns([0.85, 0.15])
     with col_header:
         st.title("🛒 Metro Cart")
         st.subheader(f"Welcome back, {customer['customer_name']}!")
+        st.image(
+        "images//banner_2.png",
+        use_container_width=True,
+    )
     with col_logout:
         if st.button("Log Out", key="customer_logout", use_container_width=True):
             del st.session_state.customer
@@ -186,7 +206,7 @@ def _order_form():
     with st.container(border=True):
         st.metric("Total Price", f"₹{total:,.2f}")
 
-    if st.button("Complete Purchase", type="primary", use_container_width=True):
+    if st.button("Complete Purchase", type="primary", use_container_width=True, key="open_confirm"):
         errors = []
         if not name.strip():
             errors.append("Name is required.")
@@ -271,21 +291,9 @@ def _order_form():
                     "order_rejected_at": str(order_rejected_at) if order_rejected_at else None,
                     "triggered_rules": disposition["triggered_rules"],
                 }
+                # Open confirmation dialog; let the dialog set session state
+                # after the user confirms the purchase (or cancels).
                 confirm_place_order(payload)
-                
-                # Update local session state so the UI remembers the user's updated information
-                st.session_state.customer["customer_name"] = name.strip()
-                st.session_state.customer["email"] = email.strip()
-                st.session_state.customer["phone_number"] = phone.strip()
-                st.session_state.customer["street"] = street.strip()
-                st.session_state.customer["city"] = city.strip()
-                st.session_state.customer["state"] = state.strip()
-                st.session_state.customer["zip_code"] = zip_code.strip()
-                st.session_state.customer["country"] = country.strip()
-
-                st.session_state.last_order_id = order_id
-                time.sleep(0.5)  # Slight pause for UX polish
-                st.rerun()
 
             except requests.exceptions.RequestException:
                 st.error("API connection failed or timed out. Please ensure the backend server is running and try again.")

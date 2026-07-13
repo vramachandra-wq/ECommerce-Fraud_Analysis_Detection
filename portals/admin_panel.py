@@ -296,7 +296,7 @@ def _tab_permissions(analyst: dict):
 
 
 def _tab_analytics():
-    st.markdown("### 📊 Platform Analytics")
+    st.markdown("### Recent Orders")
     with get_cursor() as (conn, cur):
         kpis = get_kpis(cur)
         recent_df = get_recent_orders(cur)
@@ -380,7 +380,7 @@ def _tab_analytics():
                 "amount": st.column_config.NumberColumn(
                     "Total Amount",
                     help="Transaction value",
-                    format="$ %.2f"
+                    format="₹ %.2f"
                 ),
                 "order_status": st.column_config.TextColumn("Status"),
                 "delay_minutes": st.column_config.NumberColumn("Delay (mins)"),
@@ -592,10 +592,6 @@ def render():
         _tab_analytics()
         
     with tab_rules:
-        # 1. Display the charts and stats first
         _tab_rule_stats()
-        
-        st.divider() 
-        
-        # 2. Display the configuration management form below
+        st.divider()
         _tab_rule_management()

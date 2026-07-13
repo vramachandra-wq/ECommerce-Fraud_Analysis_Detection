@@ -1,7 +1,6 @@
 .venv/
 .env
 data_csv/
-New_folder_2/
 __pycache__/
 *.py[cod]
 *.pyo
