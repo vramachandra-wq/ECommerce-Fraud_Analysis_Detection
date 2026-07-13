@@ -23,9 +23,9 @@ def show_powerbi_dashboard():
             border-radius: 12px; /* Rounded corners */
             box-shadow: 0px 8px 24px rgba(0, 0, 0, 0.12); /* Soft drop shadow */
             overflow: hidden; /* Ensures the iframe doesn't break out of the rounded corners */
-            background-color: #f4f6f8; /* Soft background color while loading */
+            background-color: var(--secondary-background-color); /* Loading bg follows active theme */
             margin-top: 1rem;
-            border: 1px solid #e0e0e0;
+            border: 1px solid rgba(128, 140, 158, 0.35);
         }}
         
         /* Iframe styling to fill the container completely */

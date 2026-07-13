@@ -29,6 +29,17 @@ def get_connection():
         pool.putconn(conn)
 
 
+def get_pooled_connection():
+    """Return a pooled database connection from the shared pool."""
+    return get_pool().getconn()
+
+
+def release_pooled_connection(conn):
+    """Return a pooled database connection to the shared pool."""
+    if conn is not None:
+        get_pool().putconn(conn)
+
+
 @contextmanager
 def get_cursor(commit: bool = False):
     """Yield a (conn, cursor) pair. Set commit=True for writes."""
