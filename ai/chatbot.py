@@ -16,10 +16,13 @@ from ai.prompt_constants import (
     SCHEMA_CONTEXT,
     SQL_SYSTEM_PROMPT,
     SUMMARY_SYSTEM_PROMPT_BASE,
+    STRATEGY_SUMMARY_PROMPT_BASE,
     REPAIR_PROMPT_TEMPLATE,
     INTENT_SYSTEM_PROMPT,
+    ADVISORY_SYSTEM_PROMPT,
     SUMMARY_MAX_TOKENS,
     INTENT_MAX_TOKENS,
+    ADVISORY_MAX_TOKENS,
 )
 from database.connection import get_pooled_connection, release_pooled_connection
 from database.transaction_repository import log_chatbot_interaction
@@ -41,6 +44,25 @@ SENSITIVE_COLUMNS = {
     "customers.password",
     "password",
 }
+
+_STRATEGY_KEYWORDS = [
+    "strateg",       # strategy, strategies, strategic
+    "grow", "growth",
+    "improve", "improvement",
+    "increase", "boost",
+    "recommend", "recommendation",
+    "how can we", "how do we", "how to",
+    "action plan", "plan to",
+    "reduce fraud", "reduce risk", "mitigat",
+]
+
+
+def _wants_strategy_answer(user_query: str) -> bool:
+    """Detect growth/strategy-style phrasing so the summary step returns
+    concrete strategies grounded in the fresh query result, instead of the
+    default single-recommendation insight summary."""
+    q = user_query.lower()
+    return any(kw in q for kw in _STRATEGY_KEYWORDS)
 
 
 def _extract_sql(text: str) -> str:
@@ -71,6 +93,57 @@ def _strip_sql_comments(sql: str) -> str:
     return sql.strip()
 
 
+def _friendly_error_message(e: Exception, stage: str) -> str:
+    """Translate a raw exception into a graceful, user-facing message.
+
+    The person asking a question should never see a stack trace or a raw
+    driver/API error string — they should see a plain-English explanation
+    and, where possible, a nudge on what to try next. The full technical
+    error is still preserved wherever we log to master.ai_chat_logs, so
+    nothing is lost for debugging; it's just kept out of the chat UI.
+
+    `stage` identifies where in the pipeline the failure happened
+    ("connection", "generation", "repair", "execution", "summary", "chart",
+    or "pipeline" for anything uncaught elsewhere) so the fallback copy
+    stays relevant even when the exception text itself is unhelpful.
+    """
+    text = str(e).lower()
+
+    # Cross-cutting checks: these can surface at almost any stage.
+    if any(s in text for s in ("connection", "timeout", "timed out", "unreachable", "refused")):
+        return "⚠️ I'm having trouble reaching the service right now. Please try again in a moment."
+
+    if any(s in text for s in ("permission denied", "access denied", "not authorized", "unauthorized")):
+        return "🔒 I don't have permission to access that data."
+
+    if stage == "execution":
+        # Covers missing tables/columns, malformed generated SQL, or any
+        # other execution-time failure. The person just wants to know the
+        # data isn't available, not see a database driver error.
+        return (
+            "📭 The data you're requesting isn't available right now. "
+            "Try rephrasing your question, or ask about a different metric, "
+            "time period, or filter."
+        )
+
+    if stage == "generation":
+        return "🤔 I couldn't work out how to answer that question. Could you try rephrasing it?"
+
+    if stage == "repair":
+        return "🔧 I couldn't automatically fix that query. Try rephrasing your question."
+
+    if stage == "summary":
+        return (
+            "📝 The data loaded successfully, but I couldn't generate a "
+            "written summary this time — you can still explore the results below."
+        )
+
+    if stage == "chart":
+        return "📊 I couldn't render a chart for this data, but you can still view it in the table below."
+
+    return "⚠️ Something went wrong while processing your request. Please try again or rephrase your question."
+
+
 def _extract_usage(completion) -> tuple[int, int]:
     """Pull (input_tokens, output_tokens) off a Groq completion's usage block.
 
@@ -88,16 +161,16 @@ def _extract_usage(completion) -> tuple[int, int]:
 
 
 def _classify_intent(client, user_query: str, history: list[dict]) -> tuple[str, int, int]:
-    """Classify whether user_query is a NEW question or a FOLLOWUP to history.
+    """Classify user_query as NEW_QUERY, FOLLOWUP_QUERY, or GENERAL.
 
-    Returns (label, input_tokens, output_tokens). Label defaults to "NEW"
-    (the safer, more isolated choice — a false "NEW" just means a follow-up
-    loses some context; a false "FOLLOWUP" can drag irrelevant prior context
-    into an unrelated query and corrupt SQL generation) on any classification
-    failure or ambiguous output.
+    Returns (label, input_tokens, output_tokens). Defaults to "NEW_QUERY" (the
+    safest fallback — it just means the question runs standalone through SQL
+    generation, which is where the pipeline already spent most of its time
+    before this classifier existed) on any classification failure or
+    unrecognized output.
     """
     if not history:
-        return "NEW", 0, 0
+        return "NEW_QUERY", 0, 0
 
     transcript = "\n".join(
         f"{m['role'].upper()}: {m['content']}" for m in history
@@ -119,11 +192,35 @@ def _classify_intent(client, user_query: str, history: list[dict]) -> tuple[str,
         )
         label = completion.choices[0].message.content.strip().upper()
         in_tok, out_tok = _extract_usage(completion)
-        return ("FOLLOWUP" if "FOLLOWUP" in label else "NEW"), in_tok, out_tok
+        if "GENERAL" in label:
+            return "GENERAL", in_tok, out_tok
+        if "FOLLOWUP" in label:
+            return "FOLLOWUP_QUERY", in_tok, out_tok
+        return "NEW_QUERY", in_tok, out_tok
     except Exception:
         # If classification fails for any reason, fall back to treating the
-        # query as standalone rather than blocking the pipeline on it.
-        return "NEW", 0, 0
+        # query as a standalone data question rather than blocking the pipeline.
+        return "NEW_QUERY", 0, 0
+
+
+def _get_last_result_context(history: list[dict]) -> str:
+    """Return the most recently stored result table in history as markdown.
+
+    Used to ground GENERAL (advisory/strategy) answers in the actual numbers
+    from the last data query, instead of letting the model improvise figures.
+    Returns an empty string if no prior result table is available.
+    """
+    for msg in reversed(history):
+        if msg.get("role") != "assistant" or not msg.get("df"):
+            continue
+        try:
+            df = pd.DataFrame(msg["df"])
+            df = _restore_dataframe_types(df)
+            if not df.empty:
+                return df.head(MARKDOWN_PREVIEW_ROWS).to_markdown(index=False)
+        except Exception:
+            continue
+    return ""
 
 
 def _validate_sql(sql: str) -> tuple[bool, str]:
@@ -190,7 +287,7 @@ def _repair_sql(sql: str, error: str) -> tuple[str, int, int]:
         in_tok, out_tok = _extract_usage(response)
         return _extract_sql(response.choices[0].message.content), in_tok, out_tok
     except Exception as e:
-        st.warning(f"⚠️ SQL repair failed: {str(e)}")
+        st.warning(_friendly_error_message(e, "repair"))
         return sql, 0, 0
 
 
@@ -247,7 +344,7 @@ def _render_chart(df: pd.DataFrame) -> None:
             )
             st.line_chart(chart_df, use_container_width=True)
         except Exception as e:
-            st.warning(f"Could not render line chart: {str(e)}")
+            st.warning(_friendly_error_message(e, "chart"))
         return
 
     if object_cols:
@@ -257,17 +354,22 @@ def _render_chart(df: pd.DataFrame) -> None:
         if unique_values <= 5 and len(df) <= 5:
             st.markdown("### 🥧 Distribution")
             try:
-                pie_df = df[[x_axis, y_axis]].set_index(x_axis)
-                st.pyplot(
-                    pie_df.plot.pie(
-                        y=y_axis,
-                        autopct="%1.1f%%",
-                        legend=False,
-                        figsize=(6, 6),
-                    ).get_figure()
+                import altair as alt
+
+                pie_df = df[[x_axis, y_axis]].copy()
+                chart = (
+                    alt.Chart(pie_df)
+                    .mark_arc(innerRadius=50)
+                    .encode(
+                        theta=alt.Theta(f"{y_axis}:Q"),
+                        color=alt.Color(f"{x_axis}:N", legend=alt.Legend(title=None)),
+                        tooltip=[x_axis, y_axis],
+                    )
+                    .properties(height=350)
                 )
+                st.altair_chart(chart, use_container_width=True)
             except Exception as e:
-                st.warning(f"Could not render pie chart: {str(e)}")
+                st.warning(_friendly_error_message(e, "chart"))
             return
 
         if len(df) >= 6:
@@ -280,7 +382,7 @@ def _render_chart(df: pd.DataFrame) -> None:
                 )
                 st.bar_chart(chart_df, use_container_width=True)
             except Exception as e:
-                st.warning(f"Could not render bar chart: {str(e)}")
+                st.warning(_friendly_error_message(e, "chart"))
             return
 
         st.markdown("### 📊 Comparison")
@@ -288,7 +390,7 @@ def _render_chart(df: pd.DataFrame) -> None:
             chart_df = df[[x_axis, y_axis]].set_index(x_axis)
             st.bar_chart(chart_df, use_container_width=True)
         except Exception as e:
-            st.warning(f"Could not render bar chart: {str(e)}")
+            st.warning(_friendly_error_message(e, "chart"))
         return
 
     if len(numeric_cols) >= 2:
@@ -301,7 +403,7 @@ def _render_chart(df: pd.DataFrame) -> None:
                 use_container_width=True,
             )
         except Exception as e:
-            st.warning(f"Could not render scatter chart: {str(e)}")
+            st.warning(_friendly_error_message(e, "chart"))
 
 
 def _run_query_pipeline(user_query: str) -> None:
@@ -324,6 +426,70 @@ def _run_query_pipeline(user_query: str) -> None:
                 total_input_tokens += in_tok
                 total_output_tokens += out_tok
 
+                if intent == "GENERAL":
+                    status.write("💬 Detected advisory question — answering from prior context, no new query needed")
+                    transcript = "\n".join(
+                        f"{m['role'].upper()}: {m['content']}" for m in recent_messages
+                    )
+                    data_context = _get_last_result_context(recent_messages)
+
+                    try:
+                        advisory_completion = create_chat_completion(
+                            client,
+                            model=GROQ_SUMMARY_MODEL,
+                            messages=[{
+                                "role": "system",
+                                "content": ADVISORY_SYSTEM_PROMPT.format(
+                                    conversation_context=transcript or "(no prior conversation)",
+                                    data_context=data_context or "(no prior data table available)",
+                                    user_query=user_query,
+                                ),
+                            }],
+                            temperature=0.4,
+                            max_tokens=ADVISORY_MAX_TOKENS,
+                        )
+                        advisory_answer = advisory_completion.choices[0].message.content
+                        in_tok, out_tok = _extract_usage(advisory_completion)
+                        total_input_tokens += in_tok
+                        total_output_tokens += out_tok
+                    except Exception as e:
+                        status.update(label="❌ Could not generate answer", state="complete", expanded=False)
+                        friendly = _friendly_error_message(e, "summary")
+                        st.error(friendly)
+                        log_chatbot_interaction(
+                            user_query,
+                            None,
+                            None,
+                            f"ADVISORY_ERROR: {str(e)}",
+                            input_tokens=total_input_tokens,
+                            output_tokens=total_output_tokens,
+                        )
+                        st.session_state.messages.append(
+                            {"role": "assistant", "content": friendly, "sql": None, "df": None}
+                        )
+                        return
+
+                    status.update(label="✅ Answer ready", state="complete", expanded=False)
+                    st.markdown(advisory_answer)
+
+                    log_chatbot_interaction(
+                        user_query,
+                        None,
+                        None,
+                        advisory_answer,
+                        input_tokens=total_input_tokens,
+                        output_tokens=total_output_tokens,
+                    )
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": advisory_answer,
+                        "sql": None,
+                        "df": None,
+                    })
+                    if len(st.session_state.messages) > MAX_STORED_MESSAGES:
+                        st.session_state.messages = st.session_state.messages[-MAX_STORED_MESSAGES:]
+                    return
+
                 llm_payload = [
                     {
                         "role": "system",
@@ -331,7 +497,7 @@ def _run_query_pipeline(user_query: str) -> None:
                     }
                 ]
 
-                if intent == "FOLLOWUP":
+                if intent == "FOLLOWUP_QUERY":
                     status.write("↪️ Detected follow-up question — using prior context")
                     for msg in recent_messages:
                         llm_payload.append({
@@ -360,10 +526,9 @@ def _run_query_pipeline(user_query: str) -> None:
                     total_input_tokens += in_tok
                     total_output_tokens += out_tok
                 except APIConnectionError as e:
-                    import traceback
-                    st.error("🔌 Unable to connect to Groq. Check network access to https://api.groq.com and your firewall/proxy settings.")
-                    st.exception(e)
-                    st.code(traceback.format_exc())
+                    status.update(label="❌ Connection issue", state="complete", expanded=False)
+                    friendly = _friendly_error_message(e, "connection")
+                    st.error(friendly)
                     log_chatbot_interaction(
                         user_query,
                         None,
@@ -372,11 +537,14 @@ def _run_query_pipeline(user_query: str) -> None:
                         input_tokens=total_input_tokens,
                         output_tokens=total_output_tokens,
                     )
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": friendly, "sql": None, "df": None}
+                    )
                     return
                 except Exception as e:
-                    import traceback
-                    st.exception(e)
-                    st.code(traceback.format_exc())
+                    status.update(label="❌ Could not generate query", state="complete", expanded=False)
+                    friendly = _friendly_error_message(e, "generation")
+                    st.error(friendly)
                     log_chatbot_interaction(
                         user_query,
                         None,
@@ -384,6 +552,9 @@ def _run_query_pipeline(user_query: str) -> None:
                         f"GENERATION_ERROR: {str(e)}",
                         input_tokens=total_input_tokens,
                         output_tokens=total_output_tokens,
+                    )
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": friendly, "sql": None, "df": None}
                     )
                     return
 
@@ -423,8 +594,11 @@ def _run_query_pipeline(user_query: str) -> None:
                     conn = get_pooled_connection()
                     result_df = pd.read_sql_query(sql_query, conn)
                 except Exception as e:
-                    status.update(label="❌ Database execution failed", state="complete", expanded=False)
-                    st.error(f"Database Error: {str(e)}")
+                    status.update(label="❌ Data not available", state="complete", expanded=False)
+                    friendly = _friendly_error_message(e, "execution")
+                    st.error(friendly)
+                    with st.expander("🛠️ View Attempted Query", expanded=False):
+                        st.code(sql_query, language="sql")
                     log_chatbot_interaction(
                         user_query,
                         sql_query,
@@ -433,14 +607,20 @@ def _run_query_pipeline(user_query: str) -> None:
                         input_tokens=total_input_tokens,
                         output_tokens=total_output_tokens,
                     )
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": friendly, "sql": sql_query, "df": None}
+                    )
                     return
                 finally:
                     if conn:
                         release_pooled_connection(conn)
 
                 if result_df.empty:
-                    status.update(label="⚠️ Query returned zero rows", state="complete", expanded=False)
-                    msg = "The query executed successfully but returned no matching rows."
+                    status.update(label="⚠️ No matching data", state="complete", expanded=False)
+                    msg = (
+                        "📭 No matching data found for your question. Try rephrasing it, "
+                        "or ask about a different metric, time period, or filter."
+                    )
                     st.info(msg)
                     with st.expander("🛠️ View Compiled Execution Query", expanded=False):
                         st.code(sql_query, language="sql")
@@ -448,7 +628,7 @@ def _run_query_pipeline(user_query: str) -> None:
                         user_query,
                         sql_query,
                         None,
-                        msg,
+                        "The query executed successfully but returned no matching rows.",
                         input_tokens=total_input_tokens,
                         output_tokens=total_output_tokens,
                     )
@@ -458,7 +638,14 @@ def _run_query_pipeline(user_query: str) -> None:
                     return
 
                 result_df = _restore_dataframe_types(result_df)
-                status.write("📝 Generating executive insight summary…")
+                strategy_mode = _wants_strategy_answer(user_query)
+                summary_prompt_template = (
+                    STRATEGY_SUMMARY_PROMPT_BASE if strategy_mode else SUMMARY_SYSTEM_PROMPT_BASE
+                )
+                status.write(
+                    "🚀 Turning results into growth strategies…" if strategy_mode
+                    else "📝 Generating executive insight summary…"
+                )
                 data_preview = result_df.head(MARKDOWN_PREVIEW_ROWS).to_markdown(index=False)
 
                 try:
@@ -467,7 +654,7 @@ def _run_query_pipeline(user_query: str) -> None:
                         model=GROQ_SUMMARY_MODEL,
                         messages=[{
                             "role": "system",
-                            "content": SUMMARY_SYSTEM_PROMPT_BASE.format(
+                            "content": summary_prompt_template.format(
                                 user_query=user_query,
                                 data_preview=data_preview,
                             ),
@@ -490,7 +677,7 @@ def _run_query_pipeline(user_query: str) -> None:
                             model=GROQ_SUMMARY_MODEL,
                             messages=[{
                                 "role": "system",
-                                "content": SUMMARY_SYSTEM_PROMPT_BASE.format(
+                                "content": summary_prompt_template.format(
                                     user_query=user_query,
                                     data_preview=data_preview,
                                 ),
@@ -503,8 +690,8 @@ def _run_query_pipeline(user_query: str) -> None:
                         total_input_tokens += in_tok
                         total_output_tokens += out_tok
                 except Exception as e:
-                    st.warning(f"Summary generation failed: {str(e)}")
-                    assistant_summary = "Unable to generate summary. Please review the data below."
+                    st.warning(_friendly_error_message(e, "summary"))
+                    assistant_summary = "Unable to generate a written summary. Please review the data below."
 
                 status.update(label="✅ Analysis completed", state="complete", expanded=False)
                 with st.expander("🛠️ View Compiled Execution Query", expanded=False):
@@ -513,7 +700,7 @@ def _run_query_pipeline(user_query: str) -> None:
                     st.dataframe(result_df, use_container_width=True)
 
                 _render_chart(result_df)
-                st.markdown("### 📋 Key Insights")
+                st.markdown("### 🚀 Growth Strategies" if strategy_mode else "### 📋 Key Insights")
                 st.markdown(assistant_summary)
 
                 log_chatbot_interaction(
@@ -536,7 +723,7 @@ def _run_query_pipeline(user_query: str) -> None:
 
             except Exception as e:
                 status.update(label="❌ Pipeline error", state="complete", expanded=False)
-                err_msg = f"An unexpected error occurred: {str(e)}"
+                err_msg = _friendly_error_message(e, "pipeline")
                 st.error(err_msg)
                 log_chatbot_interaction(
                     user_query,
@@ -649,7 +836,7 @@ Ask questions about:
                                 )
                             _render_chart(df_restored)
                     except Exception as e:
-                        st.warning(f"Could not restore dataframe: {str(e)}")
+                        st.warning("📋 Couldn't reload the saved results for this message.")
 
     if user_query := st.chat_input(
         "Ask any E-commerce Analytics question..."
