@@ -27,6 +27,53 @@ from utils.queries import (
 )
 
 
+def _inject_tab_bar_css():
+    # Scoped to the "admin_tab_bar" container key (Streamlit renders it as
+    # class "st-key-admin_tab_bar") so this never touches the sidebar's own
+    # radio-based navigation or any other radio widget in the app.
+    st.markdown("""
+        <style>
+        div[class*="st-key-admin_tab_bar"] div[role="radiogroup"] {
+            display: flex !important;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        div[class*="st-key-admin_tab_bar"] div[role="radiogroup"] label {
+            display: flex !important;
+            flex: 0 0 auto;
+            width: 220px;
+            box-sizing: border-box;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            background-color: var(--secondary-background-color) !important;
+            border: 1px solid rgba(128, 128, 128, 0.3) !important;
+            border-radius: 8px !important;
+            padding: 0.5rem 0.75rem !important;
+            margin: 0 !important;
+            cursor: pointer;
+            transition: background-color 0.15s ease, border-color 0.15s ease;
+        }
+        div[class*="st-key-admin_tab_bar"] div[role="radiogroup"] label div[data-testid="stMarkdownContainer"] p {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        div[class*="st-key-admin_tab_bar"] div[role="radiogroup"] label:has(input:checked) {
+            background-color: #dc2626 !important;
+            border-color: #dc2626 !important;
+        }
+        div[class*="st-key-admin_tab_bar"] div[role="radiogroup"] label:has(input:checked) div[data-testid="stMarkdownContainer"] p {
+            color: #ffffff !important;
+            font-weight: 600 !important;
+        }
+        div[class*="st-key-admin_tab_bar"] div[role="radiogroup"] label > div:first-child {
+            display: none;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+
 def _build_api_url(path: str) -> str:
     return f"{API_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
 
@@ -144,10 +191,16 @@ def _tab_blacklists(analyst: dict):
     st.markdown("### 🛡️ Entity Blacklist Management")
     st.caption("Check, blacklist, or whitelist IP addresses, phone numbers, and emails.")
     
-    t_ip, t_phone, t_email = st.tabs(["🌐 IP Address", "📱 Phone Number", "📧 Email"])
-    
-    # --- IP TAB ---
-    with t_ip:
+    entity_type = st.radio(
+        "Entity Type",
+        ["🌐 IP Address", "📱 Phone Number", "📧 Email"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="blacklist_entity_type",
+    )
+
+    # --- IP SECTION ---
+    if entity_type == "🌐 IP Address":
         col_lookup, _ = st.columns([1, 1])
         with col_lookup:
             ip_address = st.text_input("IP Lookup", placeholder="e.g. 203.0.113.111", key="ip_lookup")
@@ -174,8 +227,8 @@ def _tab_blacklists(analyst: dict):
                         payload = {"ip_address": checked_ip, "reason": reason, "blacklisted_by": analyst["analyst_id"]}
                         confirm_blacklist_action("blacklist-ip", payload, f"IP {checked_ip}")
 
-    # --- PHONE TAB ---
-    with t_phone:
+    # --- PHONE SECTION ---
+    elif entity_type == "📱 Phone Number":
         col_lookup, _ = st.columns([1, 1])
         with col_lookup:
             phone = st.text_input("Phone Lookup", placeholder="e.g. +919876543210", key="phone_lookup")
@@ -202,8 +255,8 @@ def _tab_blacklists(analyst: dict):
                         payload = {"phone_number": checked_phone, "reason": reason, "blacklisted_by": analyst["analyst_id"]}
                         confirm_blacklist_action("blacklist-phone", payload, f"Phone {checked_phone}")
 
-    # --- EMAIL TAB ---
-    with t_email:
+    # --- EMAIL SECTION ---
+    else:
         col_lookup, _ = st.columns([1, 1])
         with col_lookup:
             email = st.text_input("Email Lookup", placeholder="e.g. fraud@example.com", key="email_lookup")
@@ -565,33 +618,47 @@ def render():
     # Run the cached synchronization task
     sync_database_holds()
 
-    tab_overrides, tab_blacklist, tab_permissions, tab_users, tab_analytics, tab_rules = st.tabs(
-        [
-            "⚖️ Review Queue (Override)", 
-            "🛡️ Entity Blacklists", 
-            "🔐 Analyst Permissions", 
-            "👥 User Management", 
-            "📊 Analytics", 
-            "📋 Rule Management"
-        ]
-    )
-    
-    with tab_overrides:
+    _inject_tab_bar_css()
+
+    TAB_LABELS = [
+        "⚖️ Review Queue (Override)",
+        "🛡️ Entity Blacklists",
+        "🔐 Analyst Permissions",
+        "👥 User Management",
+        "📊 Analytics",
+        "📋 Rule Management",
+    ]
+
+    if "admin_active_tab" not in st.session_state:
+        st.session_state.admin_active_tab = TAB_LABELS[0]
+
+    with st.container(key="admin_tab_bar"):
+        active_tab = st.radio(
+            "Section",
+            TAB_LABELS,
+            key="admin_active_tab",
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+
+    st.divider()
+
+    if active_tab == TAB_LABELS[0]:
         render_queue_and_review(analyst)
-        
-    with tab_blacklist:
+
+    elif active_tab == TAB_LABELS[1]:
         _tab_blacklists(analyst)
-        
-    with tab_permissions:
+
+    elif active_tab == TAB_LABELS[2]:
         _tab_permissions(analyst)
-        
-    with tab_users:
+
+    elif active_tab == TAB_LABELS[3]:
         _tab_user_management()
-        
-    with tab_analytics:
+
+    elif active_tab == TAB_LABELS[4]:
         _tab_analytics()
-        
-    with tab_rules:
+
+    elif active_tab == TAB_LABELS[5]:
         _tab_rule_stats()
         st.divider()
         _tab_rule_management()
