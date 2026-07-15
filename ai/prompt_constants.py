@@ -1,4 +1,4 @@
-from config import GROQ_API_KEY, GROQ_REPAIR_MODEL, GROQ_SQL_MODEL, GROQ_SUMMARY_MODEL
+from config import GROQ_API_KEY, GROQ_INTENT_MODEL, GROQ_REPAIR_MODEL, GROQ_SQL_MODEL, GROQ_SUMMARY_MODEL
 
 MAX_HISTORY = 8
 MAX_STORED_MESSAGES = 100
@@ -8,12 +8,40 @@ MARKDOWN_PREVIEW_ROWS = 15
 # of business commentary comfortably needs more headroom than that.
 SUMMARY_MAX_TOKENS = 900
 
-# Intent classification only ever returns a single label, so this stays tiny.
-INTENT_MAX_TOKENS = 12
+# NOTE ON REASONING MODELS (openai/gpt-oss-20b / gpt-oss-120b via Groq):
+# These models spend part of max_completion_tokens on an internal reasoning
+# pass BEFORE writing the visible answer. If reasoning eats the whole budget,
+# the visible content comes back empty/truncated. Every *_MAX_TOKENS value
+# below therefore includes headroom for reasoning, not just the final
+# answer, and every call site pairs its budget with an explicit
+# *_REASONING_EFFORT (kept "low" for mechanical/deterministic tasks to save
+# tokens, "medium" where real business reasoning improves answer quality).
 
-# Advisory answers (GENERAL intent) are prose recommendations, similar
-# budget need to the executive summary.
-ADVISORY_MAX_TOKENS = 900
+# Intent classification returns a single label, but the model still reasons
+# first — 12 tokens left zero room for that reasoning, so the classifier was
+# effectively always timing out and silently defaulting to NEW_QUERY. This
+# is the main reason follow-up / advisory questions weren't being handled.
+INTENT_MAX_TOKENS = 200
+INTENT_REASONING_EFFORT = "low"
+
+# Advisory answers (GENERAL intent) are prose recommendations/strategy —
+# "medium" effort because grounding strategic or creative advice in the
+# right numbers benefits from real reasoning, not just pattern completion.
+ADVISORY_MAX_TOKENS = 1400
+ADVISORY_REASONING_EFFORT = "medium"
+
+# SQL generation: schema + rules are fully spelled out in the prompt, so
+# this is a mechanical construction task — "low" effort keeps it fast and
+# cheap without hurting correctness. Extra headroom covers reasoning + CTEs.
+SQL_MAX_TOKENS = 1800
+SQL_REASONING_EFFORT = "low"
+
+# Repair model only needs to output a corrected SQL block, not prose — same
+# reasoning as SQL generation.
+REPAIR_MAX_TOKENS = 1200
+REPAIR_REASONING_EFFORT = "low"
+
+SUMMARY_REASONING_EFFORT = "medium"
 
 SCHEMA_CONTEXT = """
 Schema: master
@@ -37,7 +65,7 @@ Tables:
    - category (VARCHAR)
    - product_name (VARCHAR)
    - quantity (INTEGER)
-   - amount (NUMERIC)
+   - amount (NUMERIC, in INR)
    - order_timestamp (TIMESTAMP)
    - order_status (VARCHAR)
    - order_approved_at (TIMESTAMP)
@@ -91,7 +119,9 @@ Tables:
    - rule_description
    - rule_type
    - action
-   - threshold_value
+   - threshold_value (NUMERIC)
+   - time_interval_value (INTEGER)
+   - time_interval_unit (VARCHAR) -- e.g. MINUTE, HOUR, DAY, WEEK
    - created_at
 
 RELATIONSHIPS
@@ -191,6 +221,11 @@ Guidelines:
 • Ground specific claims (numbers, city/state/product names) in the data
   provided below whenever possible; don't invent figures that aren't there.
 
+• NEVER fabricate or estimate specific numbers, percentages, or named entities
+  that are not present in the data below. If you need a figure to make a point
+  and it isn't in the data, say "the data doesn't show this" and suggest the
+  follow-up question that would retrieve it.
+
 • If the data needed to fully answer isn't available in what's shown below,
   say so plainly and suggest what follow-up question or data would help,
   but still give what useful guidance you can.
@@ -216,114 +251,29 @@ User's question:
 SQL_SYSTEM_PROMPT = f"""
 You are an expert PostgreSQL Data Analyst specializing in E-commerce Fraud Detection, Sales Analytics, Customer Analytics, Product Analytics, Revenue Analytics, Device Analytics, and Fraud Rule Analytics.
 
-Generate accurate, optimized PostgreSQL SQL queries based ONLY on the schema provided below.
+Generate accurate, optimized PostgreSQL SQL queries based ONLY on the schema and rules below.
 
 {SCHEMA_CONTEXT}
-
-=========================
-DATABASE RULES
-=========================
-
-• Schema name is always master.
-
-• The primary fact table is:
-    master.orders
-
-• Dimension / Lookup tables:
-    master.customers
-    master.products
-    master.device_master
-    master.order_rule_hits
-    master.rule_master
-
-=========================
-TABLE RELATIONSHIPS
-=========================
-
-orders.user_id = customers.user_id
-
-orders.product_id = products.product_id
-
-orders.device_id = device_master.device_id
-
-orders.order_id = order_rule_hits.order_id
-
-order_rule_hits.rule_id = rule_master.rule_id
-
-Never invent joins.
-
-Never join unrelated tables.
-
-Only join a table when a column from that table is required.
-
-=========================
-BUSINESS RULES
-=========================
-
-Fraud Order
-
-orders.is_fraud = TRUE
-
-Legitimate Order
-
-orders.is_fraud = FALSE
-
-Order Status values
-
-APPROVED
-REJECTED
-
-One order may trigger multiple fraud rules.
-
-Every fraud order has at least one record inside order_rule_hits.
-
-orders already contains
-
-customer_name
-email
-phone_number
-address
-city
-state
-country
-category
-product_name
-
-Therefore do NOT join customers or products unless additional columns are needed.
 
 =========================
 SQL GENERATION RULES
 =========================
 
-Always generate PostgreSQL SQL.
+• Always generate PostgreSQL SQL.
 
-Always generate only SELECT statements.
+• Always generate only SELECT statements. WITH (CTEs) are allowed.
 
-WITH (CTEs) are allowed.
+• Never generate: INSERT, UPDATE, DELETE, DROP, TRUNCATE, ALTER, CREATE, GRANT, REVOKE.
 
-Never generate
+• Never use SELECT *.
 
-INSERT
+• Never include comments (-- or /* */) in the generated SQL. Return the bare query only.
 
-UPDATE
+• All monetary amounts (orders.amount) are in Indian Rupees (INR, ₹). Format aggregates accordingly.
 
-DELETE
+• Always apply a LIMIT clause (default LIMIT 100) unless the question explicitly asks for all records or a specific count like "Top N". For ranking queries use the N requested.
 
-DROP
-
-TRUNCATE
-
-ALTER
-
-CREATE
-
-GRANT
-
-REVOKE
-
-Never use SELECT *.
-
-Never include comments (-- or /* */) in the generated SQL. Return the bare query only.
+• For date/time filtering, use orders.order_timestamp. Cast or truncate using PostgreSQL date functions (DATE_TRUNC, EXTRACT, ::date) as needed.
 """
 
 SUMMARY_SYSTEM_PROMPT_BASE = """
@@ -335,7 +285,9 @@ Guidelines:
 
 • Start with a direct answer.
 
-• Mention important numbers.
+• Mention important numbers. All monetary amounts are in Indian Rupees (INR, ₹) — always prefix currency figures with ₹.
+
+• NEVER invent or estimate numbers not present in the query result below. Only cite figures that appear in the data.
 
 • Highlight fraud patterns if present.
 
@@ -431,37 +383,15 @@ TRUNCATE
 GRANT
 REVOKE
 
-6. Never access:
-customers.password
+6. Never access: customers.password
 
-7. Use only these tables:
+7. Use only the tables, columns, and joins defined in the schema above. Do not invent tables, columns, or relationships.
 
-master.orders
-master.customers
-master.products
-master.device_master
-master.order_rule_hits
-master.rule_master
+8. Do not join unnecessary tables. Prefer master.orders whenever possible.
 
-8. Use these joins only:
+9. Preserve the original business intent of the query.
 
-orders.user_id = customers.user_id
-
-orders.product_id = products.product_id
-
-orders.device_id = device_master.device_id
-
-orders.order_id = order_rule_hits.order_id
-
-order_rule_hits.rule_id = rule_master.rule_id
-
-9. Do not join unnecessary tables.
-
-10. Prefer orders whenever possible.
-
-11. Preserve the original business intent.
-
-12. Never include comments (-- or /* */) in the returned SQL. Return the bare query only.
+10. Never include comments (-- or /* */) in the returned SQL. Return the bare query only.
 
 Original SQL
 
