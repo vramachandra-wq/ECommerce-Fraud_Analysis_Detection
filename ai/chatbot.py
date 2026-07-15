@@ -1,5 +1,5 @@
-import os
 import re
+import logging
 import pandas as pd
 import streamlit as st
 
@@ -7,6 +7,7 @@ from groq import APIConnectionError
 from ai.groq_client import get_groq_client, create_chat_completion
 from ai.prompt_constants import (
     GROQ_API_KEY,
+    GROQ_INTENT_MODEL,
     GROQ_REPAIR_MODEL,
     GROQ_SQL_MODEL,
     GROQ_SUMMARY_MODEL,
@@ -23,6 +24,13 @@ from ai.prompt_constants import (
     SUMMARY_MAX_TOKENS,
     INTENT_MAX_TOKENS,
     ADVISORY_MAX_TOKENS,
+    SQL_MAX_TOKENS,
+    REPAIR_MAX_TOKENS,
+    INTENT_REASONING_EFFORT,
+    ADVISORY_REASONING_EFFORT,
+    SQL_REASONING_EFFORT,
+    REPAIR_REASONING_EFFORT,
+    SUMMARY_REASONING_EFFORT,
 )
 from database.connection import get_pooled_connection, release_pooled_connection
 from database.transaction_repository import log_chatbot_interaction
@@ -66,13 +74,33 @@ def _wants_strategy_answer(user_query: str) -> bool:
 
 
 def _extract_sql(text: str) -> str:
-    """Extract SQL from markdown code block with improved regex."""
-    match = re.search(
-        r"```\s*sql\s*\n(.*?)\n\s*```",
-        text,
-        re.DOTALL | re.IGNORECASE
-    )
-    return match.group(1).strip() if match else text.strip()
+    """Extract SQL from the model response.
+
+    Tries in order:
+    1. A ```sql ... ``` fenced block (standard output format).
+    2. Any generic ``` ... ``` fenced block (model forgot the language tag).
+    3. The first SELECT or WITH statement found in the raw text, stripping any
+       surrounding prose — prevents raw model chatter from reaching execution.
+    """
+    # 1. Explicit sql fence
+    match = re.search(r"```\s*sql\s*\n(.*?)\n\s*```", text, re.DOTALL | re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+
+    # 2. Generic fence (no language tag)
+    match = re.search(r"```\n?(.*?)\n?```", text, re.DOTALL)
+    if match:
+        candidate = match.group(1).strip()
+        if re.match(r"^\s*(select|with)\b", candidate, re.IGNORECASE):
+            return candidate
+
+    # 3. Find first SELECT or WITH in bare text and take everything from there
+    match = re.search(r"((?:select|with)\b.*)", text, re.DOTALL | re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+
+    # Fallback: return as-is and let validation catch it
+    return text.strip()
 
 
 def _strip_sql_comments(sql: str) -> str:
@@ -173,13 +201,13 @@ def _classify_intent(client, user_query: str, history: list[dict]) -> tuple[str,
         return "NEW_QUERY", 0, 0
 
     transcript = "\n".join(
-        f"{m['role'].upper()}: {m['content']}" for m in history
+        f"{m['role'].upper()}: {m['content'][:300]}" for m in history
     )
 
     try:
         completion = create_chat_completion(
             client,
-            model=GROQ_SQL_MODEL,
+            model=GROQ_INTENT_MODEL,
             messages=[
                 {"role": "system", "content": INTENT_SYSTEM_PROMPT},
                 {
@@ -189,8 +217,10 @@ def _classify_intent(client, user_query: str, history: list[dict]) -> tuple[str,
             ],
             temperature=0.0,
             max_tokens=INTENT_MAX_TOKENS,
+            reasoning_effort=INTENT_REASONING_EFFORT,
+            include_reasoning=False,
         )
-        label = completion.choices[0].message.content.strip().upper()
+        label = (completion.choices[0].message.content or "").strip().upper()
         in_tok, out_tok = _extract_usage(completion)
         if "GENERAL" in label:
             return "GENERAL", in_tok, out_tok
@@ -223,8 +253,62 @@ def _get_last_result_context(history: list[dict]) -> str:
     return ""
 
 
+def _get_followup_context(history: list[dict]) -> str:
+    """
+    Builds structured context for follow-up questions.
+    Gives the LLM the previous SQL, returned columns and a small sample.
+
+    NOTE: history here is recent_messages which already excludes the current
+    user turn (it's built from st.session_state.messages BEFORE the new
+    message is appended). So the most recent user message in history IS the
+    previous question, which is exactly what we want.
+    """
+
+    previous_user = None
+    previous_sql = None
+    previous_df = None
+
+    for msg in reversed(history):
+        if previous_df is None and msg.get("role") == "assistant":
+            if msg.get("df"):
+                previous_df = pd.DataFrame(msg["df"])
+            if msg.get("sql"):
+                previous_sql = msg["sql"]
+
+        if previous_user is None and msg.get("role") == "user":
+            previous_user = msg["content"]
+
+        if previous_user and previous_sql and previous_df is not None:
+            break
+
+    if previous_df is None or previous_sql is None:
+        return ""
+
+    previous_df = _restore_dataframe_types(previous_df)
+
+    return f"""
+PREVIOUS USER QUESTION:
+{previous_user}
+
+PREVIOUS SQL QUERY:
+{previous_sql}
+
+RETURNED COLUMNS:
+{", ".join(previous_df.columns)}
+
+SAMPLE RESULT (first 3 rows — full dataset is larger):
+{previous_df.head(3).to_markdown(index=False)}
+"""
+
 def _validate_sql(sql: str) -> tuple[bool, str]:
-    """Validate SQL query with comprehensive checks."""
+    """Validate SQL query with comprehensive checks.
+
+    The join-duplicate check strips CTE definitions before scanning so that
+    a table referenced inside a CTE body AND again in the outer query is not
+    incorrectly flagged. Complex analytics queries (e.g. fraud-rate CTEs that
+    reference orders twice across separate CTE legs) were previously triggering
+    false-positive validation failures.
+    """
     sql = _strip_sql_comments(sql)
     sql_lower = sql.lower().strip()
 
@@ -239,20 +323,31 @@ def _validate_sql(sql: str) -> tuple[bool, str]:
         if col in sql_lower:
             return False, f"Access to sensitive column '{col}' is prohibited."
 
+    # For the duplicate-join check, only inspect the outer query — strip CTE
+    # bodies so joins inside CTEs don't inflate the count for the outer query.
+    # Strategy: remove everything between the outermost WITH ... AS (...) pairs
+    # before scanning JOIN/FROM references.
+    scan_target = sql_lower
+    if scan_target.startswith("with"):
+        # Find the final SELECT that follows all CTE definitions
+        final_select = re.search(r'\)\s*(select\b)', scan_target, re.IGNORECASE)
+        if final_select:
+            scan_target = scan_target[final_select.start(1):]
+
     join_pattern = re.compile(
         r"(?:JOIN|FROM)\s+(?:master\.)?(\w+)",
         re.IGNORECASE,
     )
 
     table_counts = {}
-    for tbl in join_pattern.findall(sql_lower):
+    for tbl in join_pattern.findall(scan_target):
         table_counts[tbl] = table_counts.get(tbl, 0) + 1
 
     for dim in _KNOWN_DIMENSION_TABLES:
         if table_counts.get(dim, 0) > 1:
             return (
                 False,
-                f"Table `{dim}` is joined multiple times. Use aliases."
+                f"Table `{dim}` is joined multiple times. Use aliases or a CTE."
             )
 
     return True, ""
@@ -282,10 +377,12 @@ def _repair_sql(sql: str, error: str) -> tuple[str, int, int]:
                 }
             ],
             temperature=0,
-            max_tokens=700,
+            max_tokens=REPAIR_MAX_TOKENS,
+            reasoning_effort=REPAIR_REASONING_EFFORT,
+            include_reasoning=False,
         )
         in_tok, out_tok = _extract_usage(response)
-        return _extract_sql(response.choices[0].message.content), in_tok, out_tok
+        return _extract_sql(response.choices[0].message.content or ""), in_tok, out_tok
     except Exception as e:
         st.warning(_friendly_error_message(e, "repair"))
         return sql, 0, 0
@@ -319,101 +416,417 @@ def _get_best_axis(df: pd.DataFrame, cols_list: list, priority_patterns: list) -
     return cols_list[0]
 
 
-def _render_chart(df: pd.DataFrame) -> None:
-    if df.empty or len(df.columns) < 2:
-        return
+def _detect_chart_columns(df: pd.DataFrame):
+    """
+    Automatically detect the best X and Y columns for visualization.
+    """
 
     numeric_cols = df.select_dtypes(include="number").columns.tolist()
-    datetime_cols = df.select_dtypes(include=['datetime64']).columns.tolist()
+    datetime_cols = df.select_dtypes(include=["datetime64"]).columns.tolist()
     object_cols = df.select_dtypes(include=["object", "category", "bool"]).columns.tolist()
 
     if not numeric_cols:
-        return
+        return None, None
 
-    y_axis = _get_best_axis(df, numeric_cols, ['count', 'amount', 'total', 'value']) or numeric_cols[0]
+    y_axis = (
+        _get_best_axis(df, numeric_cols, ["count", "amount", "total", "value"])
+        or numeric_cols[0]
+    )
 
     if datetime_cols:
-        x_axis = _get_best_axis(df, datetime_cols, ['timestamp', 'date', 'created']) or datetime_cols[0]
+        x_axis = (
+            _get_best_axis(df, datetime_cols, ["timestamp", "date", "created"])
+            or datetime_cols[0]
+        )
+    elif object_cols:
+        x_axis = (
+            _get_best_axis(df, object_cols, ["status", "category", "type", "name"])
+            or object_cols[0]
+        )
+    else:
+        x_axis = numeric_cols[0]
 
-        st.markdown("### 📈 Trend Analysis")
+    return x_axis, y_axis
+
+def _render_chart(df: pd.DataFrame, chart_key: str = "live") -> None:
+    """
+    Interactive chart renderer.
+
+    Features
+    --------
+    • Auto chart selection
+    • Manual chart selection
+    • X-Axis selection
+    • Y-Axis selection
+    • Horizontal bar chart
+    • Line chart
+    • Area chart
+    • Pie chart
+    • Scatter chart
+    • Table only option
+
+    No SQL is re-executed.
+    Everything works on the existing dataframe.
+    """
+
+    if df.empty:
+        return
+
+    if len(df.columns) < 2:
+        st.info("Not enough columns available to visualize.")
+        return
+
+    df = _restore_dataframe_types(df.copy())
+
+    numeric_cols = (
+        df.select_dtypes(include="number")
+        .columns
+        .tolist()
+    )
+
+    datetime_cols = (
+        df.select_dtypes(include=["datetime64"])
+        .columns
+        .tolist()
+    )
+
+    category_cols = (
+        df.select_dtypes(
+            include=[
+                "object",
+                "category",
+                "bool",
+            ]
+        )
+        .columns
+        .tolist()
+    )
+
+    if not numeric_cols:
+        st.info("No numeric columns available for charting.")
+        return
+
+    auto_x, auto_y = _detect_chart_columns(df)
+
+    st.markdown("---")
+    st.markdown("## 📊 Visualization")
+
+    control_col1, control_col2, control_col3 = st.columns(3)
+
+    with control_col1:
+
+        chart_type = st.selectbox(
+            "Chart Type",
+            [
+                "Auto",
+                "Bar Chart",
+                "Horizontal Bar",
+                "Line Chart",
+                "Area Chart",
+                "Pie Chart",
+                "Scatter Plot",
+                "Table Only",
+            ],
+            key=f"chart_type_{chart_key}",
+        )
+
+    available_x = []
+
+    if datetime_cols:
+        available_x.extend(datetime_cols)
+
+    if category_cols:
+        available_x.extend(category_cols)
+
+    if not available_x:
+        available_x.extend(numeric_cols)
+
+    with control_col2:
+
+        x_axis = st.selectbox(
+            "X Axis",
+            available_x,
+            index=available_x.index(auto_x)
+            if auto_x in available_x
+            else 0,
+            key=f"x_axis_{chart_key}",
+        )
+
+    with control_col3:
+
+        y_axis = st.selectbox(
+            "Y Axis",
+            numeric_cols,
+            index=numeric_cols.index(auto_y)
+            if auto_y in numeric_cols
+            else 0,
+            key=f"y_axis_{chart_key}",
+        )
+
+    chart_df = df.copy()
+
+    if chart_type == "Table Only":
+        return
+
+    if chart_type == "Auto":
+
+        if datetime_cols:
+            chart_type = "Line Chart"
+
+        elif category_cols:
+
+            if chart_df[x_axis].nunique() <= 5:
+                chart_type = "Pie Chart"
+
+            else:
+                chart_type = "Bar Chart"
+
+        else:
+            chart_type = "Scatter Plot"
+
+    st.caption(f"Current Visualization: **{chart_type}**")
+
+    # ==========================================================
+    # BAR CHART
+    # ==========================================================
+
+    if chart_type == "Bar Chart":
+
         try:
-            chart_df = (
-                df[[x_axis, y_axis]]
+
+            plot_df = (
+                chart_df[[x_axis, y_axis]]
+                .sort_values(y_axis, ascending=False)
+                .set_index(x_axis)
+            )
+
+            st.bar_chart(
+                plot_df,
+                use_container_width=True,
+            )
+
+        except Exception as e:
+
+            st.warning(_friendly_error_message(e, "chart"))
+
+        return
+
+
+    # ==========================================================
+    # HORIZONTAL BAR CHART
+    # ==========================================================
+
+    if chart_type == "Horizontal Bar":
+
+        try:
+
+            import plotly.express as px
+
+            plot_df = (
+                chart_df[[x_axis, y_axis]]
+                .sort_values(y_axis)
+            )
+
+            fig = px.bar(
+                plot_df,
+                x=y_axis,
+                y=x_axis,
+                orientation="h",
+                text_auto=True,
+            )
+
+            fig.update_layout(
+                height=500,
+                yaxis_title=x_axis,
+                xaxis_title=y_axis,
+            )
+
+            st.plotly_chart(
+                fig,
+                use_container_width=True,
+            )
+
+        except Exception as e:
+
+            st.warning(_friendly_error_message(e, "chart"))
+
+        return
+
+
+    # ==========================================================
+    # LINE CHART
+    # ==========================================================
+
+    if chart_type == "Line Chart":
+
+        try:
+
+            plot_df = (
+                chart_df[[x_axis, y_axis]]
                 .sort_values(x_axis)
                 .set_index(x_axis)
             )
-            st.line_chart(chart_df, use_container_width=True)
-        except Exception as e:
-            st.warning(_friendly_error_message(e, "chart"))
-        return
 
-    if object_cols:
-        x_axis = _get_best_axis(df, object_cols, ['status', 'category', 'type', 'name']) or object_cols[0]
-        unique_values = df[x_axis].nunique()
-
-        if unique_values <= 5 and len(df) <= 5:
-            st.markdown("### 🥧 Distribution")
-            try:
-                import altair as alt
-
-                pie_df = df[[x_axis, y_axis]].copy()
-                chart = (
-                    alt.Chart(pie_df)
-                    .mark_arc(innerRadius=50)
-                    .encode(
-                        theta=alt.Theta(f"{y_axis}:Q"),
-                        color=alt.Color(f"{x_axis}:N", legend=alt.Legend(title=None)),
-                        tooltip=[x_axis, y_axis],
-                    )
-                    .properties(height=350)
-                )
-                st.altair_chart(chart, use_container_width=True)
-            except Exception as e:
-                st.warning(_friendly_error_message(e, "chart"))
-            return
-
-        if len(df) >= 6:
-            st.markdown("### 📊 Comparison")
-            try:
-                chart_df = (
-                    df[[x_axis, y_axis]]
-                    .sort_values(y_axis)
-                    .set_index(x_axis)
-                )
-                st.bar_chart(chart_df, use_container_width=True)
-            except Exception as e:
-                st.warning(_friendly_error_message(e, "chart"))
-            return
-
-        st.markdown("### 📊 Comparison")
-        try:
-            chart_df = df[[x_axis, y_axis]].set_index(x_axis)
-            st.bar_chart(chart_df, use_container_width=True)
-        except Exception as e:
-            st.warning(_friendly_error_message(e, "chart"))
-        return
-
-    if len(numeric_cols) >= 2:
-        st.markdown("### 📉 Correlation")
-        try:
-            st.scatter_chart(
-                df,
-                x=numeric_cols[0],
-                y=numeric_cols[1],
+            st.line_chart(
+                plot_df,
                 use_container_width=True,
             )
+
         except Exception as e:
+
             st.warning(_friendly_error_message(e, "chart"))
+
+        return
+
+
+    # ==========================================================
+    # AREA CHART
+    # ==========================================================
+
+    if chart_type == "Area Chart":
+
+        try:
+
+            plot_df = (
+                chart_df[[x_axis, y_axis]]
+                .sort_values(x_axis)
+                .set_index(x_axis)
+            )
+
+            st.area_chart(
+                plot_df,
+                use_container_width=True,
+            )
+
+        except Exception as e:
+
+            st.warning(_friendly_error_message(e, "chart"))
+
+        return
+
+
+    # ==========================================================
+    # PIE CHART
+    # ==========================================================
+
+    if chart_type == "Pie Chart":
+
+        try:
+
+            import plotly.express as px
+
+            pie_df = chart_df[[x_axis, y_axis]]
+
+            fig = px.pie(
+                pie_df,
+                names=x_axis,
+                values=y_axis,
+                hole=0.45,
+            )
+
+            fig.update_traces(
+                textposition="inside",
+                textinfo="percent+label",
+            )
+
+            fig.update_layout(
+                height=500,
+            )
+
+            st.plotly_chart(
+                fig,
+                use_container_width=True,
+            )
+
+        except Exception as e:
+
+            st.warning(_friendly_error_message(e, "chart"))
+
+        return
+
+    # ==========================================================
+    # SCATTER PLOT
+    # ==========================================================
+
+    if chart_type == "Scatter Plot":
+
+        try:
+
+            if len(numeric_cols) < 2:
+                st.info("Scatter plot requires at least two numeric columns.")
+                return
+
+            x_numeric = st.selectbox(
+                "Scatter X Axis",
+                numeric_cols,
+                index=0,
+                key=f"scatter_x_{chart_key}",
+            )
+
+            y_numeric = st.selectbox(
+                "Scatter Y Axis",
+                numeric_cols,
+                index=1 if len(numeric_cols) > 1 else 0,
+                key=f"scatter_y_{chart_key}",
+            )
+
+            st.scatter_chart(
+                chart_df,
+                x=x_numeric,
+                y=y_numeric,
+                use_container_width=True,
+            )
+
+        except Exception as e:
+
+            st.warning(_friendly_error_message(e, "chart"))
+
+        return
+
+
+    # ==========================================================
+    # FALLBACK
+    # ==========================================================
+
+    try:
+
+        plot_df = chart_df[[x_axis, y_axis]].set_index(x_axis)
+
+        st.bar_chart(
+            plot_df,
+            use_container_width=True,
+        )
+
+    except Exception as e:
+
+        st.warning(_friendly_error_message(e, "chart"))
+
+    st.markdown("---")
+
+    with st.expander("📊 Visualization Information", expanded=False):
+
+        st.markdown(
+            f"""
+**Chart Type:** {chart_type}
+
+**Rows Displayed:** {len(chart_df)}
+
+**Columns Available:** {len(chart_df.columns)}
+
+**Selected X Axis:** `{x_axis}`
+
+**Selected Y Axis:** `{y_axis}`
+"""
+        )
 
 
 def _run_query_pipeline(user_query: str) -> None:
     client = get_groq_client()
     if not client:
-        # UPDATED: Directs users to check the .env file configuration
         st.error("🔑 Groq API key missing — add `GROQ_API_KEY` to your `.env` file.")
         return
 
-    recent_messages = st.session_state.messages[-MAX_HISTORY:]
+    recent_messages = st.session_state.messages[:-1][-MAX_HISTORY:]
     total_input_tokens = 0
     total_output_tokens = 0
 
@@ -434,24 +847,49 @@ def _run_query_pipeline(user_query: str) -> None:
                     data_context = _get_last_result_context(recent_messages)
 
                     try:
+                        advisory_messages = [{
+                            "role": "system",
+                            "content": ADVISORY_SYSTEM_PROMPT.format(
+                                conversation_context=transcript or "(no prior conversation)",
+                                data_context=data_context or "(no prior data table available)",
+                                user_query=user_query,
+                            ),
+                        }]
                         advisory_completion = create_chat_completion(
                             client,
                             model=GROQ_SUMMARY_MODEL,
-                            messages=[{
-                                "role": "system",
-                                "content": ADVISORY_SYSTEM_PROMPT.format(
-                                    conversation_context=transcript or "(no prior conversation)",
-                                    data_context=data_context or "(no prior data table available)",
-                                    user_query=user_query,
-                                ),
-                            }],
+                            messages=advisory_messages,
                             temperature=0.4,
                             max_tokens=ADVISORY_MAX_TOKENS,
+                            reasoning_effort=ADVISORY_REASONING_EFFORT,
+                            include_reasoning=False,
                         )
-                        advisory_answer = advisory_completion.choices[0].message.content
+                        advisory_answer = advisory_completion.choices[0].message.content or ""
                         in_tok, out_tok = _extract_usage(advisory_completion)
                         total_input_tokens += in_tok
                         total_output_tokens += out_tok
+                        if getattr(advisory_completion.choices[0], "finish_reason", None) == "length":
+                            # Ran out of tokens mid-answer — retry once with a
+                            # larger budget rather than showing a cut-off answer.
+                            advisory_completion = create_chat_completion(
+                                client,
+                                model=GROQ_SUMMARY_MODEL,
+                                messages=advisory_messages,
+                                temperature=0.4,
+                                max_tokens=ADVISORY_MAX_TOKENS * 2,
+                                reasoning_effort=ADVISORY_REASONING_EFFORT,
+                                include_reasoning=False,
+                            )
+                            advisory_answer = advisory_completion.choices[0].message.content or ""
+                            in_tok, out_tok = _extract_usage(advisory_completion)
+                            total_input_tokens += in_tok
+                            total_output_tokens += out_tok
+
+                        if not advisory_answer.strip():
+                            advisory_answer = (
+                                "I wasn't able to generate a written answer for that this time. "
+                                "Could you try rephrasing the question?"
+                            )
                     except Exception as e:
                         status.update(label="❌ Could not generate answer", state="complete", expanded=False)
                         friendly = _friendly_error_message(e, "summary")
@@ -498,12 +936,27 @@ def _run_query_pipeline(user_query: str) -> None:
                 ]
 
                 if intent == "FOLLOWUP_QUERY":
-                    status.write("↪️ Detected follow-up question — using prior context")
-                    for msg in recent_messages:
+                    status.write("↪ Detected follow-up question — using previous query context")
+
+                    followup_context = _get_followup_context(recent_messages)
+
+                    if followup_context:
                         llm_payload.append({
-                            "role": msg["role"],
-                            "content": msg["content"],
+                            "role": "user",
+                            "content": f"""This is a follow-up question. Use the context below to understand what the user is referring to, then write a new SQL query that answers their follow-up.
+
+{followup_context}
+
+FOLLOW-UP RULES:
+- Modify the previous SQL to answer the follow-up rather than writing a completely unrelated query.
+- Keep the same analytical intent and only change the part the user is asking about (e.g. a different city, date range, filter, or aggregation level).
+- If the user uses pronouns ("those", "them", "it", "that"), resolve them from the previous question and result above.
+- Do NOT copy the previous SQL verbatim — adapt it to the new question.
+- Always apply LIMIT unless the question asks for all records.
+
+The user's follow-up question is below. Respond with ONLY the SQL query.""",
                         })
+
                 else:
                     status.write("🆕 Detected new question — starting fresh")
 
@@ -519,9 +972,11 @@ def _run_query_pipeline(user_query: str) -> None:
                         model=GROQ_SQL_MODEL,
                         messages=llm_payload,
                         temperature=0.0,
-                        max_tokens=600,
+                        max_tokens=SQL_MAX_TOKENS,
+                        reasoning_effort=SQL_REASONING_EFFORT,
+                        include_reasoning=False,
                     )
-                    sql_query = _extract_sql(completion.choices[0].message.content)
+                    sql_query = _extract_sql(completion.choices[0].message.content or "")
                     in_tok, out_tok = _extract_usage(completion)
                     total_input_tokens += in_tok
                     total_output_tokens += out_tok
@@ -561,7 +1016,7 @@ def _run_query_pipeline(user_query: str) -> None:
                 is_valid, validation_error = _validate_sql(sql_query)
                 if is_valid:
                     sql_query = _strip_sql_comments(sql_query)
-                if not is_valid:
+                else:
                     status.write("🔧 Attempting query repair…")
                     repaired, repair_in_tok, repair_out_tok = _repair_sql(sql_query, validation_error)
                     total_input_tokens += repair_in_tok
@@ -573,8 +1028,6 @@ def _run_query_pipeline(user_query: str) -> None:
                     else:
                         status.update(label="⚠️ Query validation failed", state="complete", expanded=False)
                         st.error(validation_error)
-                        with st.expander("🛠️ View Generated Query", expanded=False):
-                            st.code(sql_query, language="sql")
                         log_chatbot_interaction(
                             user_query,
                             sql_query,
@@ -597,8 +1050,6 @@ def _run_query_pipeline(user_query: str) -> None:
                     status.update(label="❌ Data not available", state="complete", expanded=False)
                     friendly = _friendly_error_message(e, "execution")
                     st.error(friendly)
-                    with st.expander("🛠️ View Attempted Query", expanded=False):
-                        st.code(sql_query, language="sql")
                     log_chatbot_interaction(
                         user_query,
                         sql_query,
@@ -622,8 +1073,6 @@ def _run_query_pipeline(user_query: str) -> None:
                         "or ask about a different metric, time period, or filter."
                     )
                     st.info(msg)
-                    with st.expander("🛠️ View Compiled Execution Query", expanded=False):
-                        st.code(sql_query, language="sql")
                     log_chatbot_interaction(
                         user_query,
                         sql_query,
@@ -661,17 +1110,20 @@ def _run_query_pipeline(user_query: str) -> None:
                         }],
                         temperature=0.3,
                         max_tokens=SUMMARY_MAX_TOKENS,
+                        reasoning_effort=SUMMARY_REASONING_EFFORT,
+                        include_reasoning=False,
                     )
-                    assistant_summary = summary_completion.choices[0].message.content
+                    assistant_summary = summary_completion.choices[0].message.content or ""
                     in_tok, out_tok = _extract_usage(summary_completion)
                     total_input_tokens += in_tok
                     total_output_tokens += out_tok
                     finish_reason = getattr(
                         summary_completion.choices[0], "finish_reason", None
                     )
-                    if finish_reason == "length":
-                        # Ran out of tokens mid-summary — retry once with a
-                        # larger budget rather than showing a cut-off answer.
+                    if finish_reason == "length" or not assistant_summary.strip():
+                        # Ran out of tokens mid-summary (or reasoning ate the
+                        # whole budget) — retry once with a larger budget
+                        # rather than showing a cut-off/blank answer.
                         summary_completion = create_chat_completion(
                             client,
                             model=GROQ_SUMMARY_MODEL,
@@ -684,22 +1136,25 @@ def _run_query_pipeline(user_query: str) -> None:
                             }],
                             temperature=0.3,
                             max_tokens=SUMMARY_MAX_TOKENS * 2,
+                            reasoning_effort=SUMMARY_REASONING_EFFORT,
+                            include_reasoning=False,
                         )
-                        assistant_summary = summary_completion.choices[0].message.content
+                        assistant_summary = summary_completion.choices[0].message.content or ""
                         in_tok, out_tok = _extract_usage(summary_completion)
                         total_input_tokens += in_tok
                         total_output_tokens += out_tok
+
+                    if not assistant_summary.strip():
+                        assistant_summary = "Unable to generate a written summary. Please review the data below."
                 except Exception as e:
                     st.warning(_friendly_error_message(e, "summary"))
                     assistant_summary = "Unable to generate a written summary. Please review the data below."
 
                 status.update(label="✅ Analysis completed", state="complete", expanded=False)
-                with st.expander("🛠️ View Compiled Execution Query", expanded=False):
-                    st.code(sql_query, language="sql")
                 with st.expander("📋 View Result Data", expanded=False):
                     st.dataframe(result_df, use_container_width=True)
 
-                _render_chart(result_df)
+                _render_chart(result_df, chart_key=f"live_{len(st.session_state.messages)}")
                 st.markdown("### 🚀 Growth Strategies" if strategy_mode else "### 📋 Key Insights")
                 st.markdown(assistant_summary)
 
@@ -782,25 +1237,12 @@ Ask questions about:
     st.markdown("---")
 
     with st.sidebar:
-        # st.markdown("---")
-        # st.markdown("### ⚙️ Analytics Engine")
-        # st.caption("**Domain:** E-commerce Fraud Detection")
-        # st.caption("**Database:** PostgreSQL")
-        # st.caption("**Schema:** master")
-        # st.caption("**LLM Provider:** Groq")
-        # st.caption(f"**SQL Model:** `{GROQ_SQL_MODEL}`")
-        # st.caption(f"**Repair Model:** `{GROQ_REPAIR_MODEL}`")
-        # st.caption(f"**Summary Model:** `{GROQ_SUMMARY_MODEL}`")
         st.markdown("---")
         st.markdown("### 🔌 Connection Status")
         if GROQ_API_KEY:
             st.success("✅ Groq Connected")
         else:
             st.error("❌ Groq API Key Missing")
-        # st.markdown("---")
-        # st.markdown(f"### 📊 Session Info")
-        # st.caption(f"Messages in history: {len(st.session_state.messages)}")
-        # st.markdown("---")
         if st.button(
             "🗑️ Clear Chat History",
             use_container_width=True,
@@ -812,31 +1254,25 @@ Ask questions about:
     for idx, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
-            if msg["role"] == "assistant":
-                if msg.get("sql"):
-                    with st.expander(
-                        "🛠️ View Generated SQL",
-                        expanded=False,
-                    ):
-                        st.code(msg["sql"], language="sql")
-                stored_df = msg.get("df")
-                if stored_df is not None:
-                    try:
-                        df_restored = pd.DataFrame(stored_df)
-                        df_restored = _restore_dataframe_types(df_restored)
-                        if not df_restored.empty:
-                            with st.expander(
-                                "📋 View Query Result",
-                                expanded=False,
-                            ):
-                                st.dataframe(
-                                    df_restored,
-                                    use_container_width=True,
-                                    key=f"hist_df_{idx}",
-                                )
-                            _render_chart(df_restored)
-                    except Exception as e:
-                        st.warning("📋 Couldn't reload the saved results for this message.")
+            stored_df = msg.get("df")
+            if stored_df is not None:
+                try:
+                    df_restored = pd.DataFrame(stored_df)
+                    df_restored = _restore_dataframe_types(df_restored)
+                    if not df_restored.empty:
+                        with st.expander(
+                            "📋 View Query Result",
+                            expanded=False,
+                        ):
+                            st.dataframe(
+                                df_restored,
+                                use_container_width=True,
+                                key=f"hist_df_{idx}",
+                            )
+                        _render_chart(df_restored, chart_key=f"hist_{idx}")
+                except Exception:
+                    logging.exception("Failed to reload stored results for history message idx=%s", idx)
+                    st.warning("📋 Couldn't reload the saved results for this message.")
 
     if user_query := st.chat_input(
         "Ask any E-commerce Analytics question..."

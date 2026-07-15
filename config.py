@@ -20,12 +20,11 @@ def _get_env_str(key: str, default: str = "") -> str:
         return value.strip().strip('"').strip("'")
     return default
 
-GROQ_API_KEY = _get_env_str("GROQ_API_KEY")
-
-# UPDATED: Replaced non-existent models with valid Groq hosted open-source models
-GROQ_SQL_MODEL = _get_env_str("GROQ_SQL_MODEL", "openai/gpt-oss-20b")
-GROQ_REPAIR_MODEL = _get_env_str("GROQ_REPAIR_MODEL", "openai/gpt-oss-20b")
-GROQ_SUMMARY_MODEL = _get_env_str("GROQ_SUMMARY_MODEL", "openai/gpt-oss-20b")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+GROQ_INTENT_MODEL = _get_env_str("GROQ_INTENT_MODEL", "openai/gpt-oss-20b")
+GROQ_SQL_MODEL = _get_env_str("GROQ_SQL_MODEL", "openai/gpt-oss-120b")
+GROQ_REPAIR_MODEL = _get_env_str("GROQ_REPAIR_MODEL", "openai/gpt-oss-120b")
+GROQ_SUMMARY_MODEL = _get_env_str("GROQ_SUMMARY_MODEL", "openai/gpt-oss-120b")
 
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://127.0.0.1:8000")
 API_TIMEOUT = int(os.environ.get("API_TIMEOUT", "10"))

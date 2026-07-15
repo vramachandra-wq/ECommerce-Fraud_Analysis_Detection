@@ -501,6 +501,40 @@ def _confirm_rule_update(payload, rule_id):
             st.rerun() # Closes the modal without doing anything
 
 
+def _generate_rule_description(rule: dict) -> str:
+    """Builds a human-readable description from the rule's live parameters.
+
+    POC-friendly stand-in for a real editable description: instead of relying
+    on the static `rule_description` column (which drifts out of sync once
+    thresholds/intervals are changed), this composes the sentence fresh from
+    whatever is currently configured, so it's always accurate.
+    """
+    rule_name = rule.get('rule_name', 'This rule')
+    rule_type = rule.get('rule_type')
+    action = rule.get('action', 'FLAG')
+    threshold = rule.get('threshold_value')
+    interval_val = rule.get('time_interval_value')
+    interval_unit = rule.get('time_interval_unit')
+
+    if rule.get('rule_id') == 'R001':
+        return f"Flags P2 iPhone 16 orders for **{action}** based on configured velocity checks."
+
+    if 'blacklist' in rule_name.lower():
+        return f"Automatically applies **{action}** to any order matching a blacklisted entity."
+
+    if rule_type in ('VELOCITY', 'BEHAVIORAL') and threshold is not None and interval_val is not None:
+        unit_label = str(interval_unit).lower() if interval_unit else "interval"
+        return (
+            f"Triggers **{action}** when orders exceed **{threshold}** "
+            f"within **{interval_val} {unit_label}(s)**."
+        )
+
+    if rule_type == 'LINKAGE' and threshold is not None:
+        return f"Triggers **{action}** when **{threshold}** or more linked entities are detected on an order."
+
+    return f"Triggers **{action}** based on the `{rule_type}` detection logic configured for this rule."
+
+
 def _tab_rule_management():
     """Provides a dynamic form to update rule actions, thresholds, and time windows."""
     st.markdown("### ⚙️ Rule Configuration Management")
@@ -528,7 +562,7 @@ def _tab_rule_management():
     
     st.divider()
     
-    st.markdown(f"**Description:** {selected_rule['rule_description']}")
+    st.markdown(f"**Description:** {_generate_rule_description(selected_rule)}")
     st.markdown(f"**Detection Type:** `{selected_rule['rule_type']}`")
     
     is_r001 = selected_rule['rule_id'] == 'R001'
@@ -537,7 +571,7 @@ def _tab_rule_management():
     # 3. Edit Form
     with st.form(f"edit_form_{selected_rule['rule_id']}"):
         st.subheader("Configuration Parameters")
-        
+
         # 4. Handle Action Locking
         if is_r001:
             st.info("🔒 **Action is locked to HOLD** for the P2 iPhone 16 Rule.")
