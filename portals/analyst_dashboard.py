@@ -106,7 +106,7 @@ def confirm_approve_order(analyst_id, order_id, comments):
                 json={
                     "approved_at": str(datetime.now()),
                     "reviewed_by": analyst_id,
-                    "review_comments": comments or None,
+                    "review_comments": comments,
                     "order_id": order_id,
                 },
             )
@@ -160,7 +160,7 @@ def confirm_batch_approve(analyst_id, order_ids, comments):
                 json={
                     "approved_at": str(datetime.now()),
                     "reviewed_by": analyst_id,
-                    "review_comments": comments or None,
+                    "review_comments": comments,
                     "order_ids": order_ids,
                 },
             )
@@ -335,12 +335,15 @@ def render_queue_and_review(analyst: dict):
     if selected_order_ids:
         st.markdown(f"#### ⚡ Batch Actions ({len(selected_order_ids)} selected)")
         with st.container(border=True):
-            batch_comments = st.text_area("Batch Review Comments (applied to all selected orders, required for rejection)", key="batch_comments")
+            batch_comments = st.text_area("Batch Review Comments (applied to all selected orders, required)", key="batch_comments")
             
             col_batch_app, col_batch_rej = st.columns(2)
             with col_batch_app:
                 if st.button("✅ Approve Selected", type="primary", use_container_width=True):
-                    confirm_batch_approve(analyst["analyst_id"], selected_order_ids, batch_comments)
+                    if not batch_comments.strip():
+                        st.warning("Please provide a reason in the comments before approving.")
+                    else:
+                        confirm_batch_approve(analyst["analyst_id"], selected_order_ids, batch_comments)
             with col_batch_rej:
                 if st.button("🚫 Reject Selected", use_container_width=True):
                     if not batch_comments.strip():
@@ -403,12 +406,15 @@ def render_queue_and_review(analyst: dict):
     # --- SINGLE ACTION DECISION ---
     st.markdown("#### ⚖️ Analyst Decision")
     with st.container(border=True):
-        comments = st.text_area("Review Comments (required for rejection, optional for approval)", key=f"comments_{order_id}")
+        comments = st.text_area("Review Comments (required)", key=f"comments_{order_id}")
 
         col_approve, col_reject = st.columns(2)
         with col_approve:
             if st.button("✅ Approve Order", type="primary", key=f"approve_{order_id}", use_container_width=True):
-                confirm_approve_order(analyst["analyst_id"], order_id, comments)
+                if not comments.strip():
+                    st.warning("Please provide a reason in the comments before approving.")
+                else:
+                    confirm_approve_order(analyst["analyst_id"], order_id, comments)
                 
         with col_reject:
             if st.button("🚫 Reject Order", key=f"reject_{order_id}", use_container_width=True):
