@@ -20,6 +20,22 @@ DB_ACTION_TO_STATUS: Dict[str, str] = {
 # In-memory cache to minimize database hits[cite: 7]
 _RULE_METADATA_CACHE: Dict[str, Dict[str, Any]] = {}
 
+# Priority tiers for conflict resolution. Lower number = decided first.
+# Tier 0: blacklist rules always win regardless of any other rule's configured action.
+# Tier 1: iPhone/program rule is next.
+# Tier 2 (default): every other rule — resolved amongst themselves as before.
+RULE_TIER: Dict[str, int] = {
+    "R007": 0,  # Blacklisted IP
+    "R011": 0,  # Blacklisted phone
+    "R012": 0,  # Blacklisted email
+    "R001": 1,  # P2 iPhone 16 rule
+}
+DEFAULT_RULE_TIER = 2
+
+
+def _tier_for(rule_id: str) -> int:
+    return RULE_TIER.get(rule_id, DEFAULT_RULE_TIER)
+
 def _get_rule_metadata(cursor: Any, rule_id: str) -> Dict[str, Any]:
     """Fetches rule actions and intervals directly from the master.rule_master table[cite: 7]."""
     if rule_id not in _RULE_METADATA_CACHE:
@@ -83,14 +99,20 @@ def evaluate_order(cursor: Any, ctx: Dict[str, Any]) -> Dict[str, Any]:
     final_status = "PENDING_REVIEW"
     delay_minutes = 0
 
-    # Resolve strictness conflict[cite: 7]
-    for rule in triggered:
+    # Every triggered rule is recorded and contributes to the combined reason,
+    # but only the highest-priority TIER decides the final status/delay.
+    # Tier 0 (blacklists) beats tier 1 (iPhone rule) beats tier 2 (everything else).
+    min_tier = min(_tier_for(rule["rule_id"]) for rule in triggered)
+    deciding_rules = [rule for rule in triggered if _tier_for(rule["rule_id"]) == min_tier]
+
+    # Resolve strictness conflict within the deciding tier only[cite: 7]
+    for rule in deciding_rules:
         meta = _get_rule_metadata(cursor, rule["rule_id"])
         action = meta["action"]
-        
+
         if STATUS_PRIORITY[action] > STATUS_PRIORITY[final_status]:
             final_status = action
-            
+
         if action == "ON_HOLD":
             delay_minutes = max(delay_minutes, meta["delay_minutes"])
 
@@ -98,6 +120,8 @@ def evaluate_order(cursor: Any, ctx: Dict[str, Any]) -> Dict[str, Any]:
     if final_status == "REJECTED":
         delay_minutes = 0
 
+    # Combined reason includes ALL triggered rules (order passes through every rule),
+    # even though only the top-priority tier drives the status decision.
     combined_reason = "; ".join(rule["rule_description"] for rule in triggered)
     is_fraud = final_status == "REJECTED"
 

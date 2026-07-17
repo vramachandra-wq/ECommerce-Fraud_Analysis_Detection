@@ -157,12 +157,26 @@ def _order_form():
 
     st.divider()
     st.markdown("#### 👤 Contact Details")
+    # Email and phone are pulled straight from master.customers and are NOT
+    # editable at checkout. This isn't just a UX choice — it keeps the
+    # blacklist rule checks (R011/R012) honest, since a customer could
+    # otherwise type in a different phone/email to dodge those checks.
+    name = customer["customer_name"]
+    email = customer["email"]
+    phone = customer["phone_number"] or ""
+
     col1, col2 = st.columns(2)
     with col1:
-        name = st.text_input("Name", value=customer["customer_name"])
-        email = st.text_input("Email", value=customer["email"])
+        st.text_input("Name", value=name, disabled=True)
+        st.text_input("Email", value=email, disabled=True)
     with col2:
-        phone = st.text_input("Phone", value=customer["phone_number"] or "")
+        st.text_input("Phone", value=phone, disabled=True)
+
+    if not phone:
+        st.warning(
+            "No phone number on file for your account. Please contact support "
+            "to add one before placing an order."
+        )
 
     st.divider()
     st.markdown("#### 📍 Delivery Address")
@@ -212,6 +226,8 @@ def _order_form():
             errors.append("Name is required.")
         if not email.strip() or "@" not in email:
             errors.append("A valid email is required.")
+        if not phone.strip():
+            errors.append("No phone number on file. Please contact support to add one before ordering.")
         
         if not street.strip() or not city.strip() or not state.strip() or not zip_code.strip():
             errors.append("Complete delivery address (Street, City, State, and ZIP Code) is required.")
@@ -246,7 +262,8 @@ def _order_form():
                         "amount": total,
                         "ip_address": ip_address.strip(),
                         "device_id": device_id,
-                        "email": email.strip(),
+                        "email": email,
+                        "phone_number": phone,
                         "address": formatted_address,
                         "order_timestamp": order_timestamp,
                     }
