@@ -1,6 +1,5 @@
 import streamlit as st
 from ui import apply_theme, render_app_shell
-from ui.i18n import t, language_toggle
 from portals.analyst_dashboard import render as render_dashboard
 from portals.admin_panel import render as render_admin_panel
 from portals.ai_chatbot import render as render_ai_chatbot
@@ -22,15 +21,15 @@ from auth.analyst_auth import (
 )
 
 def _login_form():
-    st.title(t("internal_brand"))
-    st.subheader(t("employee_login"))
+    st.title("🏢 Metro Cart Internal")
+    st.subheader("Employee Login")
     
     # Note: Streamlit's st.form doesn't natively support a 'width' argument, 
     # but left it as you had it in case you are using a custom wrapper.
     with st.form("analyst_login"):
-        username = st.text_input(t("username"))
-        password = st.text_input(t("password"), type="password")
-        submitted = st.form_submit_button(t("log_in"), use_container_width=False)
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Log In", use_container_width=False)
 
     if submitted:
         with get_cursor() as (conn, cur):
@@ -43,7 +42,7 @@ def _login_form():
                 st.session_state.admin = user
             st.rerun()
         else:
-            st.error(t("invalid_login_analyst"))
+            st.error("Invalid username or password.")
 
 def main():
     st.set_page_config(
@@ -51,8 +50,7 @@ def main():
         layout="wide"
     )
     apply_theme()
-    language_toggle()
-    render_app_shell(t("internal_app_title"), t("internal_app_subtitle"))
+    render_app_shell("Metro Cart PRO", "Fraud Analyst Workspace")
 
     # Render main login if the base analyst session is missing
     if "analyst" not in st.session_state:
@@ -62,10 +60,10 @@ def main():
     user_data = st.session_state.analyst
     
     # Centralized Sidebar & Logout
-    st.sidebar.title(t("internal_brand"))
-    st.sidebar.write(t("welcome_user", name=user_data.get('employee_name', 'Employee')))
+    st.sidebar.title("🏢 Metro Cart Internal")
+    st.sidebar.write(f"Welcome, **{user_data.get('employee_name', 'Employee')}**")
     
-    if st.sidebar.button(t("log_out"), use_container_width=True):
+    if st.sidebar.button("Log Out", use_container_width=True):
         st.session_state.clear() # Clears all auth keys safely
         st.rerun()
         
@@ -86,20 +84,13 @@ def main():
     # 3. Add the Power BI page to the available tuple to check against granted permissions
     available = [p for p in ALL_PAGES if p in granted]
 
-    nav_labels = {
-        PAGE_FRAUD_DASHBOARD: t("nav_fraud_dashboard"),
-        PAGE_ADMIN_PANEL: t("nav_admin_panel"),
-        PAGE_POWER_BI: t("nav_power_bi"),
-        PAGE_AI_CHATBOT: t("nav_ai_chatbot"),
-    }
-
     if not available:
-        st.warning(t("no_page_access"))
+        st.warning("You don't have access to any pages yet. Contact an Admin to request access.")
         return
 
     if len(available) > 1:
-        choice_label = st.sidebar.radio(t("nav_title"), [nav_labels[p] for p in available])
-        choice = next(p for p in available if nav_labels[p] == choice_label)
+        choice_label = st.sidebar.radio("Navigation", [PAGE_LABELS[p] for p in available])
+        choice = next(p for p in available if PAGE_LABELS[p] == choice_label)
     else:
         choice = available[0]
 

@@ -25,7 +25,6 @@ from utils.queries import (
     get_recent_orders,
     get_rule_stats
 )
-from ui.i18n import t, cur_sym
 
 
 def _inject_tab_bar_css():
@@ -147,30 +146,30 @@ def confirm_whitelist_action(endpoint: str, payload: dict, entity_label: str):
 
 
 def _tab_user_management():
-    st.markdown(t("user_management"))
-    st.caption(t("user_mgmt_caption"))
+    st.markdown("### 👥 User Management")
+    st.caption("Create new analyst profiles and monitor current team performance.")
 
-    with st.expander(t("create_analyst_profile"), expanded=True):
+    with st.expander("➕ Create New Analyst Profile", expanded=True):
         with st.form("create_analyst"):
             col1, col2 = st.columns(2)
             with col1:
-                analyst_id = st.text_input(t("analyst_id"), placeholder="e.g. A2")
-                employee_name = st.text_input(t("employee_name"), placeholder="e.g. Jane Doe")
+                analyst_id = st.text_input("Analyst ID", placeholder="e.g. A2")
+                employee_name = st.text_input("Employee Name", placeholder="e.g. Jane Doe")
             with col2:
-                username = st.text_input(t("username"), placeholder="e.g. jdoe")
-                password = st.text_input(t("password"), type="password")
+                username = st.text_input("Username", placeholder="e.g. jdoe")
+                password = st.text_input("Password", type="password")
             
-            role = st.selectbox(t("role"), ["Fraud Analyst", "Senior Fraud Analyst", "Admin"])
+            role = st.selectbox("Role", ["Fraud Analyst", "Senior Fraud Analyst", "Admin"])
             
             st.divider()
-            confirm = st.checkbox(t("confirm_create_analyst_chk"))
-            submitted = st.form_submit_button(t("create_analyst"), type="primary")
+            confirm = st.checkbox("⚠️ I confirm that I want to create this analyst profile.")
+            submitted = st.form_submit_button("Create Analyst", type="primary")
 
     if submitted:
         if not all([analyst_id, employee_name, username, password]):
-            st.error(t("err_all_fields_required"))
+            st.error("All fields are required.")
         elif not confirm:
-            st.warning(t("warn_confirm_checkbox"))
+            st.warning("Please check the confirmation box to proceed with creation.")
         else:
             payload = {
                 "analyst_id": analyst_id,
@@ -182,34 +181,30 @@ def _tab_user_management():
             confirm_create_analyst(payload)
 
 
-    st.markdown(t("analyst_performance"))
+    st.markdown("#### 📈 Analyst Performance")
     with get_cursor() as (conn, cur):
         perf_df = get_analyst_performance(cur)
     st.dataframe(perf_df, use_container_width=True, hide_index=True)
 
 
 def _tab_blacklists(analyst: dict):
-    st.markdown(t("entity_blacklist_mgmt"))
-    st.caption(t("blacklist_caption"))
+    st.markdown("### 🛡️ Entity Blacklist Management")
+    st.caption("Check, blacklist, or whitelist IP addresses, phone numbers, and emails.")
     
-    entity_options = [t("entity_ip"), t("entity_phone"), t("entity_email")]
-    if st.session_state.get("blacklist_entity_type") not in entity_options:
-        st.session_state.blacklist_entity_type = entity_options[0]
-
     entity_type = st.radio(
-        t("entity_type"),
-        entity_options,
+        "Entity Type",
+        ["🌐 IP Address", "📱 Phone Number", "📧 Email"],
         horizontal=True,
         label_visibility="collapsed",
         key="blacklist_entity_type",
     )
 
     # --- IP SECTION ---
-    if entity_type == t("entity_ip"):
+    if entity_type == "🌐 IP Address":
         col_lookup, _ = st.columns([1, 1])
         with col_lookup:
-            ip_address = st.text_input(t("ip_lookup"), placeholder="e.g. 203.0.113.111", key="ip_lookup")
-            if st.button(t("check_ip"), key="btn_check_ip"):
+            ip_address = st.text_input("IP Lookup", placeholder="e.g. 203.0.113.111", key="ip_lookup")
+            if st.button("🔍 Check IP", key="btn_check_ip"):
                 st.session_state.blacklist_checked_ip = ip_address.strip()
 
         checked_ip = st.session_state.get("blacklist_checked_ip")
@@ -221,23 +216,23 @@ def _tab_blacklists(analyst: dict):
             if entry:
                 st.error(f"🚫 **{checked_ip}** is currently blacklisted.")
                 st.write(f"**Reason:** {entry['reason']} | **By:** {entry['blacklisted_by_name'] or entry['blacklisted_by']} | **Date:** {str(entry['blacklisted_at']).split()[0]}")
-                if st.button(t("whitelist_ip"), type="primary", key="whitelist_ip"):
+                if st.button("Whitelist IP", type="primary", key="whitelist_ip"):
                     payload = {"removed_by": analyst["analyst_id"], "removed_at": str(datetime.now()), "blacklist_id": entry["blacklist_id"]}
                     confirm_whitelist_action("whitelist-ip", payload, f"IP {checked_ip}")
             else:
                 st.success(f"✅ **{checked_ip}** is safe.")
                 with st.form("form_bl_ip"):
-                    reason = st.text_area(t("reason"))
-                    if st.form_submit_button(t("blacklist_ip"), type="primary") and reason:
+                    reason = st.text_area("Reason")
+                    if st.form_submit_button("Blacklist IP", type="primary") and reason:
                         payload = {"ip_address": checked_ip, "reason": reason, "blacklisted_by": analyst["analyst_id"]}
                         confirm_blacklist_action("blacklist-ip", payload, f"IP {checked_ip}")
 
     # --- PHONE SECTION ---
-    elif entity_type == t("entity_phone"):
+    elif entity_type == "📱 Phone Number":
         col_lookup, _ = st.columns([1, 1])
         with col_lookup:
-            phone = st.text_input(t("phone_lookup"), placeholder="e.g. +919876543210", key="phone_lookup")
-            if st.button(t("check_phone"), key="btn_check_phone"):
+            phone = st.text_input("Phone Lookup", placeholder="e.g. +919876543210", key="phone_lookup")
+            if st.button("🔍 Check Phone", key="btn_check_phone"):
                 st.session_state.blacklist_checked_phone = phone.strip()
 
         checked_phone = st.session_state.get("blacklist_checked_phone")
@@ -249,14 +244,14 @@ def _tab_blacklists(analyst: dict):
             if entry:
                 st.error(f"🚫 **{checked_phone}** is currently blacklisted.")
                 st.write(f"**Reason:** {entry['reason']} | **By:** {entry['blacklisted_by_name'] or entry['blacklisted_by']} | **Date:** {str(entry['blacklisted_at']).split()[0]}")
-                if st.button(t("whitelist_phone"), type="primary", key="whitelist_phone"):
+                if st.button("Whitelist Phone", type="primary", key="whitelist_phone"):
                     payload = {"removed_by": analyst["analyst_id"], "removed_at": str(datetime.now()), "blacklist_id": entry["blacklist_id"]}
                     confirm_whitelist_action("whitelist-phone", payload, f"Phone {checked_phone}")
             else:
                 st.success(f"✅ **{checked_phone}** is safe.")
                 with st.form("form_bl_phone"):
-                    reason = st.text_area(t("reason"))
-                    if st.form_submit_button(t("blacklist_phone"), type="primary") and reason:
+                    reason = st.text_area("Reason")
+                    if st.form_submit_button("Blacklist Phone", type="primary") and reason:
                         payload = {"phone_number": checked_phone, "reason": reason, "blacklisted_by": analyst["analyst_id"]}
                         confirm_blacklist_action("blacklist-phone", payload, f"Phone {checked_phone}")
 
@@ -264,8 +259,8 @@ def _tab_blacklists(analyst: dict):
     else:
         col_lookup, _ = st.columns([1, 1])
         with col_lookup:
-            email = st.text_input(t("email_lookup"), placeholder="e.g. fraud@example.com", key="email_lookup")
-            if st.button(t("check_email"), key="btn_check_email"):
+            email = st.text_input("Email Lookup", placeholder="e.g. fraud@example.com", key="email_lookup")
+            if st.button("🔍 Check Email", key="btn_check_email"):
                 st.session_state.blacklist_checked_email = email.strip()
 
         checked_email = st.session_state.get("blacklist_checked_email")
@@ -277,27 +272,27 @@ def _tab_blacklists(analyst: dict):
             if entry:
                 st.error(f"🚫 **{checked_email}** is currently blacklisted.")
                 st.write(f"**Reason:** {entry['reason']} | **By:** {entry['blacklisted_by_name'] or entry['blacklisted_by']} | **Date:** {str(entry['blacklisted_at']).split()[0]}")
-                if st.button(t("whitelist_email"), type="primary", key="whitelist_email"):
+                if st.button("Whitelist Email", type="primary", key="whitelist_email"):
                     payload = {"removed_by": analyst["analyst_id"], "removed_at": str(datetime.now()), "blacklist_id": entry["blacklist_id"]}
                     confirm_whitelist_action("whitelist-email", payload, f"Email {checked_email}")
             else:
                 st.success(f"✅ **{checked_email}** is safe.")
                 with st.form("form_bl_email"):
-                    reason = st.text_area(t("reason"))
-                    if st.form_submit_button(t("blacklist_email"), type="primary") and reason:
+                    reason = st.text_area("Reason")
+                    if st.form_submit_button("Blacklist Email", type="primary") and reason:
                         payload = {"email": checked_email, "reason": reason, "blacklisted_by": analyst["analyst_id"]}
                         confirm_blacklist_action("blacklist-email", payload, f"Email {checked_email}")
 
 
 def _tab_permissions(analyst: dict):
-    st.markdown(t("analyst_page_permissions"))
-    st.caption(t("permissions_caption"))
+    st.markdown("### 🔐 Analyst Page Permissions")
+    st.caption("Grant or revoke access to each page. Admins always have full access and aren't listed here.")
 
     with get_cursor() as (conn, cur):
         analysts = get_permission_matrix(cur)
 
     if not analysts:
-        st.info(t("no_non_admin"))
+        st.info("No non-admin analysts exist yet.")
         return
 
     analyst_options = {
@@ -307,7 +302,7 @@ def _tab_permissions(analyst: dict):
     
     col_select, _ = st.columns([1, 1])
     with col_select:
-        selected_label = st.selectbox(t("select_analyst_edit"), options=list(analyst_options.keys()))
+        selected_label = st.selectbox("Select Analyst to Edit", options=list(analyst_options.keys()))
     
     selected_analyst = analyst_options[selected_label]
     target_id = selected_analyst["analyst_id"]
@@ -328,11 +323,11 @@ def _tab_permissions(analyst: dict):
             
         st.divider()
         confirm_perms = st.checkbox(f"⚠️ I confirm these permission changes for {selected_analyst['employee_name']}.")
-        submitted = st.form_submit_button(t("save_permissions"), type="primary")
+        submitted = st.form_submit_button("Save Permissions", type="primary")
 
     if submitted:
         if not confirm_perms:
-            st.warning(t("warn_save_perms"))
+            st.warning("Please check the confirmation box to save these permissions.")
         else:
             with st.spinner(f"Updating permissions for {selected_analyst['employee_name']}..."):
                 response = _send_api_request(
@@ -354,18 +349,18 @@ def _tab_permissions(analyst: dict):
 
 
 def _tab_analytics():
-    st.markdown(t("recent_orders"))
+    st.markdown("### Recent Orders")
     with get_cursor() as (conn, cur):
         kpis = get_kpis(cur)
         recent_df = get_recent_orders(cur)
 
     # Top KPI Metrics
     col1, col2, col3 = st.columns(3)
-    col1.metric(t("total_orders"), f"{kpis['total_orders']:,}")
-    col2.metric(t("total_fraud_orders"), f"{kpis['total_fraud']:,}")
+    col1.metric("Total Orders", f"{kpis['total_orders']:,}")
+    col2.metric("Total Fraud Orders", f"{kpis['total_fraud']:,}")
     
     fraud_rate = (kpis['total_fraud'] / kpis['total_orders'] * 100) if kpis['total_orders'] > 0 else 0
-    col3.metric(t("fraud_rate"), f"{fraud_rate:.2f}%")
+    col3.metric("Fraud Rate", f"{fraud_rate:.2f}%")
 
     st.divider()
     
@@ -387,7 +382,7 @@ def _tab_analytics():
         with get_cursor() as (conn, cur):
             trend_df = get_orders_over_time(cur)
         if trend_df.empty:
-            st.info(t("no_orders_this_month"))
+            st.info("No orders placed yet this month.")
         else:
             trend_fig = px.line(
                 trend_df,
@@ -400,8 +395,8 @@ def _tab_analytics():
             trend_fig.update_yaxes(title="Orders", rangemode="tozero")
             st.plotly_chart(trend_fig, use_container_width=True)
 
-    st.markdown(t("recent_orders_live"))
-    st.caption(t("recent_orders_caption"))
+    st.markdown("#### 🕒 Recent Orders")
+    st.caption("Live view of the latest system transactions.")
     
     if not recent_df.empty:
         # Define columns mapped exactly to the master.orders schema
@@ -438,7 +433,7 @@ def _tab_analytics():
                 "amount": st.column_config.NumberColumn(
                     "Total Amount",
                     help="Transaction value",
-                    format=f"{cur_sym()} %.2f"
+                    format="₹ %.2f"
                 ),
                 "order_status": st.column_config.TextColumn("Status"),
                 "delay_minutes": st.column_config.NumberColumn("Delay (mins)"),
@@ -452,13 +447,13 @@ def _tab_analytics():
             }
         )
     else:
-        st.info(t("no_recent_orders"))
+        st.info("No recent orders found.")
 
 
 def _tab_rule_stats():
     """Displays visual analytics and a table for how often rules are firing."""
-    st.markdown(t("rule_trigger_stats"))
-    st.caption(t("rule_stats_caption"))
+    st.markdown("### 📋 Rule Trigger Statistics")
+    st.caption("Visibility into which automated fraud rules are firing most frequently.")
     
     with get_cursor() as (conn, cur):
         rule_df = get_rule_stats(cur)
@@ -476,7 +471,7 @@ def _tab_rule_stats():
         
         st.dataframe(rule_df, use_container_width=True, hide_index=True)
     else:
-        st.info(t("no_rule_data"))
+        st.info("No rule trigger data available to display.")
 
 
 @st.dialog("Confirm Rule Update")
@@ -542,8 +537,8 @@ def _generate_rule_description(rule: dict) -> str:
 
 def _tab_rule_management():
     """Provides a dynamic form to update rule actions, thresholds, and time windows."""
-    st.markdown(t("rule_config_mgmt"))
-    st.caption(t("rule_config_caption"))
+    st.markdown("### ⚙️ Rule Configuration Management")
+    st.caption("Adjust actions, thresholds, and time windows for e-commerce fraud detection rules.")
     
     # 1. Fetch current rules 
     with get_cursor() as (conn, cur):
@@ -557,12 +552,12 @@ def _tab_rule_management():
         rules_data = [dict(zip(cols, row)) for row in cur.fetchall()]
         
     if not rules_data:
-        st.info(t("no_rules_found"))
+        st.info("No rules found in the database.")
         return
         
     # 2. UI: Select a rule
     rule_options = {f"{r['rule_id']} - {r['rule_name']}": r for r in rules_data}
-    selected_rule_label = st.selectbox(t("select_rule_modify"), options=list(rule_options.keys()))
+    selected_rule_label = st.selectbox("Select Rule to Modify", options=list(rule_options.keys()))
     selected_rule = rule_options[selected_rule_label]
     
     st.divider()
@@ -575,14 +570,14 @@ def _tab_rule_management():
     
     # 3. Edit Form
     with st.form(f"edit_form_{selected_rule['rule_id']}"):
-        st.subheader(t("configuration_parameters"))
+        st.subheader("Configuration Parameters")
 
         # 4. Handle Action Locking
         if is_r001:
-            st.info(t("action_locked_hold"))
+            st.info("🔒 **Action is locked to HOLD** for the P2 iPhone 16 Rule.")
             new_action = 'HOLD'
         elif is_blacklist:
-            st.error(t("action_locked_rejected"))
+            st.error("🔒 **Action is strictly locked to REJECTED** for Blacklist entities.")
             new_action = 'REJECTED'
         else:
             col_action, _ = st.columns([1, 1])
@@ -590,7 +585,7 @@ def _tab_rule_management():
                 actions = ['HOLD', 'REVIEW', 'REJECTED', 'PASS']
                 current_action = selected_rule['action']
                 action_idx = actions.index(current_action) if current_action in actions else 0
-                new_action = st.selectbox(t("rule_action"), actions, index=action_idx)
+                new_action = st.selectbox("Rule Action", actions, index=action_idx)
         
         # 5. Handle Metrics (Split logic for Linkage vs Velocity/Behavioral)
         requires_interval = (selected_rule['rule_type'] in ['VELOCITY', 'BEHAVIORAL'] or is_r001) and not is_blacklist
@@ -601,18 +596,18 @@ def _tab_rule_management():
         with col_thresh:
             if requires_threshold:
                 current_threshold = float(selected_rule['threshold_value']) if selected_rule['threshold_value'] is not None else 0.0
-                new_threshold = st.number_input(t("threshold"), min_value=0.0, value=current_threshold, step=1.0)
+                new_threshold = st.number_input("Threshold", min_value=0.0, value=current_threshold, step=1.0)
             else:
-                st.info(t("threshold_na"))
+                st.info("Threshold N/A")
                 new_threshold = None
                 
         with col_val:
             if requires_interval:
                 current_interval_val = int(selected_rule['time_interval_value']) if selected_rule['time_interval_value'] is not None else 1
-                new_interval_val = st.number_input(t("time_interval"), min_value=1, value=current_interval_val, step=1)
+                new_interval_val = st.number_input("Time Interval", min_value=1, value=current_interval_val, step=1)
             else:
                 if not requires_threshold: 
-                    st.info(t("interval_na"))
+                    st.info("Interval N/A")
                 new_interval_val = None
                 
         with col_unit:
@@ -620,11 +615,11 @@ def _tab_rule_management():
                 units = ['MINUTE', 'HOUR', 'DAY', 'WEEK']
                 current_unit = selected_rule['time_interval_unit'] if selected_rule['time_interval_unit'] else 'MINUTE'
                 unit_idx = units.index(current_unit) if current_unit in units else 0
-                new_unit = st.selectbox(t("unit"), units, index=unit_idx)
+                new_unit = st.selectbox("Unit", units, index=unit_idx)
             else:
                 new_unit = None
                 
-        submit = st.form_submit_button(t("review_changes"), type="primary")
+        submit = st.form_submit_button("Review Changes", type="primary")
         
         # 6. Trigger the Modal Confirmation
         if submit:
@@ -648,10 +643,10 @@ def sync_database_holds():
 def render():
     analyst = st.session_state.get("analyst")
     if not analyst:
-        st.error(t("access_denied"))
+        st.error("Access Denied. Please log in through the main portal.")
         return
 
-    st.header(t("admin_control_panel"))
+    st.header(f"⚙️ Admin Control Panel")
     st.caption(f"Logged in as: **{analyst['employee_name']}** ({analyst['role']})")
 
     # Run the cached synchronization task
@@ -660,15 +655,15 @@ def render():
     _inject_tab_bar_css()
 
     TAB_LABELS = [
-        t("tab_review_queue"),
-        t("tab_blacklists"),
-        t("tab_permissions"),
-        t("tab_user_mgmt"),
-        t("tab_analytics"),
-        t("tab_rule_mgmt"),
+        "⚖️ Review Queue (Override)",
+        "🛡️ Entity Blacklists",
+        "🔐 Analyst Permissions",
+        "👥 User Management",
+        "📊 Analytics",
+        "📋 Rule Management",
     ]
 
-    if "admin_active_tab" not in st.session_state or st.session_state.admin_active_tab not in TAB_LABELS:
+    if "admin_active_tab" not in st.session_state:
         st.session_state.admin_active_tab = TAB_LABELS[0]
 
     with st.container(key="admin_tab_bar"):

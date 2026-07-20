@@ -23,7 +23,6 @@ from utils.queries import (
     list_products, 
     list_programs
 )
-from ui.i18n import t, cur_sym
 
 
 def _build_api_url(path: str) -> str:
@@ -55,10 +54,10 @@ def _send_api_request(method: str, path: str, **kwargs):
 
 @st.dialog("Confirm Place Order")
 def confirm_place_order(payload: dict, customer_session_key: str = "customer"):
-    st.markdown(t("order_summary"))
+    st.markdown("### Order Summary — Metro Cart")
     # Show a compact summary
     st.write(f"**Customer:** {payload.get('customer_name')} — **Email:** {payload.get('email')}")
-    st.write(f"**Product:** {payload.get('product_name')} x{payload.get('quantity')} — **Amount:** {cur_sym()}{payload.get('amount'):,.2f}")
+    st.write(f"**Product:** {payload.get('product_name')} x{payload.get('quantity')} — **Amount:** ₹{payload.get('amount'):,.2f}")
     st.write(f"**Delivery Address:** {payload.get('address')}")
     st.write(f"**IP:** {payload.get('ip_address')} — **Device:** {payload.get('device_id')}")
     st.divider()
@@ -66,9 +65,9 @@ def confirm_place_order(payload: dict, customer_session_key: str = "customer"):
     with col1:
         # Use a distinct key and label to avoid widget collisions with the
         # order form's "Complete Purchase" button which opens this dialog.
-        if st.button(t("confirm_purchase"), type="primary", use_container_width=True, key="confirm_purchase"):
+        if st.button("Confirm Purchase", type="primary", use_container_width=True, key="confirm_purchase"):
             try:
-                with st.spinner(t("completing_purchase")):
+                with st.spinner("Completing your purchase..."):
                     resp = _send_api_request("post", "create-order", json=payload)
                 if not resp:
                     st.error("Failed to call order API. See logs or backend.")
@@ -91,7 +90,7 @@ def confirm_place_order(payload: dict, customer_session_key: str = "customer"):
                 st.error(f"Error while completing order: {exc}")
                 return
     with col2:
-        if st.button(t("cancel"), use_container_width=True):
+        if st.button("Cancel", use_container_width=True):
             st.rerun()
 
 
@@ -115,12 +114,12 @@ def _login_form():
         "images//banner_3.png",
         use_container_width=True,
     )
-    st.subheader(t("customer_login"))
+    st.subheader("Customer Login")
     
     with st.form("customer_login"):
-        user_id = st.text_input(t("user_id"), placeholder="e.g. U1001")
-        password = st.text_input(t("password"), type="password")
-        submitted = st.form_submit_button(t("log_in"), use_container_width=True)
+        user_id = st.text_input("User ID", placeholder="e.g. U1001")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Log In", use_container_width=True)
 
     if submitted:
         with get_cursor() as (conn, cur):
@@ -129,7 +128,7 @@ def _login_form():
             st.session_state.customer = customer
             st.rerun()
         else:
-            st.error(t("invalid_login"))
+            st.error("Invalid user ID or password. Please try again.")
 
 
 def _order_form():
@@ -138,26 +137,26 @@ def _order_form():
     
     col_header, col_logout = st.columns([0.85, 0.15])
     with col_header:
-        st.title(t("customer_app_title"))
-        st.subheader(t("welcome_back", name=customer['customer_name']))
+        st.title("🛒 Metro Cart")
+        st.subheader(f"Welcome back, {customer['customer_name']}!")
         st.image(
         "images//banner_2.png",
         use_container_width=True,
     )
     with col_logout:
-        if st.button(t("log_out"), key="customer_logout", use_container_width=True):
+        if st.button("Log Out", key="customer_logout", use_container_width=True):
             del st.session_state.customer
             st.rerun()
 
     # Load cached static options
     products, programs, devices = fetch_form_options()
 
-    product_options = {f"{name} — {cur_sym()}{price:,.2f}": (pid, name, cat, price) for pid, name, cat, price in products}
+    product_options = {f"{name} — ₹{price:,.2f}": (pid, name, cat, price) for pid, name, cat, price in products}
     program_options = {f"{pid} — {name}": pid for pid, name in programs}
     device_options = {f"{did} — {name}": did for did, name, dtype in devices}
 
     st.divider()
-    st.markdown(f"#### {t('contact_details')}")
+    st.markdown("#### 👤 Contact Details")
     # Email and phone are pulled straight from master.customers and are NOT
     # editable at checkout. This isn't just a UX choice — it keeps the
     # blacklist rule checks (R011/R012) honest, since a customer could
@@ -168,38 +167,39 @@ def _order_form():
 
     col1, col2 = st.columns(2)
     with col1:
-        st.text_input(t("name"), value=name, disabled=True)
-        st.text_input(t("email"), value=email, disabled=True)
+        st.text_input("Name", value=name, disabled=True)
+        st.text_input("Email", value=email, disabled=True)
     with col2:
-        st.text_input(t("phone"), value=phone, disabled=True)
+        st.text_input("Phone", value=phone, disabled=True)
 
     if not phone:
         st.warning(
-            t("no_phone_warning")
+            "No phone number on file for your account. Please contact support "
+            "to add one before placing an order."
         )
 
     st.divider()
-    st.markdown(f"#### {t('delivery_address')}")
+    st.markdown("#### 📍 Delivery Address")
     
     col_addr1, col_addr2 = st.columns(2)
     with col_addr1:
-        street = st.text_input(t("street"), value=customer.get("street") or "", placeholder="e.g. 21 MG Road")
-        city = st.text_input(t("city"), value=customer.get("city") or "", placeholder="e.g. Bengaluru")
+        street = st.text_input("Street", value=customer.get("street") or "", placeholder="e.g. 21 MG Road")
+        city = st.text_input("City", value=customer.get("city") or "", placeholder="e.g. Bengaluru")
     with col_addr2:
-        state = st.text_input(t("state"), value=customer.get("state") or "", placeholder="e.g. Karnataka")
-        zip_code = st.text_input(t("zip_code"), value=customer.get("zip_code") or "", placeholder="e.g. 560001")
+        state = st.text_input("State", value=customer.get("state") or "", placeholder="e.g. Karnataka")
+        zip_code = st.text_input("ZIP Code", value=customer.get("zip_code") or "", placeholder="e.g. 560001")
         
-    country = st.text_input(t("country"), value=customer.get("country") or "India")
+    country = st.text_input("Country", value=customer.get("country") or "India")
 
     st.divider()
-    st.markdown(f"#### {t('sim_fields')}")
-    st.caption(t("sim_caption"))
+    st.markdown("#### ⚙️ E-Commerce Demo Simulation Fields")
+    st.caption("IP address, program track, and device are entered manually for testing purposes.")
     col3, col4, col5 = st.columns(3)
     with col3:
-        ip_address = st.text_input(t("ip_address"), placeholder="e.g. 203.0.113.111")
+        ip_address = st.text_input("IP Address", placeholder="e.g. 203.0.113.111")
     with col4:
         program_label = st.selectbox(
-            t("program_track"),
+            "Program Track",
             list(program_options.keys()),
             index=list(program_options.values()).index(customer["program_id"])
             if customer["program_id"] in program_options.values()
@@ -207,40 +207,40 @@ def _order_form():
         )
         program_id = program_options[program_label]
     with col5:
-        device_label = st.selectbox(t("device"), list(device_options.keys()))
+        device_label = st.selectbox("Device", list(device_options.keys()))
         device_id = device_options[device_label]
 
     st.divider()
-    st.markdown(f"#### {t('product_selection')}")
-    product_label = st.selectbox(t("product"), list(product_options.keys()))
+    st.markdown("#### 🛍️ Product Selection")
+    product_label = st.selectbox("Product", list(product_options.keys()))
     product_id, product_name, category, price = product_options[product_label]
-    quantity = st.number_input(t("quantity"), min_value=1, value=1, step=1)
+    quantity = st.number_input("Quantity", min_value=1, value=1, step=1)
 
     total = calculate_total(price, quantity)
     with st.container(border=True):
-        st.metric(t("total_price"), f"{cur_sym()}{total:,.2f}")
+        st.metric("Total Price", f"₹{total:,.2f}")
 
-    if st.button(t("complete_purchase"), type="primary", use_container_width=True, key="open_confirm"):
+    if st.button("Complete Purchase", type="primary", use_container_width=True, key="open_confirm"):
         errors = []
         if not name.strip():
-            errors.append(t("err_name_required"))
+            errors.append("Name is required.")
         if not email.strip() or "@" not in email:
-            errors.append(t("err_email_required"))
+            errors.append("A valid email is required.")
         if not phone.strip():
-            errors.append(t("err_phone_required"))
+            errors.append("No phone number on file. Please contact support to add one before ordering.")
         
         if not street.strip() or not city.strip() or not state.strip() or not zip_code.strip():
-            errors.append(t("err_address_required"))
+            errors.append("Complete delivery address (Street, City, State, and ZIP Code) is required.")
             
         if not ip_address.strip():
-            errors.append(t("err_ip_required"))
+            errors.append("Please enter an IP address.")
             
         if errors:
             for err in errors:
                 st.error(err)
             return
 
-        with st.spinner(t("processing_purchase")):
+        with st.spinner("Processing your Metro Cart purchase..."):
             order_timestamp = datetime.now()
             
             # FORMAT ADDRESS: "street, city, state zip_code"
@@ -322,11 +322,11 @@ def render():
         return
 
     if "last_order_id" in st.session_state:
-        st.title(t("customer_app_title"))
+        st.title("🛒 Metro Cart")
         with st.container(border=True):
-            st.success(t("order_success"))
-            st.metric(t("your_order_id"), st.session_state.last_order_id)
-        if st.button(t("place_another_order"), type="primary", use_container_width=True):
+            st.success("🎉 Order placed successfully. Thank you for shopping at Metro Cart!")
+            st.metric("Your Order ID", st.session_state.last_order_id)
+        if st.button("Place Another Order", type="primary", use_container_width=True):
             del st.session_state.last_order_id
             st.rerun()
         return
