@@ -1,4 +1,5 @@
 .venv/
+.run/
 .env
 data_csv/
 __pycache__/

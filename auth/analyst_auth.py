@@ -1,5 +1,7 @@
 from typing import Optional, Dict, Set, Any
 
+from auth.passwords import upgrade_password_if_needed, verify_password
+
 ANALYST_FIELDS = ["analyst_id", "employee_name", "username", "role"]
 
 # --- PAGE CONFIGURATION ---
@@ -18,28 +20,69 @@ PAGE_LABELS = {
     PAGE_AI_CHATBOT: "AI Chatbot",
 }
 
+ROLE_ADMIN = "Admin"
+ROLE_SENIOR_ANALYST = "Senior Fraud Analyst"
+ROLE_FRAUD_ANALYST = "Fraud Analyst"
+
+CREATABLE_ROLES_ADMIN = [ROLE_FRAUD_ANALYST, ROLE_SENIOR_ANALYST, ROLE_ADMIN]
+CREATABLE_ROLES_NON_ADMIN = [ROLE_FRAUD_ANALYST, ROLE_SENIOR_ANALYST]
+
 
 # --- AUTHENTICATION & AUTHORIZATION ---
 
-def authenticate_analyst(cursor, username: str, password: str) -> Optional[Dict[str, Any]]:
-    """Validates analyst credentials and returns their profile profile if successful."""
+def authenticate_analyst(
+    cursor,
+    username: str,
+    password: str,
+    conn=None,
+) -> Optional[Dict[str, Any]]:
+    """Validates analyst credentials and returns their profile if successful."""
     cursor.execute(
         """
-        SELECT analyst_id, employee_name, username, role
+        SELECT analyst_id, employee_name, username, role, password
         FROM master.analyst_users
-        WHERE username = %s AND password = %s
+        WHERE username = %s
         """,
-        (username, password),
+        (username,),
     )
     row = cursor.fetchone()
     if not row:
         return None
-    return dict(zip(ANALYST_FIELDS, row))
+
+    data = dict(zip(ANALYST_FIELDS + ["password"], row))
+    stored_password = data.pop("password")
+
+    if not verify_password(password, stored_password):
+        return None
+
+    if conn is not None:
+        upgrade_password_if_needed(
+            cursor,
+            conn,
+            table="master.analyst_users",
+            id_column="analyst_id",
+            id_value=data["analyst_id"],
+            plain_password=password,
+            stored_password=stored_password,
+        )
+
+    return data
 
 
 def is_admin(analyst: Dict[str, Any]) -> bool:
     """Checks if the provided analyst profile has Admin privileges."""
-    return analyst is not None and analyst.get("role") == "Admin"
+    return analyst is not None and analyst.get("role") == ROLE_ADMIN
+
+
+def can_create_admin_users(analyst: Dict[str, Any]) -> bool:
+    """Only Admin role may create other Admin accounts."""
+    return is_admin(analyst)
+
+
+def creatable_roles_for(analyst: Dict[str, Any]) -> list:
+    if can_create_admin_users(analyst):
+        return CREATABLE_ROLES_ADMIN
+    return CREATABLE_ROLES_NON_ADMIN
 
 
 def get_granted_pages(cursor, analyst: Dict[str, Any]) -> Set[str]:

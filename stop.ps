@@ -1,0 +1,94 @@
+# Stops FastAPI, Streamlit apps, and the PostgreSQL container.
+# Usage (from project root in PowerShell): .\stop.ps
+
+$ErrorActionPreference = "Stop"
+
+$ProjectRoot = $PSScriptRoot
+Set-Location $ProjectRoot
+
+$RunDir = Join-Path $ProjectRoot ".run"
+$StateFile = Join-Path $RunDir "services.json"
+
+function Write-Step([string]$Message) {
+    Write-Host "==> $Message" -ForegroundColor Cyan
+}
+
+function Get-ComposeCommand {
+    if (Get-Command podman -ErrorAction SilentlyContinue) {
+        return @{ Executable = "podman"; Arguments = @("compose") }
+    }
+    if (Get-Command podman-compose -ErrorAction SilentlyContinue) {
+        return @{ Executable = "podman-compose"; Arguments = @() }
+    }
+    return $null
+}
+
+function Invoke-Compose {
+    param([string[]]$ComposeArgs)
+
+    $compose = Get-ComposeCommand
+    if (-not $compose) {
+        Write-Host "Podman not found; skipping container shutdown." -ForegroundColor Yellow
+        return
+    }
+
+    $args = @($compose.Arguments + $ComposeArgs) | Where-Object { $_ }
+    & $compose.Executable @args
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Warning: compose command returned exit code $LASTEXITCODE" -ForegroundColor Yellow
+    }
+}
+
+function Stop-ProcessTree {
+    param([int]$ProcessId)
+
+    if ($ProcessId -le 0) {
+        return
+    }
+
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.ParentProcessId -eq $ProcessId } |
+        ForEach-Object { Stop-ProcessTree -ProcessId $_.ProcessId }
+
+    Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+}
+
+function Stop-PortListeners {
+    param([int[]]$Ports)
+
+    foreach ($port in $Ports) {
+        $connections = netstat -ano | Select-String ":$port\s"
+        foreach ($line in $connections) {
+            if ($line -match "\s(\d+)\s*$") {
+                $targetPid = [int]$Matches[1]
+                if ($targetPid -gt 0) {
+                    Stop-ProcessTree -ProcessId $targetPid
+                }
+            }
+        }
+    }
+}
+
+Write-Step "Stopping application services..."
+
+if (Test-Path $StateFile) {
+    $services = Get-Content $StateFile -Raw | ConvertFrom-Json
+    foreach ($svc in $services) {
+        if (Get-Process -Id $svc.pid -ErrorAction SilentlyContinue) {
+            Write-Host "Stopping $($svc.name) (PID $($svc.pid))..."
+            Stop-ProcessTree -ProcessId $svc.pid
+        }
+    }
+    Remove-Item $StateFile -Force
+}
+else {
+    Write-Host "No service state file found. Attempting port-based cleanup..." -ForegroundColor Yellow
+}
+
+Stop-PortListeners -Ports @(8000, 8501, 8502)
+
+Write-Step "Stopping PostgreSQL container..."
+Invoke-Compose -ComposeArgs @("-f", "podman-compose.yaml", "down")
+
+Write-Host ""
+Write-Host "All services stopped." -ForegroundColor Green

@@ -33,8 +33,8 @@ def _login_form():
         submitted = st.form_submit_button(t("log_in"), use_container_width=False)
 
     if submitted:
-        with get_cursor() as (conn, cur):
-            user = authenticate_analyst(cur, username, password)
+        with get_cursor(commit=True) as (conn, cur):
+            user = authenticate_analyst(cur, username, password, conn=conn)
             
         if user:
             # Set the exact session keys the downstream portal files are looking for
