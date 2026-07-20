@@ -26,6 +26,18 @@ GROQ_SQL_MODEL = _get_env_str("GROQ_SQL_MODEL", "openai/gpt-oss-120b")
 GROQ_REPAIR_MODEL = _get_env_str("GROQ_REPAIR_MODEL", "openai/gpt-oss-120b")
 GROQ_SUMMARY_MODEL = _get_env_str("GROQ_SUMMARY_MODEL", "openai/gpt-oss-120b")
 
+_GROQ_KEY_PLACEHOLDERS = {
+    "",
+    "your_groq_api_key_here",
+    "changeme",
+    "replace_me",
+}
+
+
+def is_groq_api_key_configured() -> bool:
+    """True when a non-placeholder Groq API key is present in the environment."""
+    return GROQ_API_KEY.lower() not in _GROQ_KEY_PLACEHOLDERS
+
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://127.0.0.1:8000")
 API_TIMEOUT = int(os.environ.get("API_TIMEOUT", "10"))
 POWER_BI_EMBED_URL = os.environ.get("POWER_BI_EMBED_URL", "")

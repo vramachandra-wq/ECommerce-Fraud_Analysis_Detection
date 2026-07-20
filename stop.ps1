@@ -1,9 +1,9 @@
 # Stops FastAPI, Streamlit apps, and the PostgreSQL container.
-# Usage (from project root in PowerShell): .\stop.ps
+# Usage (from project root in PowerShell): .\stop.ps1
 
 $ErrorActionPreference = "Stop"
 
-$ProjectRoot = $PSScriptRoot
+$ProjectRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Get-Location }
 Set-Location $ProjectRoot
 
 $RunDir = Join-Path $ProjectRoot ".run"
