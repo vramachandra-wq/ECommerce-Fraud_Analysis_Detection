@@ -1,5 +1,6 @@
 import streamlit as st
 from ui import apply_theme, render_app_shell
+from ui.i18n import t, language_toggle
 from portals.customer_portal import render 
 
 def main():
@@ -8,7 +9,8 @@ def main():
         layout="wide"
     )
     apply_theme()
-    render_app_shell("🛒 Metro Cart", "Customer Purchase Portal")
+    language_toggle()
+    render_app_shell(t("customer_app_title"), t("customer_app_subtitle"))
 
     # Call the render function from customer_portal.py
     render()

@@ -176,9 +176,16 @@ def check_r010(cursor: Any, ctx: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
 
 def check_r011(cursor: Any, ctx: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     """Blacklisted Phone Number."""
-    phone = ctx.get("phone_number")
-    if not phone: return False, None
-    cursor.execute("SELECT reason FROM master.phone_blacklist WHERE phone_number = %s AND is_active = TRUE", (phone,))
+    # NOTE: uses direct indexing (like every other rule) instead of ctx.get(),
+    # so a missing/mis-keyed phone_number raises loudly instead of silently
+    # skipping the check and letting a blacklisted phone slip through.
+    phone = (ctx["phone_number"] or "").strip()
+    if not phone:
+        return False, None
+    cursor.execute(
+        "SELECT reason FROM master.phone_blacklist WHERE phone_number = %s AND is_active = TRUE",
+        (phone,),
+    )
     row = cursor.fetchone()
     if row:
         return True, f"R011: Phone number {phone} is blacklisted ({row[0]})"
