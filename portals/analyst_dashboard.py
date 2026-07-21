@@ -1,23 +1,21 @@
 """Fraud Analyst Dashboard: queue of ON_HOLD / PENDING_REVIEW orders."""
-import sys
 from datetime import datetime
-from pathlib import Path
-import requests
 import time
 
-from config import API_BASE_URL, API_TIMEOUT
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
+import pandas as pd
+import requests
 import streamlit as st
 
+from config import API_BASE_URL, API_TIMEOUT
 from database.connection import get_cursor
 from fraud_engine.auto_approval import sync_expired_holds
 from utils.queries import (
-    get_active_blacklist_entry, 
-    get_active_phone_blacklist_entry, 
+    get_active_blacklist_entry,
     get_active_email_blacklist_entry,
-    get_order_detail, 
-    get_queue_orders
+    get_active_phone_blacklist_entry,
+    get_backlog_orders,
+    get_order_detail,
+    get_queue_orders,
 )
 from ui.i18n import t, cur_sym
 
@@ -55,6 +53,12 @@ def _send_api_request(method: str, path: str, **kwargs):
     return resp
 
 
+def _sync_expired_holds() -> int:
+    """Auto-approve ON_HOLD orders past their delay window."""
+    with get_cursor(commit=True) as (conn, cur):
+        return sync_expired_holds(conn, cur)
+
+
 def inject_dashboard_css():
     st.markdown("""
         <style>
@@ -82,16 +86,6 @@ def inject_dashboard_css():
         .status-REJECTED { background-color: #ef4444; color: #ffffff; border: 1px solid rgba(220,38,38,0.12); }
         </style>
     """, unsafe_allow_html=True)
-
-
-# --- CACHED DATABASE SYNC ---
-
-@st.cache_data(ttl=300)
-def sync_database_holds():
-    """Caches the database synchronization to prevent it from firing on every UI rerun.
-    TTL of 300 seconds means this background cleanup only runs once every 5 minutes."""
-    with get_cursor(commit=True) as (conn, cur):
-        return sync_expired_holds(conn, cur)
 
 
 # --- DIALOG FUNCTIONS ---
@@ -274,16 +268,95 @@ def confirm_blacklist_email(analyst_id, email, reason):
         st.rerun()
 
 
+@st.dialog("Backlog Orders")
+def _no_backlog_dialog():
+    st.info(t("no_backlog_orders"))
+    if st.button("OK", use_container_width=True):
+        st.rerun()
+
+
+@st.dialog("Backlog Orders")
+def _show_backlog_orders_dialog(backlog_df):
+    if backlog_df.empty:
+        st.info(t("backlog_caption_clear"))
+        return
+
+    display_df = backlog_df.copy()
+    display_df["order_timestamp"] = pd.to_datetime(display_df["order_timestamp"])
+    overdue_minutes = (
+        (pd.Timestamp.now() - display_df["order_timestamp"]).dt.total_seconds() / 60
+        - display_df["delay_minutes"]
+    )
+    display_df["overdue_by_min"] = overdue_minutes.round(0).astype(int)
+    st.dataframe(
+        display_df[["order_id", "customer_name", "product_name", "amount",
+                     "order_status", "order_timestamp", "delay_minutes", "overdue_by_min"]],
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "order_id": "Order ID",
+            "customer_name": "Customer",
+            "product_name": "Product",
+            "amount": st.column_config.NumberColumn("Amount", format=f"{cur_sym()} %.2f"),
+            "order_status": "Status",
+            "order_timestamp": st.column_config.DatetimeColumn("Placed At", format="D MMM YYYY, h:mm a"),
+            "delay_minutes": "Delay (min)",
+            "overdue_by_min": "Overdue By (min)",
+        },
+    )
+
+
 # --- MAIN DASHBOARD LOGIC ---
 
 def render_queue_and_review(analyst: dict):
     """Shared queue + review UI, reused by both the Analyst Dashboard and Admin overrides."""
     inject_dashboard_css()
-    
-    # Run the cached synchronization task
-    auto_approved = sync_database_holds()
-    if auto_approved:
-        st.info(f"{auto_approved} order(s) auto-approved in the recent background sync after their 180-minute hold window elapsed.")
+    approved = _sync_expired_holds()
+    if approved:
+        st.toast(t("auto_approved_toast", n=approved), icon="✅")
+
+    with get_cursor() as (conn, cur):
+        backlog_df = get_backlog_orders(cur)
+    backlog_ids = backlog_df["order_id"].tolist() if not backlog_df.empty else []
+
+    st.markdown(f"#### {t('backlog_panel_title', n=len(backlog_ids))}")
+    if backlog_ids:
+        st.caption(t("backlog_caption_pending"))
+    else:
+        st.caption(t("backlog_caption_clear"))
+
+    if st.button(t("find_backlog_orders"), use_container_width=False):
+        _show_backlog_orders_dialog(backlog_df)
+
+    with st.container(border=True):
+        backlog_comments = st.text_area(t("batch_comments"), key="backlog_comments")
+
+        col_bl_app, col_bl_rej, col_bl_fraud = st.columns(3)
+        with col_bl_app:
+            if st.button(t("approve_all_backlog"), type="primary", use_container_width=True):
+                if not backlog_ids:
+                    _no_backlog_dialog()
+                elif not backlog_comments.strip():
+                    st.warning(t("warn_comment_approve"))
+                else:
+                    confirm_batch_approve(analyst["analyst_id"], backlog_ids, backlog_comments)
+        with col_bl_rej:
+            if st.button(t("reject_all_backlog"), use_container_width=True):
+                if not backlog_ids:
+                    _no_backlog_dialog()
+                elif not backlog_comments.strip():
+                    st.warning(t("warn_comment_reject"))
+                else:
+                    confirm_batch_reject(analyst["analyst_id"], backlog_ids, backlog_comments, is_fraud=False)
+        with col_bl_fraud:
+            if st.button(t("reject_all_backlog_fraud"), use_container_width=True):
+                if not backlog_ids:
+                    _no_backlog_dialog()
+                elif not backlog_comments.strip():
+                    st.warning(t("warn_comment_reject"))
+                else:
+                    confirm_batch_reject(analyst["analyst_id"], backlog_ids, backlog_comments, is_fraud=True)
+    st.divider()
 
     with get_cursor() as (conn, cur):
         queue_df = get_queue_orders(cur)
@@ -401,7 +474,8 @@ def render_queue_and_review(analyst: dict):
         st.write(f"**Device:** {order['device_id']}")
         st.write(f"**Placed At:** {order['order_timestamp']}")
 
-    st.error(t("flagged_reason", reason=order['flagged_reason']))
+    if order.get("flagged_reason"):
+        st.warning(t("flagged_reason", reason=order["flagged_reason"]))
 
     # Render blacklist action expanders
     _blacklist_ip_action(analyst, order["ip_address"], blacklist_entry, key_suffix=order_id)

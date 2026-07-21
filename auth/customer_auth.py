@@ -2,7 +2,8 @@ from typing import Optional, Dict, Any
 
 CUSTOMER_FIELDS = [
     "user_id", "customer_name", "email", "phone_number",
-    "default_address", "program_id",
+    "default_address", "street", "city", "state", "country", "zip_code",
+    "program_id",
 ]
 
 def authenticate_customer(cursor, user_id: str, password: str) -> Optional[Dict[str, Any]]:
@@ -12,7 +13,8 @@ def authenticate_customer(cursor, user_id: str, password: str) -> Optional[Dict[
     """
     cursor.execute(
         """
-        SELECT user_id, customer_name, email, phone_number, default_address, program_id
+        SELECT user_id, customer_name, email, phone_number, default_address,
+               street, city, state, country, zip_code, program_id
         FROM master.customers
         WHERE user_id = %s AND password = %s
         """,

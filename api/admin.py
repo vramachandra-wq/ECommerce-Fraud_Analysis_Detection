@@ -51,6 +51,7 @@ class RuleUpdate(BaseModel):
     threshold_value: Optional[float] = None
     time_interval_value: Optional[int] = None
     time_interval_unit: Optional[str] = None
+    delay_minutes: Optional[int] = None
 
 
 # --- ANALYST ENDPOINTS ---
@@ -246,7 +247,8 @@ def update_rule(data: RuleUpdate):
                     SET action = %s, 
                         threshold_value = %s, 
                         time_interval_value = %s, 
-                        time_interval_unit = %s
+                        time_interval_unit = %s,
+                        delay_minutes = %s
                     WHERE rule_id = %s
                     """,
                     (
@@ -254,6 +256,7 @@ def update_rule(data: RuleUpdate):
                         data.threshold_value,
                         data.time_interval_value,
                         data.time_interval_unit,
+                        data.delay_minutes,
                         data.rule_id
                     )
                 )

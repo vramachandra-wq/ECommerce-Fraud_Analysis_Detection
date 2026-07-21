@@ -229,6 +229,40 @@ def apply_theme():
         grid-template-columns: 1fr;
       }
     }
+
+    /* Centered login card for customer / analyst login screens */
+    .login-panel {
+      max-width: 480px;
+      margin: 0 auto 2rem auto;
+      padding: 1.5rem 1.75rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--card-bg);
+    }
+
+    /* Sidebar navigation radio: pill-style active state */
+    section[data-testid="stSidebar"] div[role="radiogroup"] label {
+      border-radius: 8px !important;
+      padding: 0.45rem 0.75rem !important;
+      margin-bottom: 0.25rem !important;
+      border: 1px solid transparent !important;
+      transition: background-color 0.15s ease, border-color 0.15s ease;
+    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) {
+      background-color: rgba(190, 30, 45, 0.12) !important;
+      border-color: var(--primary-red) !important;
+      font-weight: 600 !important;
+    }
+
+    /* Section headings inside portals */
+    h4, h3 {
+      letter-spacing: -0.01em;
+    }
+
+    /* Language selector: compact pill in top-right */
+    div[data-testid="stSelectbox"]:has(select[aria-label]) {
+      font-size: 0.9rem;
+    }
     </style>
     """
 

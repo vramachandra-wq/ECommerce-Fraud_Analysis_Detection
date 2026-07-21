@@ -3,6 +3,7 @@ from typing import Dict, Any, Tuple, Optional, Callable, List
 # In-memory caches to prevent querying master.rule_master repeatedly 
 _INTERVAL_CACHE: Dict[str, str] = {}
 _THRESHOLD_CACHE: Dict[str, float] = {}
+_DELAY_CACHE: Dict[str, int] = {}
 
 def _get_interval(cursor: Any, rule_id: str) -> str:
     """Fetches and caches the time interval from master.rule_master."""
@@ -18,6 +19,21 @@ def _get_interval(cursor: Any, rule_id: str) -> str:
             _INTERVAL_CACHE[rule_id] = "0 MINUTE"
             
     return _INTERVAL_CACHE[rule_id]
+
+def _get_delay_minutes(cursor: Any, rule_id: str, fallback_value: int = 60) -> int:
+    """Fetches and caches the hold-delay (minutes) from master.rule_master."""
+    if rule_id not in _DELAY_CACHE:
+        cursor.execute(
+            "SELECT delay_minutes FROM master.rule_master WHERE rule_id = %s",
+            (rule_id,)
+        )
+        row = cursor.fetchone()
+        if row and row[0] is not None:
+            _DELAY_CACHE[rule_id] = int(row[0])
+        else:
+            _DELAY_CACHE[rule_id] = int(fallback_value)
+
+    return _DELAY_CACHE[rule_id]
 
 def _get_threshold(cursor: Any, rule_id: str, fallback_value: float) -> float:
     """Fetches and caches the threshold value from master.rule_master."""
@@ -38,8 +54,8 @@ def _get_threshold(cursor: Any, rule_id: str, fallback_value: float) -> float:
 def check_r001(cursor: Any, ctx: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     """P2 iPhone 16 Rule."""
     if ctx["program_id"] == "P2" and "iphone 16" in (ctx.get("product_name") or "").lower():
-        interval_str = _get_interval(cursor, "R001")
-        return True, f"R001: iPhone 16 order on P2 track — held for {interval_str} review window"
+        delay_minutes = _get_delay_minutes(cursor, "R001", fallback_value=180)
+        return True, f"R001: iPhone 16 order on P2 track — held for {delay_minutes} minute review window"
     return False, None
 
 
@@ -202,14 +218,16 @@ def check_r012(cursor: Any, ctx: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
 
 
 def clear_interval_cache(rule_id: Optional[str] = None):
-    """Clears both interval and threshold caches."""
-    global _INTERVAL_CACHE, _THRESHOLD_CACHE
+    """Clears interval, threshold, and delay caches."""
+    global _INTERVAL_CACHE, _THRESHOLD_CACHE, _DELAY_CACHE
     if rule_id:
         _INTERVAL_CACHE.pop(rule_id, None)
         _THRESHOLD_CACHE.pop(rule_id, None)
+        _DELAY_CACHE.pop(rule_id, None)
     else:
         _INTERVAL_CACHE.clear()
         _THRESHOLD_CACHE.clear()
+        _DELAY_CACHE.clear()
 
 
 # Ordered rule set

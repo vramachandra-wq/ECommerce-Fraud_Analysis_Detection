@@ -1,31 +1,29 @@
 """Admin Control Panel: user management, analytics, rule stats, overrides."""
-import sys
-from pathlib import Path
-import requests
-import time
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
 from datetime import datetime
+import time
 
 import plotly.express as px
+import requests
 import streamlit as st
+
 from config import API_BASE_URL, API_TIMEOUT
 from database.connection import get_cursor
 from auth.analyst_auth import ALL_PAGES, PAGE_LABELS
-from fraud_engine.auto_approval import sync_expired_holds
 from portals.analyst_dashboard import render_queue_and_review
 from utils.queries import (
     get_active_blacklist_entry,
-    get_active_phone_blacklist_entry,
     get_active_email_blacklist_entry,
+    get_active_phone_blacklist_entry,
     get_analyst_performance,
     get_kpis,
     get_orders_over_time,
     get_permission_matrix,
     get_recent_orders,
-    get_rule_stats
+    get_rule_stats,
 )
 from ui.i18n import t, cur_sym
+
+_CHART_COLORS = ["#be1e2d", "#1f56ff", "#10b981", "#f59e0b", "#8b5cf6", "#64748b"]
 
 
 def _inject_tab_bar_css():
@@ -378,9 +376,12 @@ def _tab_analytics():
             fig = px.pie(
                 names=list(status_counts.keys()),
                 values=list(status_counts.values()),
-                title="Order Status Distribution",
-                hole=0.4
+                title=t("chart_status_distribution"),
+                hole=0.45,
+                color_discrete_sequence=_CHART_COLORS,
             )
+            fig.update_traces(textposition="inside", textinfo="percent+label")
+            fig.update_layout(showlegend=False, margin=dict(t=40, b=20, l=20, r=20))
             st.plotly_chart(fig, use_container_width=True)
 
     with chart_col2:
@@ -394,10 +395,12 @@ def _tab_analytics():
                 x="order_date",
                 y="order_count",
                 markers=True,
-                title="Daily Order Volume — Current Month",
+                title=t("chart_daily_volume"),
+                color_discrete_sequence=[_CHART_COLORS[1]],
             )
-            trend_fig.update_xaxes(title="Date")
-            trend_fig.update_yaxes(title="Orders", rangemode="tozero")
+            trend_fig.update_xaxes(title=t("chart_date"))
+            trend_fig.update_yaxes(title=t("chart_orders"), rangemode="tozero")
+            trend_fig.update_layout(margin=dict(t=40, b=20, l=20, r=20))
             st.plotly_chart(trend_fig, use_container_width=True)
 
     st.markdown(t("recent_orders_live"))
@@ -465,13 +468,14 @@ def _tab_rule_stats():
         
     if not rule_df.empty:
         fig = px.bar(
-            rule_df, 
-            x="rule_id", 
-            y="times_triggered", 
-            title="Rule Trigger Counts",
+            rule_df,
+            x="rule_id",
+            y="times_triggered",
+            title=t("chart_rule_triggers"),
             color="times_triggered",
-            color_continuous_scale="Reds"
+            color_continuous_scale=["#fecaca", "#be1e2d"],
         )
+        fig.update_layout(margin=dict(t=40, b=20, l=20, r=20))
         st.plotly_chart(fig, use_container_width=True)
         
         st.dataframe(rule_df, use_container_width=True, hide_index=True)
@@ -522,17 +526,22 @@ def _generate_rule_description(rule: dict) -> str:
     interval_unit = rule.get('time_interval_unit')
 
     if rule.get('rule_id') == 'R001':
-        return f"Flags P2 iPhone 16 orders for **{action}** based on configured velocity checks."
+        delay = rule.get('delay_minutes')
+        delay_txt = f" Orders are held for **{int(delay)} minutes** before auto-approval." if delay is not None else ""
+        return f"Flags P2 iPhone 16 orders for **{action}** based on configured velocity checks.{delay_txt}"
 
     if 'blacklist' in rule_name.lower():
         return f"Automatically applies **{action}** to any order matching a blacklisted entity."
 
     if rule_type in ('VELOCITY', 'BEHAVIORAL') and threshold is not None and interval_val is not None:
         unit_label = str(interval_unit).lower() if interval_unit else "interval"
-        return (
+        base = (
             f"Triggers **{action}** when orders exceed **{threshold}** "
             f"within **{interval_val} {unit_label}(s)**."
         )
+        if action == 'HOLD' and rule.get('delay_minutes') is not None:
+            base += f" Held for **{int(rule['delay_minutes'])} minutes** before auto-approval."
+        return base
 
     if rule_type == 'LINKAGE' and threshold is not None:
         return f"Triggers **{action}** when **{threshold}** or more linked entities are detected on an order."
@@ -549,7 +558,8 @@ def _tab_rule_management():
     with get_cursor() as (conn, cur):
         cur.execute("""
             SELECT rule_id, rule_name, rule_description, rule_type, 
-                   action, threshold_value, time_interval_value, time_interval_unit 
+                   action, threshold_value, time_interval_value, time_interval_unit,
+                   delay_minutes 
             FROM master.rule_master 
             ORDER BY rule_id
         """)
@@ -593,10 +603,10 @@ def _tab_rule_management():
                 new_action = st.selectbox(t("rule_action"), actions, index=action_idx)
         
         # 5. Handle Metrics (Split logic for Linkage vs Velocity/Behavioral)
-        requires_interval = (selected_rule['rule_type'] in ['VELOCITY', 'BEHAVIORAL'] or is_r001) and not is_blacklist
+        requires_interval = (selected_rule['rule_type'] in ['VELOCITY', 'BEHAVIORAL']) and not is_blacklist
         requires_threshold = (selected_rule['rule_type'] in ['VELOCITY', 'BEHAVIORAL', 'LINKAGE']) and not is_blacklist
         
-        col_thresh, col_val, col_unit = st.columns(3)
+        col_thresh, col_val, col_unit, col_delay = st.columns(4)
         
         with col_thresh:
             if requires_threshold:
@@ -623,6 +633,14 @@ def _tab_rule_management():
                 new_unit = st.selectbox(t("unit"), units, index=unit_idx)
             else:
                 new_unit = None
+
+        with col_delay:
+            if new_action == 'HOLD':
+                current_delay = int(selected_rule['delay_minutes']) if selected_rule.get('delay_minutes') is not None else 60
+                new_delay_minutes = st.number_input(t("delay_minutes_label"), min_value=1, value=current_delay, step=1)
+            else:
+                st.info(t("delay_na"))
+                new_delay_minutes = None
                 
         submit = st.form_submit_button(t("review_changes"), type="primary")
         
@@ -633,17 +651,11 @@ def _tab_rule_management():
                 "action": new_action,
                 "threshold_value": new_threshold,
                 "time_interval_value": new_interval_val,
-                "time_interval_unit": new_unit
+                "time_interval_unit": new_unit,
+                "delay_minutes": new_delay_minutes
             }
             _confirm_rule_update(payload, selected_rule['rule_id'])
 
-
-@st.cache_data(ttl=300)
-def sync_database_holds():
-    """Caches the database synchronization to prevent it from firing on every UI rerun."""
-    with get_cursor(commit=True) as (conn, cur):
-        sync_expired_holds(conn, cur)
-        
 
 def render():
     analyst = st.session_state.get("analyst")
@@ -652,10 +664,7 @@ def render():
         return
 
     st.header(t("admin_control_panel"))
-    st.caption(f"Logged in as: **{analyst['employee_name']}** ({analyst['role']})")
-
-    # Run the cached synchronization task
-    sync_database_holds()
+    st.caption(f"{t('logged_in_as', name=analyst['employee_name'])} · {analyst['role']}")
 
     _inject_tab_bar_css()
 

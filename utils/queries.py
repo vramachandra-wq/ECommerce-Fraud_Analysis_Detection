@@ -47,6 +47,29 @@ def get_queue_orders(cursor: Any) -> pd.DataFrame:
     return pd.DataFrame(cursor.fetchall(), columns=cols)
 
 
+def get_backlog_orders(cursor: Any) -> pd.DataFrame:
+    """ON_HOLD or PENDING_REVIEW orders whose delay window has already elapsed.
+
+    order_timestamp is stored as naive local (Asia/Kolkata) wall-clock time
+    (see portals/customer_portal.py: datetime.now()), while NOW() evaluates
+    in the DB session's timezone (UTC). Comparing them directly causes a
+    ~5:30 skew, so NOW() is converted to Asia/Kolkata wall-clock first.
+    """
+    cursor.execute(
+        """
+        SELECT order_id, user_id, customer_name, product_name, category, quantity,
+               amount, order_status, flagged_reason, order_timestamp, delay_minutes
+        FROM master.orders
+        WHERE order_status IN ('ON_HOLD', 'PENDING_REVIEW')
+          AND delay_minutes > 0
+          AND order_timestamp + (delay_minutes * INTERVAL '1 minute') <= (NOW() AT TIME ZONE 'Asia/Kolkata')
+        ORDER BY order_timestamp ASC
+        """
+    )
+    cols = [d.name for d in cursor.description]
+    return pd.DataFrame(cursor.fetchall(), columns=cols)
+
+
 def get_order_detail(cursor: Any, order_id: str) -> Optional[Dict[str, Any]]:
     """Fetches details for a specific order."""
     cursor.execute("SELECT * FROM master.orders WHERE order_id = %s", (order_id,))
@@ -59,9 +82,9 @@ def get_recent_orders(cursor: Any, limit: int = 100) -> pd.DataFrame:
     cursor.execute(
         """
         SELECT
-            order_id, user_id, customer_name, product_name, quantity,
-            amount, order_status, delay_minutes, is_fraud,
-            order_timestamp, order_approved_at, order_rejected_at
+            order_id, user_id, customer_name, program_id, category, product_name,
+            quantity, amount, order_status, delay_minutes, is_fraud,
+            flagged_reason, order_timestamp, order_approved_at, order_rejected_at
         FROM master.orders
         ORDER BY order_timestamp DESC
         LIMIT %s

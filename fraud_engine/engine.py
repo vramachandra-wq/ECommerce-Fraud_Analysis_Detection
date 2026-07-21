@@ -8,7 +8,7 @@ STATUS_PRIORITY: Dict[str, int] = {
     "APPROVED": 0,
 }
 
-# Maps database ENUM/VARCHAR actions to internal application statuses[cite: 7]
+# Maps database ENUM/VARCHAR actions to internal application statuses
 DB_ACTION_TO_STATUS: Dict[str, str] = {
     "REJECTED": "REJECTED",
     "HOLD": "ON_HOLD",
@@ -17,7 +17,7 @@ DB_ACTION_TO_STATUS: Dict[str, str] = {
     "APPROVE": "APPROVED"   
 }
 
-# In-memory cache to minimize database hits[cite: 7]
+# In-memory cache to minimize database hits
 _RULE_METADATA_CACHE: Dict[str, Dict[str, Any]] = {}
 
 # Priority tiers for conflict resolution. Lower number = decided first.
@@ -32,38 +32,45 @@ RULE_TIER: Dict[str, int] = {
 }
 DEFAULT_RULE_TIER = 2
 
+# Fallback hold-delay applied when a rule resolves to ON_HOLD but has no
+# time_interval configured in master.rule_master (e.g. newly added rule).
+DEFAULT_HOLD_DELAY_MINUTES = 60
+RULE_DELAY_OVERRIDES: Dict[str, int] = {
+    "R001": 180,  # P2 iPhone 16 rule gets a longer review window
+}
+
 
 def _tier_for(rule_id: str) -> int:
     return RULE_TIER.get(rule_id, DEFAULT_RULE_TIER)
 
 def _get_rule_metadata(cursor: Any, rule_id: str) -> Dict[str, Any]:
-    """Fetches rule actions and intervals directly from the master.rule_master table[cite: 7]."""
+    """Fetches rule action and hold-delay directly from the master.rule_master table."""
     if rule_id not in _RULE_METADATA_CACHE:
         cursor.execute(
             """
-            SELECT action, time_interval_value, time_interval_unit 
+            SELECT action, delay_minutes
             FROM master.rule_master 
             WHERE rule_id = %s
             """,
             (rule_id,)
         )
         row = cursor.fetchone()
-        
+
         if row:
             action_str = row[0].upper() if row[0] else "REVIEW"
-            interval_val = row[1] or 0
-            interval_unit = (row[2] or "MINUTE").upper()
-            
-            # Convert everything to minutes[cite: 7]
-            if interval_unit == "HOUR":
-                delay_minutes = interval_val * 60
-            elif interval_unit == "DAY":
-                delay_minutes = interval_val * 1440
-            else:
-                delay_minutes = interval_val # Defaults to MINUTE
-                
+            resolved_action = DB_ACTION_TO_STATUS.get(action_str, "PENDING_REVIEW")
+            delay_minutes = row[1]
+
+            if delay_minutes is None:
+                # No delay configured. ON_HOLD rules default to 60 mins
+                # (180 for P2 iPhone via RULE_DELAY_OVERRIDES); other actions default to 0.
+                delay_minutes = (
+                    RULE_DELAY_OVERRIDES.get(rule_id, DEFAULT_HOLD_DELAY_MINUTES)
+                    if resolved_action == "ON_HOLD" else 0
+                )
+
             _RULE_METADATA_CACHE[rule_id] = {
-                "action": DB_ACTION_TO_STATUS.get(action_str, "PENDING_REVIEW"),
+                "action": resolved_action,
                 "delay_minutes": delay_minutes
             }
         else:
@@ -73,13 +80,13 @@ def _get_rule_metadata(cursor: Any, rule_id: str) -> Dict[str, Any]:
 
 
 def evaluate_order(cursor: Any, ctx: Dict[str, Any]) -> Dict[str, Any]:
-    """Run all rules against the order context and return the resolved disposition[cite: 7]."""
+    """Run all rules against the order context and return the resolved disposition."""
     triggered: List[Dict[str, str]] = []
     
     for rule_id, check_fn in RULE_CHECKS:
         is_triggered, reason = check_fn(cursor, ctx)
         if is_triggered and reason:
-            # Shorten name if possible[cite: 7]
+            # Shorten name if possible
             rule_name = reason.split("—")[0].strip() if "—" in reason else rule_id
             triggered.append({
                 "rule_id": rule_id,
@@ -105,7 +112,7 @@ def evaluate_order(cursor: Any, ctx: Dict[str, Any]) -> Dict[str, Any]:
     min_tier = min(_tier_for(rule["rule_id"]) for rule in triggered)
     deciding_rules = [rule for rule in triggered if _tier_for(rule["rule_id"]) == min_tier]
 
-    # Resolve strictness conflict within the deciding tier only[cite: 7]
+    # Resolve strictness conflict within the deciding tier only
     for rule in deciding_rules:
         meta = _get_rule_metadata(cursor, rule["rule_id"])
         action = meta["action"]
@@ -113,10 +120,10 @@ def evaluate_order(cursor: Any, ctx: Dict[str, Any]) -> Dict[str, Any]:
         if STATUS_PRIORITY[action] > STATUS_PRIORITY[final_status]:
             final_status = action
 
-        if action == "ON_HOLD":
+        if action in ("ON_HOLD", "PENDING_REVIEW"):
             delay_minutes = max(delay_minutes, meta["delay_minutes"])
 
-    # Discard delay if stricter outcome found[cite: 7]
+    # Discard delay if stricter outcome found
     if final_status == "REJECTED":
         delay_minutes = 0
 
@@ -134,7 +141,7 @@ def evaluate_order(cursor: Any, ctx: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 def clear_metadata_cache(rule_id: Optional[str] = None):
-    """Clears cached rule metadata[cite: 7]."""
+    """Clears cached rule metadata."""
     global _RULE_METADATA_CACHE
     if rule_id and rule_id in _RULE_METADATA_CACHE:
         del _RULE_METADATA_CACHE[rule_id]

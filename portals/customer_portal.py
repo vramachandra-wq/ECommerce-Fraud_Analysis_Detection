@@ -1,28 +1,16 @@
 """Customer Portal: login -> order form -> fraud evaluation -> confirmation."""
-import sys
 from datetime import datetime
-from pathlib import Path
-import requests
 import time
 
-from config import API_BASE_URL, API_TIMEOUT
-
-# Defensive: ensure the project root (parent of this portals/ folder) is on
-# sys.path, so imports below resolve even if Streamlit is launched directly
-# on this file instead of on app.py.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
+import requests
 import streamlit as st
 
+from config import API_BASE_URL, API_TIMEOUT
 from auth.customer_auth import authenticate_customer
 from database.connection import get_cursor
 from fraud_engine.engine import evaluate_order
 from utils.order_utils import calculate_total, generate_order_id
-from utils.queries import (
-    list_devices, 
-    list_products, 
-    list_programs
-)
+from utils.queries import list_devices, list_products, list_programs
 from ui.i18n import t, cur_sym
 
 
@@ -53,7 +41,7 @@ def _send_api_request(method: str, path: str, **kwargs):
     return resp
 
 
-@st.dialog("Confirm Place Order")
+@st.dialog(t("confirm_place_order"))
 def confirm_place_order(payload: dict, customer_session_key: str = "customer"):
     st.markdown(t("order_summary"))
     # Show a compact summary
@@ -84,6 +72,8 @@ def confirm_place_order(payload: dict, customer_session_key: str = "customer"):
                 st.session_state[customer_session_key]["zip_code"] = payload.get("zip_code")
                 st.session_state[customer_session_key]["country"] = payload.get("country")
                 st.session_state["last_order_id"] = payload.get("order_id")
+                st.session_state["last_order_status"] = payload.get("order_status")
+                st.session_state["last_order_reason"] = payload.get("flagged_reason")
 
                 time.sleep(0.25)
                 st.rerun()
@@ -108,13 +98,8 @@ def fetch_form_options():
 
 
 def _login_form():
-    # Placeholder hero banner — swap the URL below for a real banner image.
-    # Suggested image: a wide e-commerce storefront banner showing shopping
-    # bags, gift boxes, or a "big sale" graphic in Metro Cart's red/blue brand colors.
-    st.image(
-        "images//banner_3.png",
-        use_container_width=True,
-    )
+    st.image("images/banner_3.png", use_container_width=True)
+    st.markdown('<div class="login-panel">', unsafe_allow_html=True)
     st.subheader(t("customer_login"))
     
     with st.form("customer_login"):
@@ -130,6 +115,7 @@ def _login_form():
             st.rerun()
         else:
             st.error(t("invalid_login"))
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def _order_form():
@@ -140,10 +126,7 @@ def _order_form():
     with col_header:
         st.title(t("customer_app_title"))
         st.subheader(t("welcome_back", name=customer['customer_name']))
-        st.image(
-        "images//banner_2.png",
-        use_container_width=True,
-    )
+        st.image("images/banner_2.png", use_container_width=True)
     with col_logout:
         if st.button(t("log_out"), key="customer_logout", use_container_width=True):
             del st.session_state.customer
@@ -271,9 +254,10 @@ def _order_form():
                     # Evaluate using both the cursor and the context
                     disposition = evaluate_order(cur, ctx)
                 
-                # Calculate approval and rejection timestamps based on fraud status
-                order_approved_at = None if disposition["is_fraud"] else order_timestamp
-                order_rejected_at = order_timestamp if disposition["is_fraud"] else None
+                # Only stamp approval/rejection timestamps when the order is final.
+                status = disposition["order_status"]
+                order_approved_at = order_timestamp if status == "APPROVED" else None
+                order_rejected_at = order_timestamp if status == "REJECTED" else None
 
                 # Send ALL detailed fields to the updated FastAPI backend
                 payload = {
@@ -323,11 +307,26 @@ def render():
 
     if "last_order_id" in st.session_state:
         st.title(t("customer_app_title"))
+        status = st.session_state.get("last_order_status", "APPROVED")
+        reason = st.session_state.get("last_order_reason")
+
         with st.container(border=True):
-            st.success(t("order_success"))
+            if status == "APPROVED":
+                st.success(t("order_success_approved"))
+            elif status == "REJECTED":
+                st.error(t("order_success_rejected"))
+            elif status == "ON_HOLD":
+                st.warning(t("order_success_on_hold"))
+            else:
+                st.info(t("order_success_review"))
+
             st.metric(t("your_order_id"), st.session_state.last_order_id)
+            if reason:
+                st.caption(t("flagged_reason", reason=reason))
+
         if st.button(t("place_another_order"), type="primary", use_container_width=True):
-            del st.session_state.last_order_id
+            for key in ("last_order_id", "last_order_status", "last_order_reason"):
+                st.session_state.pop(key, None)
             st.rerun()
         return
 

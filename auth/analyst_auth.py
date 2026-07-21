@@ -22,7 +22,7 @@ PAGE_LABELS = {
 # --- AUTHENTICATION & AUTHORIZATION ---
 
 def authenticate_analyst(cursor, username: str, password: str) -> Optional[Dict[str, Any]]:
-    """Validates analyst credentials and returns their profile profile if successful."""
+    """Validates analyst credentials and returns their profile if successful."""
     cursor.execute(
         """
         SELECT analyst_id, employee_name, username, role
