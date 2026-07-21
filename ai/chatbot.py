@@ -3,10 +3,10 @@ import logging
 import pandas as pd
 import streamlit as st
 
-from groq import APIConnectionError
+from groq import APIConnectionError, AuthenticationError
 from ai.groq_client import get_groq_client, create_chat_completion
+from config import GROQ_API_KEY, is_groq_api_key_configured
 from ai.prompt_constants import (
-    GROQ_API_KEY,
     GROQ_INTENT_MODEL,
     GROQ_REPAIR_MODEL,
     GROQ_SQL_MODEL,
@@ -152,6 +152,12 @@ def _friendly_error_message(e: Exception, stage: str) -> str:
             "📭 The data you're requesting isn't available right now. "
             "Try rephrasing your question, or ask about a different metric, "
             "time period, or filter."
+        )
+
+    if any(s in text for s in ("invalid api key", "invalid_api_key", "authentication", "401")):
+        return (
+            "🔑 Groq API key is missing or invalid. "
+            "Add a valid `GROQ_API_KEY` to your `.env` file and restart the analyst portal."
         )
 
     if stage == "generation":
@@ -821,6 +827,13 @@ def _render_chart(df: pd.DataFrame, chart_key: str = "live") -> None:
 
 
 def _run_query_pipeline(user_query: str) -> None:
+    if not is_groq_api_key_configured():
+        st.error(
+            "🔑 Groq API key is not configured. "
+            "Set a valid `GROQ_API_KEY` in `.env` (not the placeholder) and restart the app."
+        )
+        return
+
     client = get_groq_client()
     if not client:
         st.error("🔑 Groq API key missing — add `GROQ_API_KEY` to your `.env` file.")
@@ -980,6 +993,22 @@ The user's follow-up question is below. Respond with ONLY the SQL query.""",
                     in_tok, out_tok = _extract_usage(completion)
                     total_input_tokens += in_tok
                     total_output_tokens += out_tok
+                except AuthenticationError as e:
+                    status.update(label="❌ Invalid Groq API key", state="complete", expanded=False)
+                    friendly = _friendly_error_message(e, "generation")
+                    st.error(friendly)
+                    log_chatbot_interaction(
+                        user_query,
+                        None,
+                        None,
+                        f"AUTH_ERROR: {str(e)}",
+                        input_tokens=total_input_tokens,
+                        output_tokens=total_output_tokens,
+                    )
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": friendly, "sql": None, "df": None}
+                    )
+                    return
                 except APIConnectionError as e:
                     status.update(label="❌ Connection issue", state="complete", expanded=False)
                     friendly = _friendly_error_message(e, "connection")
@@ -1239,10 +1268,12 @@ Ask questions about:
     with st.sidebar:
         st.markdown("---")
         st.markdown("### 🔌 Connection Status")
-        if GROQ_API_KEY:
-            st.success("✅ Groq Connected")
+        if is_groq_api_key_configured():
+            st.success("✅ Groq API key configured")
+        elif GROQ_API_KEY:
+            st.warning("⚠️ Groq API key looks like a placeholder — replace it in `.env`")
         else:
-            st.error("❌ Groq API Key Missing")
+            st.error("❌ Groq API key missing")
         if st.button(
             "🗑️ Clear Chat History",
             use_container_width=True,

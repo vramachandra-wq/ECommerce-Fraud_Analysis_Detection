@@ -11,7 +11,7 @@ import plotly.express as px
 import streamlit as st
 from config import API_BASE_URL, API_TIMEOUT
 from database.connection import get_cursor
-from auth.analyst_auth import ALL_PAGES, PAGE_LABELS
+from auth.analyst_auth import ALL_PAGES, PAGE_LABELS, creatable_roles_for, is_admin
 from fraud_engine.auto_approval import sync_expired_holds
 from portals.analyst_dashboard import render_queue_and_review
 from utils.queries import (
@@ -101,7 +101,8 @@ def _send_api_request(method: str, endpoint: str, payload: dict):
 @st.dialog("Confirm Create Analyst")
 def confirm_create_analyst(payload: dict):
     st.markdown("### Create New Analyst — Confirm Details")
-    st.json(payload)
+    display_payload = {**payload, "password": "********"}
+    st.json(display_payload)
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Create Analyst Account", type="primary", use_container_width=True):
@@ -146,7 +147,7 @@ def confirm_whitelist_action(endpoint: str, payload: dict, entity_label: str):
         st.rerun()
 
 
-def _tab_user_management():
+def _tab_user_management(analyst: dict):
     st.markdown(t("user_management"))
     st.caption(t("user_mgmt_caption"))
 
@@ -160,7 +161,7 @@ def _tab_user_management():
                 username = st.text_input(t("username"), placeholder="e.g. jdoe")
                 password = st.text_input(t("password"), type="password")
             
-            role = st.selectbox(t("role"), ["Fraud Analyst", "Senior Fraud Analyst", "Admin"])
+            role = st.selectbox(t("role"), creatable_roles_for(analyst))
             
             st.divider()
             confirm = st.checkbox(t("confirm_create_analyst_chk"))
@@ -171,6 +172,8 @@ def _tab_user_management():
             st.error(t("err_all_fields_required"))
         elif not confirm:
             st.warning(t("warn_confirm_checkbox"))
+        elif role == "Admin" and not is_admin(analyst):
+            st.error("Only Admin users can create Admin accounts.")
         else:
             payload = {
                 "analyst_id": analyst_id,
@@ -178,6 +181,7 @@ def _tab_user_management():
                 "username": username,
                 "password": password,
                 "role": role,
+                "actor_role": analyst.get("role"),
             }
             confirm_create_analyst(payload)
 
@@ -692,7 +696,7 @@ def render():
         _tab_permissions(analyst)
 
     elif active_tab == TAB_LABELS[3]:
-        _tab_user_management()
+        _tab_user_management(analyst)
 
     elif active_tab == TAB_LABELS[4]:
         _tab_analytics()

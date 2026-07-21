@@ -19,6 +19,7 @@ from utils.queries import (
     get_order_detail, 
     get_queue_orders
 )
+from utils.pii import display_pii
 from ui.i18n import t, cur_sym
 
 STATUS_ICONS = {
@@ -390,14 +391,23 @@ def render_queue_and_review(analyst: dict):
     with col1:
         st.markdown(t("customer_details"))
         st.write(f"**Name:** {order['customer_name']} ({order['user_id']})")
-        st.write(f"**Email:** {order['email']}" + (" 🚫 *(blacklisted)*" if email_blacklist_entry else ""))
-        st.write(f"**Phone:** {order['phone_number']}" + (" 🚫 *(blacklisted)*" if phone_blacklist_entry else ""))
-        st.write(f"**Address:** {order['address']}") 
+        st.write(
+            f"**Email:** {display_pii(order['email'], field='email', analyst=analyst)}"
+            + (" 🚫 *(blacklisted)*" if email_blacklist_entry else "")
+        )
+        st.write(
+            f"**Phone:** {display_pii(order['phone_number'], field='phone', analyst=analyst)}"
+            + (" 🚫 *(blacklisted)*" if phone_blacklist_entry else "")
+        )
+        st.write(f"**Address:** {display_pii(order['address'], field='address', analyst=analyst)}") 
     with col2:
         st.markdown(t("order_details"))
         st.write(f"**Product:** {order['product_name']} x{order['quantity']}")
         st.write(f"**Amount:** {cur_sym()}{order['amount']:,.2f}")
-        st.write(f"**IP Address:** {order['ip_address']}" + (" 🚫 *(blacklisted)*" if blacklist_entry else ""))
+        st.write(
+            f"**IP Address:** {display_pii(order['ip_address'], field='ip', analyst=analyst)}"
+            + (" 🚫 *(blacklisted)*" if blacklist_entry else "")
+        )
         st.write(f"**Device:** {order['device_id']}")
         st.write(f"**Placed At:** {order['order_timestamp']}")
 

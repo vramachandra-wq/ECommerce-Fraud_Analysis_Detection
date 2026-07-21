@@ -5,6 +5,8 @@ from datetime import datetime
 import psycopg2
 from psycopg2.extras import execute_batch
 from config import DB_CONFIG
+from auth.analyst_auth import ROLE_ADMIN
+from auth.passwords import hash_password
 
 # Note: Adjust these import paths as needed
 from fraud_engine.rules import clear_interval_cache
@@ -21,6 +23,7 @@ class AnalystCreate(BaseModel):
     username: str
     password: str
     role: str
+    actor_role: Optional[str] = None
 
 class BlacklistRequest(BaseModel):
     reason: str
@@ -57,17 +60,28 @@ class RuleUpdate(BaseModel):
 
 @router.post("/create-analyst")
 def create_analyst(data: AnalystCreate):
+    if data.role == ROLE_ADMIN and data.actor_role != ROLE_ADMIN:
+        raise HTTPException(
+            status_code=403,
+            detail="Only Admin users can create Admin accounts.",
+        )
+
     try:
         with psycopg2.connect(**DB_CONFIG) as conn:
             with conn.cursor() as cur:
-                # TODO: In production, hash data.password using passlib/bcrypt before inserting!
                 cur.execute(
                     """
                     INSERT INTO master.analyst_users
                     (analyst_id, employee_name, username, password, role)
                     VALUES (%s,%s,%s,%s,%s)
                     """,
-                    (data.analyst_id, data.employee_name, data.username, data.password, data.role),
+                    (
+                        data.analyst_id,
+                        data.employee_name,
+                        data.username,
+                        hash_password(data.password),
+                        data.role,
+                    ),
                 )
         return {"message": f"Analyst {data.employee_name} Created"}
     except Exception as e:

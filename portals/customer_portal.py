@@ -123,8 +123,8 @@ def _login_form():
         submitted = st.form_submit_button(t("log_in"), use_container_width=True)
 
     if submitted:
-        with get_cursor() as (conn, cur):
-            customer = authenticate_customer(cur, user_id, password)
+        with get_cursor(commit=True) as (conn, cur):
+            customer = authenticate_customer(cur, user_id, password, conn=conn)
         if customer:
             st.session_state.customer = customer
             st.rerun()
