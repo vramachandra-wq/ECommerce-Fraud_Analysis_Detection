@@ -13,13 +13,79 @@ function Write-Step([string]$Message) {
     Write-Host "==> $Message" -ForegroundColor Cyan
 }
 
+function Test-PodmanComposePlugin {
+    if (-not (Get-Command podman -ErrorAction SilentlyContinue)) {
+        return $false
+    }
+
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
+    try {
+        & podman compose version 1>$null 2>$null
+        return ($LASTEXITCODE -eq 0)
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+    }
+}
+
+function Find-PodmanComposeExecutable {
+    $fromPath = Get-Command podman-compose -ErrorAction SilentlyContinue
+    if ($fromPath) {
+        return $fromPath.Source
+    }
+
+    $roots = @()
+    if ($env:APPDATA) {
+        $roots += Join-Path $env:APPDATA "Python"
+    }
+    if ($env:LOCALAPPDATA) {
+        $roots += Join-Path $env:LOCALAPPDATA "Programs\Python"
+    }
+
+    foreach ($root in $roots) {
+        if (-not (Test-Path $root)) {
+            continue
+        }
+        $match = Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                $candidate = Join-Path $_.FullName "Scripts\podman-compose.exe"
+                if (Test-Path $candidate) { $candidate }
+            } |
+            Select-Object -First 1
+        if ($match) {
+            return $match
+        }
+    }
+
+    return $null
+}
+
 function Get-ComposeCommand {
-    if (Get-Command podman -ErrorAction SilentlyContinue) {
+    $podmanCompose = Find-PodmanComposeExecutable
+    if ($podmanCompose) {
+        return @{ Executable = $podmanCompose; Arguments = @() }
+    }
+
+    $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+    if ($pythonCmd) {
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = "SilentlyContinue"
+        try {
+            & python -c "import podman_compose" 1>$null 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                return @{ Executable = "python"; Arguments = @("-m", "podman_compose") }
+            }
+        }
+        finally {
+            $ErrorActionPreference = $previousPreference
+        }
+    }
+
+    if (Test-PodmanComposePlugin) {
         return @{ Executable = "podman"; Arguments = @("compose") }
     }
-    if (Get-Command podman-compose -ErrorAction SilentlyContinue) {
-        return @{ Executable = "podman-compose"; Arguments = @() }
-    }
+
     return $null
 }
 
@@ -28,14 +94,20 @@ function Invoke-Compose {
 
     $compose = Get-ComposeCommand
     if (-not $compose) {
-        Write-Host "Podman not found; skipping container shutdown." -ForegroundColor Yellow
+        Write-Host "Compose not found; trying direct podman stop..." -ForegroundColor Yellow
+        if (Get-Command podman -ErrorAction SilentlyContinue) {
+            & podman stop ecommerce_fraud 2>$null
+        }
         return
     }
 
     $args = @($compose.Arguments + $ComposeArgs) | Where-Object { $_ }
     & $compose.Executable @args
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "Warning: compose command returned exit code $LASTEXITCODE" -ForegroundColor Yellow
+        Write-Host "Warning: compose command returned exit code $LASTEXITCODE; trying direct podman stop..." -ForegroundColor Yellow
+        if (Get-Command podman -ErrorAction SilentlyContinue) {
+            & podman stop ecommerce_fraud 2>$null
+        }
     }
 }
 
@@ -92,3 +164,4 @@ Invoke-Compose -ComposeArgs @("-f", "podman-compose.yaml", "down")
 
 Write-Host ""
 Write-Host "All services stopped." -ForegroundColor Green
+exit 0

@@ -2,6 +2,7 @@
 import sys
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 import requests
 import time
 
@@ -57,10 +58,19 @@ def _send_api_request(method: str, path: str, **kwargs):
 def confirm_place_order(payload: dict, customer_session_key: str = "customer"):
     st.markdown(t("order_summary"))
     # Show a compact summary
-    st.write(f"**Customer:** {payload.get('customer_name')} — **Email:** {payload.get('email')}")
-    st.write(f"**Product:** {payload.get('product_name')} x{payload.get('quantity')} — **Amount:** {cur_sym()}{payload.get('amount'):,.2f}")
-    st.write(f"**Delivery Address:** {payload.get('address')}")
-    st.write(f"**IP:** {payload.get('ip_address')} — **Device:** {payload.get('device_id')}")
+    st.write(
+        f"**{t('label_customer')}:** {payload.get('customer_name')} — "
+        f"**{t('email')}:** {payload.get('email')}"
+    )
+    st.write(
+        f"**{t('label_product')}:** {payload.get('product_name')} x{payload.get('quantity')} — "
+        f"**{t('label_amount')}:** {cur_sym()}{payload.get('amount'):,.2f}"
+    )
+    st.write(f"**{t('label_delivery_address')}:** {payload.get('address')}")
+    st.write(
+        f"**{t('label_ip')}:** {payload.get('ip_address')} — "
+        f"**{t('label_device')}:** {payload.get('device_id')}"
+    )
     st.divider()
     col1, col2 = st.columns(2)
     with col1:
@@ -71,7 +81,7 @@ def confirm_place_order(payload: dict, customer_session_key: str = "customer"):
                 with st.spinner(t("completing_purchase")):
                     resp = _send_api_request("post", "create-order", json=payload)
                 if not resp:
-                    st.error("Failed to call order API. See logs or backend.")
+                    st.error(t("err_order_api_failed"))
                     return
 
                 # Update session state after success
@@ -88,7 +98,7 @@ def confirm_place_order(payload: dict, customer_session_key: str = "customer"):
                 time.sleep(0.25)
                 st.rerun()
             except Exception as exc:
-                st.error(f"Error while completing order: {exc}")
+                st.error(t("err_completing_order", exc=exc))
                 return
     with col2:
         if st.button(t("cancel"), use_container_width=True):
@@ -115,21 +125,22 @@ def _login_form():
         "images//banner_3.png",
         use_container_width=True,
     )
-    st.subheader(t("customer_login"))
-    
-    with st.form("customer_login"):
-        user_id = st.text_input(t("user_id"), placeholder="e.g. U1001")
-        password = st.text_input(t("password"), type="password")
-        submitted = st.form_submit_button(t("log_in"), use_container_width=True)
+    _, mid, _ = st.columns([1, 1.2, 1])
+    with mid:
+        st.subheader(t("customer_login"))
+        with st.form("customer_login"):
+            user_id = st.text_input(t("user_id"), placeholder="e.g. U1001")
+            password = st.text_input(t("password"), type="password")
+            submitted = st.form_submit_button(t("log_in"), use_container_width=True)
 
-    if submitted:
-        with get_cursor(commit=True) as (conn, cur):
-            customer = authenticate_customer(cur, user_id, password, conn=conn)
-        if customer:
-            st.session_state.customer = customer
-            st.rerun()
-        else:
-            st.error(t("invalid_login"))
+        if submitted:
+            with get_cursor(commit=True) as (conn, cur):
+                customer = authenticate_customer(cur, user_id, password, conn=conn)
+            if customer:
+                st.session_state.customer = customer
+                st.rerun()
+            else:
+                st.error(t("invalid_login"))
 
 
 def _order_form():
@@ -241,7 +252,8 @@ def _order_form():
             return
 
         with st.spinner(t("processing_purchase")):
-            order_timestamp = datetime.now()
+            # Wall-clock Asia/Kolkata (matches DB session timezone)
+            order_timestamp = datetime.now(ZoneInfo("Asia/Kolkata")).replace(tzinfo=None)
             
             # FORMAT ADDRESS: "street, city, state zip_code"
             formatted_address = f"{street.strip()}, {city.strip()}, {state.strip()} {zip_code.strip()}"
@@ -271,9 +283,10 @@ def _order_form():
                     # Evaluate using both the cursor and the context
                     disposition = evaluate_order(cur, ctx)
                 
-                # Calculate approval and rejection timestamps based on fraud status
-                order_approved_at = None if disposition["is_fraud"] else order_timestamp
-                order_rejected_at = order_timestamp if disposition["is_fraud"] else None
+                # Only stamp approval/rejection times for terminal statuses
+                status = disposition["order_status"]
+                order_approved_at = order_timestamp if status == "APPROVED" else None
+                order_rejected_at = order_timestamp if status == "REJECTED" else None
 
                 # Send ALL detailed fields to the updated FastAPI backend
                 payload = {
@@ -313,7 +326,7 @@ def _order_form():
                 confirm_place_order(payload)
 
             except requests.exceptions.RequestException:
-                st.error("API connection failed or timed out. Please ensure the backend server is running and try again.")
+                st.error(t("err_api_connection"))
 
 
 def render():

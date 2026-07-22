@@ -1,5 +1,6 @@
 from typing import Dict, Any, List, Optional
 from fraud_engine.rules import RULE_CHECKS
+from fraud_engine.backlog import DEFAULT_DELAY_MINUTES
 
 STATUS_PRIORITY: Dict[str, int] = {
     "REJECTED": 3,
@@ -8,16 +9,16 @@ STATUS_PRIORITY: Dict[str, int] = {
     "APPROVED": 0,
 }
 
-# Maps database ENUM/VARCHAR actions to internal application statuses[cite: 7]
+# Maps database ENUM/VARCHAR actions to internal application statuses
 DB_ACTION_TO_STATUS: Dict[str, str] = {
     "REJECTED": "REJECTED",
     "HOLD": "ON_HOLD",
     "REVIEW": "PENDING_REVIEW",
-    "PASS": "APPROVED",  
-    "APPROVE": "APPROVED"   
+    "PASS": "APPROVED",
+    "APPROVE": "APPROVED",
 }
 
-# In-memory cache to minimize database hits[cite: 7]
+# In-memory cache to minimize database hits
 _RULE_METADATA_CACHE: Dict[str, Dict[str, Any]] = {}
 
 # Priority tiers for conflict resolution. Lower number = decided first.
@@ -36,55 +37,56 @@ DEFAULT_RULE_TIER = 2
 def _tier_for(rule_id: str) -> int:
     return RULE_TIER.get(rule_id, DEFAULT_RULE_TIER)
 
+
 def _get_rule_metadata(cursor: Any, rule_id: str) -> Dict[str, Any]:
-    """Fetches rule actions and intervals directly from the master.rule_master table[cite: 7]."""
+    """
+    Fetches rule action and delay_minutes from master.rule_master.
+
+    delay_minutes is the sole source of truth for review timeout — never
+    derive it from time_interval_* (those remain for velocity windows only).
+    """
     if rule_id not in _RULE_METADATA_CACHE:
         cursor.execute(
             """
-            SELECT action, time_interval_value, time_interval_unit 
-            FROM master.rule_master 
+            SELECT action, delay_minutes
+            FROM master.rule_master
             WHERE rule_id = %s
             """,
-            (rule_id,)
+            (rule_id,),
         )
         row = cursor.fetchone()
-        
+
         if row:
             action_str = row[0].upper() if row[0] else "REVIEW"
-            interval_val = row[1] or 0
-            interval_unit = (row[2] or "MINUTE").upper()
-            
-            # Convert everything to minutes[cite: 7]
-            if interval_unit == "HOUR":
-                delay_minutes = interval_val * 60
-            elif interval_unit == "DAY":
-                delay_minutes = interval_val * 1440
-            else:
-                delay_minutes = interval_val # Defaults to MINUTE
-                
+            delay_minutes = int(row[1]) if row[1] is not None else DEFAULT_DELAY_MINUTES
+            if delay_minutes <= 0:
+                delay_minutes = DEFAULT_DELAY_MINUTES
+
             _RULE_METADATA_CACHE[rule_id] = {
                 "action": DB_ACTION_TO_STATUS.get(action_str, "PENDING_REVIEW"),
-                "delay_minutes": delay_minutes
+                "delay_minutes": delay_minutes,
             }
         else:
-            _RULE_METADATA_CACHE[rule_id] = {"action": "PENDING_REVIEW", "delay_minutes": 0}
-            
+            _RULE_METADATA_CACHE[rule_id] = {
+                "action": "PENDING_REVIEW",
+                "delay_minutes": DEFAULT_DELAY_MINUTES,
+            }
+
     return _RULE_METADATA_CACHE[rule_id]
 
 
 def evaluate_order(cursor: Any, ctx: Dict[str, Any]) -> Dict[str, Any]:
-    """Run all rules against the order context and return the resolved disposition[cite: 7]."""
+    """Run all rules against the order context and return the resolved disposition."""
     triggered: List[Dict[str, str]] = []
-    
+
     for rule_id, check_fn in RULE_CHECKS:
         is_triggered, reason = check_fn(cursor, ctx)
         if is_triggered and reason:
-            # Shorten name if possible[cite: 7]
             rule_name = reason.split("—")[0].strip() if "—" in reason else rule_id
             triggered.append({
                 "rule_id": rule_id,
                 "rule_name": rule_name,
-                "rule_description": reason
+                "rule_description": reason,
             })
 
     if not triggered:
@@ -100,12 +102,12 @@ def evaluate_order(cursor: Any, ctx: Dict[str, Any]) -> Dict[str, Any]:
     delay_minutes = 0
 
     # Every triggered rule is recorded and contributes to the combined reason,
-    # but only the highest-priority TIER decides the final status/delay.
+    # but only the highest-priority TIER decides the final status.
     # Tier 0 (blacklists) beats tier 1 (iPhone rule) beats tier 2 (everything else).
     min_tier = min(_tier_for(rule["rule_id"]) for rule in triggered)
     deciding_rules = [rule for rule in triggered if _tier_for(rule["rule_id"]) == min_tier]
 
-    # Resolve strictness conflict within the deciding tier only[cite: 7]
+    # Resolve strictness conflict within the deciding tier only
     for rule in deciding_rules:
         meta = _get_rule_metadata(cursor, rule["rule_id"])
         action = meta["action"]
@@ -113,15 +115,18 @@ def evaluate_order(cursor: Any, ctx: Dict[str, Any]) -> Dict[str, Any]:
         if STATUS_PRIORITY[action] > STATUS_PRIORITY[final_status]:
             final_status = action
 
-        if action == "ON_HOLD":
-            delay_minutes = max(delay_minutes, meta["delay_minutes"])
+    # Review timeout: MAX delay_minutes across ALL triggered rules so every
+    # rule that tagged the order receives its full review window.
+    # delay_minutes is always read from rule_master (via _get_rule_metadata).
+    for rule in triggered:
+        meta = _get_rule_metadata(cursor, rule["rule_id"])
+        delay_minutes = max(delay_minutes, int(meta["delay_minutes"] or 0))
 
-    # Discard delay if stricter outcome found[cite: 7]
     if final_status == "REJECTED":
         delay_minutes = 0
+    elif final_status in ("ON_HOLD", "PENDING_REVIEW") and delay_minutes <= 0:
+        delay_minutes = DEFAULT_DELAY_MINUTES
 
-    # Combined reason includes ALL triggered rules (order passes through every rule),
-    # even though only the top-priority tier drives the status decision.
     combined_reason = "; ".join(rule["rule_description"] for rule in triggered)
     is_fraud = final_status == "REJECTED"
 
@@ -129,12 +134,13 @@ def evaluate_order(cursor: Any, ctx: Dict[str, Any]) -> Dict[str, Any]:
         "order_status": final_status,
         "delay_minutes": delay_minutes,
         "flagged_reason": combined_reason,
-        "triggered_rules": triggered, 
+        "triggered_rules": triggered,
         "is_fraud": is_fraud,
     }
 
+
 def clear_metadata_cache(rule_id: Optional[str] = None):
-    """Clears cached rule metadata[cite: 7]."""
+    """Clears cached rule metadata."""
     global _RULE_METADATA_CACHE
     if rule_id and rule_id in _RULE_METADATA_CACHE:
         del _RULE_METADATA_CACHE[rule_id]

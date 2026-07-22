@@ -54,6 +54,7 @@ class RuleUpdate(BaseModel):
     threshold_value: Optional[float] = None
     time_interval_value: Optional[int] = None
     time_interval_unit: Optional[str] = None
+    delay_minutes: Optional[int] = None
 
 
 # --- ANALYST ENDPOINTS ---
@@ -254,30 +255,83 @@ def update_rule(data: RuleUpdate):
     try:
         with psycopg2.connect(**DB_CONFIG) as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE master.rule_master 
-                    SET action = %s, 
-                        threshold_value = %s, 
-                        time_interval_value = %s, 
-                        time_interval_unit = %s
-                    WHERE rule_id = %s
-                    """,
-                    (
-                        data.action,
-                        data.threshold_value,
-                        data.time_interval_value,
-                        data.time_interval_unit,
-                        data.rule_id
+                # R001: delay_minutes is the only editable timing field
+                if data.rule_id == "R001":
+                    if data.delay_minutes is None or data.delay_minutes <= 0:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="R001 requires a positive delay_minutes value.",
+                        )
+                    cur.execute(
+                        """
+                        UPDATE master.rule_master
+                        SET action = %s,
+                            threshold_value = %s,
+                            time_interval_value = NULL,
+                            time_interval_unit = NULL,
+                            delay_minutes = %s
+                        WHERE rule_id = %s
+                        """,
+                        (
+                            data.action,
+                            data.threshold_value,
+                            data.delay_minutes,
+                            data.rule_id,
+                        ),
                     )
-                )
-                
-        # Clear the in-memory caches so the engine picks up the new config instantly
+                else:
+                    delay = data.delay_minutes
+                    if delay is not None and delay <= 0:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="delay_minutes must be a positive integer.",
+                        )
+                    if delay is None:
+                        cur.execute(
+                            """
+                            UPDATE master.rule_master
+                            SET action = %s,
+                                threshold_value = %s,
+                                time_interval_value = %s,
+                                time_interval_unit = %s
+                            WHERE rule_id = %s
+                            """,
+                            (
+                                data.action,
+                                data.threshold_value,
+                                data.time_interval_value,
+                                data.time_interval_unit,
+                                data.rule_id,
+                            ),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            UPDATE master.rule_master
+                            SET action = %s,
+                                threshold_value = %s,
+                                time_interval_value = %s,
+                                time_interval_unit = %s,
+                                delay_minutes = %s
+                            WHERE rule_id = %s
+                            """,
+                            (
+                                data.action,
+                                data.threshold_value,
+                                data.time_interval_value,
+                                data.time_interval_unit,
+                                delay,
+                                data.rule_id,
+                            ),
+                        )
+
         clear_interval_cache(data.rule_id)
         clear_metadata_cache(data.rule_id)
-        
+
         return {"message": f"Rule {data.rule_id} updated successfully"}
-        
+
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"Backend Error updating rule: {str(e)}") 
+        print(f"Backend Error updating rule: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

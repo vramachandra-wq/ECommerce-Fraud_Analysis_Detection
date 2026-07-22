@@ -1,5 +1,5 @@
 # Starts PostgreSQL (Podman), FastAPI, and both Streamlit portals.
-# First run: creates .venv, .env, installs dependencies, migrates passwords.
+# First run: creates .venv, .env, and installs dependencies.
 # If all services are already up: opens Google Chrome immediately.
 # Usage (from project root in PowerShell): .\start.ps1
 
@@ -11,7 +11,6 @@ Set-Location $ProjectRoot
 $RunDir = Join-Path $ProjectRoot ".run"
 $LogDir = Join-Path $RunDir "logs"
 $StateFile = Join-Path $RunDir "services.json"
-$MigrationMarker = Join-Path $RunDir "passwords-migrated"
 
 $ProjectUrls = @(
     "http://127.0.0.1:8000/docs",
@@ -49,14 +48,81 @@ function Write-Step([string]$Message) {
     Write-Host "==> $Message" -ForegroundColor Cyan
 }
 
+function Test-PodmanComposePlugin {
+    if (-not (Get-Command podman -ErrorAction SilentlyContinue)) {
+        return $false
+    }
+
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
+    try {
+        & podman compose version 1>$null 2>$null
+        return ($LASTEXITCODE -eq 0)
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+    }
+}
+
+function Find-PodmanComposeExecutable {
+    $fromPath = Get-Command podman-compose -ErrorAction SilentlyContinue
+    if ($fromPath) {
+        return $fromPath.Source
+    }
+
+    $roots = @()
+    if ($env:APPDATA) {
+        $roots += Join-Path $env:APPDATA "Python"
+    }
+    if ($env:LOCALAPPDATA) {
+        $roots += Join-Path $env:LOCALAPPDATA "Programs\Python"
+    }
+
+    foreach ($root in $roots) {
+        if (-not (Test-Path $root)) {
+            continue
+        }
+        $match = Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                $candidate = Join-Path $_.FullName "Scripts\podman-compose.exe"
+                if (Test-Path $candidate) { $candidate }
+            } |
+            Select-Object -First 1
+        if ($match) {
+            return $match
+        }
+    }
+
+    return $null
+}
+
 function Get-ComposeCommand {
-    if (Get-Command podman -ErrorAction SilentlyContinue) {
+    # Prefer podman-compose: Windows Podman often lacks the "podman compose" provider.
+    $podmanCompose = Find-PodmanComposeExecutable
+    if ($podmanCompose) {
+        return @{ Executable = $podmanCompose; Arguments = @() }
+    }
+
+    $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+    if ($pythonCmd) {
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = "SilentlyContinue"
+        try {
+            & python -c "import podman_compose" 1>$null 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                return @{ Executable = "python"; Arguments = @("-m", "podman_compose") }
+            }
+        }
+        finally {
+            $ErrorActionPreference = $previousPreference
+        }
+    }
+
+    if (Test-PodmanComposePlugin) {
         return @{ Executable = "podman"; Arguments = @("compose") }
     }
-    if (Get-Command podman-compose -ErrorAction SilentlyContinue) {
-        return @{ Executable = "podman-compose"; Arguments = @() }
-    }
-    throw "Podman not found. Install Podman and ensure it is on PATH."
+
+    throw "Neither podman-compose nor 'podman compose' is available. Install with: pip install podman-compose"
 }
 
 function Invoke-Compose {
@@ -290,29 +356,6 @@ function Wait-ForAllAppServices {
     }
 }
 
-function Invoke-PasswordMigrationIfNeeded {
-    if (Test-Path $MigrationMarker) {
-        return
-    }
-
-    $migrationScript = Join-Path $ProjectRoot "scripts\migrate_passwords.py"
-    if (-not (Test-Path $migrationScript)) {
-        Write-Host "Password migration script not found; skipping." -ForegroundColor Yellow
-        return
-    }
-
-    Write-Step "Running one-time password migration..."
-    $python = Get-PythonExecutable
-    & $python $migrationScript
-    if ($LASTEXITCODE -eq 0) {
-        (Get-Date).ToString("o") | Set-Content -Path $MigrationMarker -Encoding UTF8
-        Write-Host "Password migration complete." -ForegroundColor Green
-    }
-    else {
-        Write-Host "Password migration failed. Existing logins may still work via legacy fallback." -ForegroundColor Yellow
-    }
-}
-
 function Get-ChromeExecutable {
     $candidates = @(
         (Join-Path ${env:ProgramFiles} "Google\Chrome\Application\chrome.exe"),
@@ -359,7 +402,7 @@ function Show-ProjectInfo {
     Write-Host "  Analyst portal:   http://localhost:8502"
     Write-Host ""
     Write-Host "Logs: $LogDir"
-    Write-Host "Stop everything with: .\stop.ps"
+    Write-Host "Stop everything with: .\stop.ps1"
 }
 
 function Ensure-ApplicationServices {
@@ -421,7 +464,6 @@ Write-Step "Ensuring PostgreSQL container is up..."
 Invoke-Compose -ComposeArgs @("-f", "podman-compose.yaml", "up", "-d")
 Wait-ForDatabase
 Wait-ForDatabasePort
-Invoke-PasswordMigrationIfNeeded
 
 Write-Step "Starting application services..."
 $startedServices = Ensure-ApplicationServices

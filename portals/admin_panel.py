@@ -11,9 +11,9 @@ import plotly.express as px
 import streamlit as st
 from config import API_BASE_URL, API_TIMEOUT
 from database.connection import get_cursor
-from auth.analyst_auth import ALL_PAGES, PAGE_LABELS, creatable_roles_for, is_admin
-from fraud_engine.auto_approval import sync_expired_holds
+from auth.analyst_auth import ALL_PAGES, creatable_roles_for, is_admin
 from portals.analyst_dashboard import render_queue_and_review
+from portals.hold_sync import sync_database_holds
 from utils.queries import (
     get_active_blacklist_entry,
     get_active_phone_blacklist_entry,
@@ -195,21 +195,28 @@ def _tab_user_management(analyst: dict):
 def _tab_blacklists(analyst: dict):
     st.markdown(t("entity_blacklist_mgmt"))
     st.caption(t("blacklist_caption"))
-    
-    entity_options = [t("entity_ip"), t("entity_phone"), t("entity_email")]
-    if st.session_state.get("blacklist_entity_type") not in entity_options:
-        st.session_state.blacklist_entity_type = entity_options[0]
 
-    entity_type = st.radio(
+    # Stable keys so language switches do not break entity selection
+    entity_keys = ["ip", "phone", "email"]
+    entity_labels = {
+        "ip": t("entity_ip"),
+        "phone": t("entity_phone"),
+        "email": t("entity_email"),
+    }
+    if st.session_state.get("blacklist_entity_key") not in entity_keys:
+        st.session_state.blacklist_entity_key = "ip"
+
+    entity_key = st.radio(
         t("entity_type"),
-        entity_options,
+        entity_keys,
+        format_func=lambda k: entity_labels[k],
         horizontal=True,
         label_visibility="collapsed",
-        key="blacklist_entity_type",
+        key="blacklist_entity_key",
     )
 
     # --- IP SECTION ---
-    if entity_type == t("entity_ip"):
+    if entity_key == "ip":
         col_lookup, _ = st.columns([1, 1])
         with col_lookup:
             ip_address = st.text_input(t("ip_lookup"), placeholder="e.g. 203.0.113.111", key="ip_lookup")
@@ -237,7 +244,7 @@ def _tab_blacklists(analyst: dict):
                         confirm_blacklist_action("blacklist-ip", payload, f"IP {checked_ip}")
 
     # --- PHONE SECTION ---
-    elif entity_type == t("entity_phone"):
+    elif entity_key == "phone":
         col_lookup, _ = st.columns([1, 1])
         with col_lookup:
             phone = st.text_input(t("phone_lookup"), placeholder="e.g. +919876543210", key="phone_lookup")
@@ -265,7 +272,7 @@ def _tab_blacklists(analyst: dict):
                         confirm_blacklist_action("blacklist-phone", payload, f"Phone {checked_phone}")
 
     # --- EMAIL SECTION ---
-    else:
+    elif entity_key == "email":
         col_lookup, _ = st.columns([1, 1])
         with col_lookup:
             email = st.text_input(t("email_lookup"), placeholder="e.g. fraud@example.com", key="email_lookup")
@@ -324,14 +331,20 @@ def _tab_permissions(analyst: dict):
         cols = st.columns(3)
         for i, page_key in enumerate(ALL_PAGES):
             col = cols[i % 3]
+            page_label_key = {
+                "FRAUD_DASHBOARD": "nav_fraud_dashboard",
+                "ADMIN_PANEL": "nav_admin_panel",
+                "POWER_BI_DASHBOARD": "nav_power_bi",
+                "AI_CHATBOT": "nav_ai_chatbot",
+            }.get(page_key, page_key)
             selections[page_key] = col.checkbox(
-                PAGE_LABELS[page_key],
+                t(page_label_key),
                 value=page_key in selected_analyst["granted_pages"],
                 key=f"perm_{target_id}_{page_key}",
             )
             
         st.divider()
-        confirm_perms = st.checkbox(f"⚠️ I confirm these permission changes for {selected_analyst['employee_name']}.")
+        confirm_perms = st.checkbox(t("confirm_save_perms_chk"))
         submitted = st.form_submit_button(t("save_permissions"), type="primary")
 
     if submitted:
@@ -549,34 +562,36 @@ def _tab_rule_management():
     st.markdown(t("rule_config_mgmt"))
     st.caption(t("rule_config_caption"))
     
-    # 1. Fetch current rules 
+    # 1. Fetch current rules
     with get_cursor() as (conn, cur):
         cur.execute("""
-            SELECT rule_id, rule_name, rule_description, rule_type, 
-                   action, threshold_value, time_interval_value, time_interval_unit 
-            FROM master.rule_master 
+            SELECT rule_id, rule_name, rule_description, rule_type,
+                   action, threshold_value, time_interval_value, time_interval_unit,
+                   delay_minutes
+            FROM master.rule_master
             ORDER BY rule_id
         """)
         cols = [desc[0] for desc in cur.description]
         rules_data = [dict(zip(cols, row)) for row in cur.fetchall()]
-        
+
     if not rules_data:
         st.info(t("no_rules_found"))
         return
-        
+
     # 2. UI: Select a rule
     rule_options = {f"{r['rule_id']} - {r['rule_name']}": r for r in rules_data}
     selected_rule_label = st.selectbox(t("select_rule_modify"), options=list(rule_options.keys()))
     selected_rule = rule_options[selected_rule_label]
-    
+
     st.divider()
-    
-    st.markdown(f"**Description:** {_generate_rule_description(selected_rule)}")
-    st.markdown(f"**Detection Type:** `{selected_rule['rule_type']}`")
-    
+
+    st.markdown(f"{t('description_label')} {_generate_rule_description(selected_rule)}")
+    st.markdown(f"{t('detection_type_label')} `{selected_rule['rule_type']}`")
+    st.markdown(t("review_delay_label", minutes=selected_rule.get("delay_minutes", 60)))
+
     is_r001 = selected_rule['rule_id'] == 'R001'
     is_blacklist = 'blacklist' in selected_rule['rule_name'].lower()
-    
+
     # 3. Edit Form
     with st.form(f"edit_form_{selected_rule['rule_id']}"):
         st.subheader(t("configuration_parameters"))
@@ -595,13 +610,18 @@ def _tab_rule_management():
                 current_action = selected_rule['action']
                 action_idx = actions.index(current_action) if current_action in actions else 0
                 new_action = st.selectbox(t("rule_action"), actions, index=action_idx)
-        
+
         # 5. Handle Metrics (Split logic for Linkage vs Velocity/Behavioral)
-        requires_interval = (selected_rule['rule_type'] in ['VELOCITY', 'BEHAVIORAL'] or is_r001) and not is_blacklist
+        # R001: Time Interval is disabled; only Delay Minutes is editable.
+        requires_interval = (
+            selected_rule['rule_type'] in ['VELOCITY', 'BEHAVIORAL']
+            and not is_blacklist
+            and not is_r001
+        )
         requires_threshold = (selected_rule['rule_type'] in ['VELOCITY', 'BEHAVIORAL', 'LINKAGE']) and not is_blacklist
-        
+
         col_thresh, col_val, col_unit = st.columns(3)
-        
+
         with col_thresh:
             if requires_threshold:
                 current_threshold = float(selected_rule['threshold_value']) if selected_rule['threshold_value'] is not None else 0.0
@@ -609,27 +629,44 @@ def _tab_rule_management():
             else:
                 st.info(t("threshold_na"))
                 new_threshold = None
-                
+
         with col_val:
             if requires_interval:
                 current_interval_val = int(selected_rule['time_interval_value']) if selected_rule['time_interval_value'] is not None else 1
                 new_interval_val = st.number_input(t("time_interval"), min_value=1, value=current_interval_val, step=1)
+            elif is_r001:
+                st.info(t("interval_disabled_r001"))
+                new_interval_val = None
             else:
-                if not requires_threshold: 
+                if not requires_threshold:
                     st.info(t("interval_na"))
                 new_interval_val = None
-                
+
         with col_unit:
             if requires_interval:
-                units = ['MINUTE', 'HOUR', 'DAY', 'WEEK']
+                units = ['MINUTE', 'HOUR', 'DAY']
                 current_unit = selected_rule['time_interval_unit'] if selected_rule['time_interval_unit'] else 'MINUTE'
                 unit_idx = units.index(current_unit) if current_unit in units else 0
                 new_unit = st.selectbox(t("unit"), units, index=unit_idx)
             else:
                 new_unit = None
-                
+
+        # Delay Minutes — editable for all non-blacklist rules; required for R001
+        current_delay = int(selected_rule['delay_minutes']) if selected_rule.get('delay_minutes') else 60
+        if is_blacklist:
+            st.caption(t("delay_na_blacklist"))
+            new_delay = current_delay
+        else:
+            new_delay = st.number_input(
+                t("delay_minutes"),
+                min_value=1,
+                value=current_delay,
+                step=1,
+                help=t("delay_minutes_help"),
+            )
+
         submit = st.form_submit_button(t("review_changes"), type="primary")
-        
+
         # 6. Trigger the Modal Confirmation
         if submit:
             payload = {
@@ -637,17 +674,11 @@ def _tab_rule_management():
                 "action": new_action,
                 "threshold_value": new_threshold,
                 "time_interval_value": new_interval_val,
-                "time_interval_unit": new_unit
+                "time_interval_unit": new_unit,
+                "delay_minutes": new_delay,
             }
             _confirm_rule_update(payload, selected_rule['rule_id'])
 
-
-@st.cache_data(ttl=300)
-def sync_database_holds():
-    """Caches the database synchronization to prevent it from firing on every UI rerun."""
-    with get_cursor(commit=True) as (conn, cur):
-        sync_expired_holds(conn, cur)
-        
 
 def render():
     analyst = st.session_state.get("analyst")
@@ -656,7 +687,7 @@ def render():
         return
 
     st.header(t("admin_control_panel"))
-    st.caption(f"Logged in as: **{analyst['employee_name']}** ({analyst['role']})")
+    st.caption(t("logged_in_as_role", name=analyst["employee_name"], role=analyst["role"]))
 
     # Run the cached synchronization task
     sync_database_holds()

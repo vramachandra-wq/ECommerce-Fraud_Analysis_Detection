@@ -31,8 +31,8 @@ def _cursor(*fetch_results):
 # ---------------- R001 ----------------
 
 def test_r001_should_trigger():
-    # interval lookup from rule_master
-    cursor = _cursor((3, "HOUR"))
+    # R001 now reads delay_minutes from rule_master (fallback 60 if missing)
+    cursor = _cursor([180])
 
     ctx = {
         "program_id": "P2",
@@ -43,7 +43,7 @@ def test_r001_should_trigger():
 
     assert triggered is True
     assert "R001" in reason
-    assert "3 HOUR" in reason
+    assert "180-minute" in reason
 
 
 def test_r001_wrong_program():
