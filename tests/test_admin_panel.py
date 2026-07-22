@@ -12,8 +12,8 @@ from portals.admin_panel import (
     _build_api_url,
     _generate_rule_description,
     _send_api_request,
-    sync_database_holds,
 )
+from portals.hold_sync import sync_database_holds
 
 
 def test_build_api_url():
@@ -118,17 +118,19 @@ def test_generate_rule_description_linkage():
     assert "1" in desc
 
 
-@patch("portals.admin_panel.sync_expired_holds")
-@patch("portals.admin_panel.get_cursor")
+@patch("portals.hold_sync.sync_expired_holds")
+@patch("portals.hold_sync.get_cursor")
 def test_sync_database_holds_wires_auto_approval(mock_get_cursor, mock_sync):
     sync_database_holds.clear()
 
     mock_conn = MagicMock()
     mock_cur = MagicMock()
     mock_get_cursor.return_value.__enter__.return_value = (mock_conn, mock_cur)
+    mock_sync.return_value = 2
 
-    sync_database_holds()
+    updated = sync_database_holds()
 
+    assert updated == 2
     mock_get_cursor.assert_called_once_with(commit=True)
     mock_sync.assert_called_once_with(mock_conn, mock_cur)
 

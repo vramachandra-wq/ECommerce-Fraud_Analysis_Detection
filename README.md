@@ -1,100 +1,75 @@
-# 🛒 E-Commerce Real-Time, Rule-Based Fraud Detection & Analytics Platform
+# Metro Cart — E-Commerce Fraud Detection & Analytics Platform
 
-A real-time, rule-based fraud detection platform for e-commerce transactions that detects suspicious orders, automates fraud decisions, streamlines analyst investigations, and provides actionable insights through integrated analytics dashboards.
-
----
-
-# 📌 Overview
-
-The platform evaluates every customer order against configurable fraud detection rules before order fulfillment. Based on the triggered rules, the system can automatically:
-
-- ✅ Approve the order
-- ⏳ Hold the order
-- 🔍 Send the order for manual review
-- ❌ Reject the order
-
-The platform also provides:
-
-- Fraud Analyst Portal
-- Admin Panel
-- Rule Management System
-- Role-Based Access Control (RBAC)
-- Blacklist Management
-- AI Analytics Chatbot
-- Integrated Power BI Dashboards
+Real-time, rule-based fraud detection for e-commerce orders. The platform evaluates every purchase against configurable rules, automates hold/review/reject decisions, supports analyst investigation, and exposes analytics through Streamlit portals, FastAPI, Power BI, and an AI chatbot.
 
 ---
 
-# ✨ Features
+# Overview
 
-## Real-Time Fraud Detection
+When a customer places an order, the fraud engine applies rules from `master.rule_master` and can:
 
-- Rule-based fraud detection engine
-- Configurable fraud rules
-- Automatic fraud decisioning
-- Real-time order evaluation
+- Approve the order
+- Hold the order (`ON_HOLD`)
+- Send the order for manual review (`PENDING_REVIEW`)
+- Reject the order
 
-## Fraud Analyst Portal
+Held and review orders wait for `rule_master.delay_minutes`. After that window they become **backlog** and can be handled by analysts or **auto-approved** by the API scheduler on timeout.
 
-Fraud analysts can:
+Also included:
 
-- Review suspicious orders
-- Approve orders
-- Reject orders
-- Flag fraudulent orders
-- View order history
-
-## Admin Panel
-
-Administrators can:
-
-- Create analyst accounts
-- Manage users
-- Assign permissions
-- Manage dashboard access
-- Modify fraud rule thresholds
-- Update rule time intervals
-- Manage blacklist entries
-
-## Rule Management
-
-Supports configurable fraud rules including:
-
-- Static Rules
-- Velocity Rules
-- Behavioral Rules
-- Linkage Rules
-
-## Blacklist Management
-
-Maintain blacklists for:
-
-- IP Addresses
-- Email Addresses
-- Phone Numbers
-
-Blacklisted entities are automatically rejected during order evaluation.
-
-## Analytics
-
-Integrated Power BI dashboards provide insights into:
-
-- Fraud trends
-- Rule trigger frequency
-- Order status distribution
-- Analyst workload
-- Fraud investigation metrics
-
-## AI Chatbot
-
-Natural language interface for querying fraud and order-related data.
+- Customer purchase portal
+- Fraud Analyst Workspace (queue + backlog)
+- Admin Control Panel (users, permissions, rules, blacklists, analytics)
+- RBAC page permissions
+- AI analytics chatbot (Groq)
+- Power BI dashboards
+- English / Thai UI language toggle
+- bcrypt-hashed passwords
 
 ---
 
-# 📋 Fraud Detection Rules
+# Features
 
-| Rule | Description | Action |
-|------|-------------|--------|
+## Real-time fraud detection
+
+- Configurable static, velocity, behavioral, and linkage rules
+- Review timeout driven by `delay_minutes` (R001 default **180**; others typically **60**)
+- Max delay across triggered rules for multi-hit orders
+- Background auto-approval of expired holds/reviews (~60s)
+
+## Analyst portal
+
+- Pending review / hold queue and backlog management
+- Individual and bulk approve / reject / flag fraud (with confirmations)
+- Remaining-time timers and overdue highlighting
+- Change password from the **login page** (username + current password → new password → log in again)
+
+## Admin panel
+
+- Create analyst accounts (passwords hashed with bcrypt)
+- Page permissions and roles
+- Rule thresholds, intervals, and delay minutes (R001: delay only)
+- IP / email / phone blacklist management
+- KPI and rule analytics
+
+## AI chatbot
+
+- Natural-language questions over orders, fraud, revenue, customers, products, devices, and rules
+- SQL generation + validation (SELECT-only) via Groq
+- Charts and follow-up suggestions
+- Sensitive fields (`email`, `phone`, `address`, `ip`) masked in tables, charts, history, and logs
+
+## Localization & UX
+
+- UI language: English / Thai (chatbot answers stay in English)
+- Currency display: Thai Baht (฿)
+
+---
+
+# Fraud detection rules
+
+| Rule | Description | Typical action |
+|------|-------------|----------------|
 | P2 iPhone 16 Rule | High-risk product monitoring | Hold |
 | Email Velocity | Multiple orders from the same email | Review |
 | IP Velocity | Multiple orders from the same IP | Review |
@@ -110,205 +85,188 @@ Natural language interface for querying fraud and order-related data.
 
 ---
 
-# 🏗️ Technology Stack
+# Technology stack
 
 | Component | Technology |
-|------------|------------|
-| Backend API | FastAPI |
-| Database | PostgreSQL |
-| Frontend | Streamlit |
-| Analytics | Power BI |
-| AI Integration | Groq API |
-| Programming Language | Python |
-| Containerization | Podman |
+|-----------|------------|
+| Backend API | FastAPI (+ lifespan auto-approval scheduler) |
+| Database | PostgreSQL 15 (Podman Compose) |
+| Frontends | Streamlit (`customer_app.py`, `analyst_app.py`) |
+| Analytics | Power BI embed |
+| AI | Groq API |
+| Auth | bcrypt |
+| Language | Python 3.10+ |
+| Containers | Podman / podman-compose |
 
 ---
 
-# 📁 Project Structure
+# Project structure
 
 ```text
-ECOMMERCE-FRAUD_ANALYSIS_DETECTION/
-│
-├── ai/                    # AI chatbot and Groq integration
-├── api/                   # FastAPI endpoints
-├── auth/                  # Authentication modules
-├── data_csv/              # Sample datasets
-├── database/              # Database connection and repositories
-├── fraud_engine/          # Fraud detection engine and rules
-├── images/                # UI assets
-├── init_scripts/          # Database initialization scripts
-├── portals/               # Streamlit portal components
-├── ui/                    # UI styling
-├── utils/                 # Utility functions
-│
-├── analyst_app.py         # Fraud Analyst Streamlit application
-├── customer_app.py        # Customer Streamlit application
+ECommerce-Fraud_Analysis_Detection/
+├── ai/                         # Chatbot + Groq client + prompts
+├── api/                        # FastAPI routes + scheduler
+├── auth/                       # Customer / analyst auth + password hashing
+├── database/                   # Connection pool + repositories
+├── fraud_engine/               # Rules, engine, backlog, auto-approval, audit
+├── images/                     # UI assets
+├── init_scripts/ecommerce_fraud/
+│   └── schema.sql              # Full DDL + seed (Compose init)
+├── portals/                    # Streamlit pages (customer, analyst, admin, chatbot, …)
+├── scripts/
+│   └── hash_seed_passwords.py  # Optional: bcrypt-hash live/seed passwords
+├── tests/                      # Unit + integration tests
+├── ui/                         # Theme + i18n
+├── utils/                      # Queries, PII helpers, order utils
+├── analyst_app.py
+├── customer_app.py
 ├── config.py
 ├── podman-compose.yaml
 ├── requirements.txt
+├── start.ps1                   # Start DB + API + portals
+├── stop.ps1                    # Stop everything
 └── README.md
 ```
 
 ---
 
-# 🚀 Getting Started
+# Getting started
 
-## 1. Clone the Repository
+## Prerequisites
 
-```bash
-https://github.com/vramachandra-wq/ECommerce-Fraud_Analysis_Detection.git
+- Python 3.10+
+- Podman (with `podman-compose` available — `pip install podman-compose` if needed)
+- Chrome (optional; `start.ps1` opens portals)
+
+## Quick start (Windows)
+
+From the project root in PowerShell:
+
+```powershell
+.\start.ps1
 ```
 
----
+First run will:
 
-## 2. Create a Python Virtual Environment
+1. Create `.venv` and install `requirements.txt`
+2. Create `.env` from `.env.example` if missing
+3. Start PostgreSQL via `podman-compose.yaml`
+4. Start FastAPI (`:8000`) and Streamlit apps (`:8501`, `:8502`)
+5. Open the service URLs in Chrome
 
-### Windows
+Stop everything:
 
-```bash
+```powershell
+.\stop.ps1
+```
+
+### Service URLs
+
+| Service | URL |
+|---------|-----|
+| API docs | http://127.0.0.1:8000/docs |
+| Customer portal | http://localhost:8501 |
+| Analyst portal | http://localhost:8502 |
+
+App logs: `.run/logs/`
+
+### Demo logins (seed data)
+
+| Portal | ID / username | Password |
+|--------|---------------|----------|
+| Customer | `U1001` | `password123` |
+| Analyst | `analyst` | `secure123` |
+| Admin | `admin` | `admin123` |
+
+Passwords are stored as **bcrypt** hashes. Change password is available on the analyst **login** screen.
+
+## Environment
+
+Copy `.env.example` → `.env` and set at least:
+
+| Variable | Purpose |
+|----------|---------|
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | App DB connection |
+| `POSTGRES_*` / same credentials | Compose Postgres |
+| `GROQ_API_KEY` | AI chatbot (required for chatbot answers) |
+| `API_BASE_URL` | Streamlit → FastAPI (default `http://127.0.0.1:8000`) |
+| `POWER_BI_EMBED_URL` | Optional Power BI embed |
+
+## Database initialization
+
+Compose mounts `init_scripts/ecommerce_fraud/` → `/docker-entrypoint-initdb.d`.
+
+Postgres runs `schema.sql` **once** when the data volume is empty (rules with `delay_minutes`, backlog indexes, `order_review_audit`, seed users/orders).
+
+Rebuild DB from scratch:
+
+```powershell
+podman-compose -f podman-compose.yaml down -v
+.\start.ps1
+```
+
+Without `-v`, the existing volume is kept and init scripts are **not** re-run.
+
+Optional helper to bcrypt-hash any remaining plain-text passwords:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\hash_seed_passwords.py
+```
+
+## Manual setup (optional)
+
+```powershell
 python -m venv .venv
-```
-
-### Linux / macOS
-
-```bash
-python3 -m venv .venv
-```
-
----
-
-## 3. Activate the Virtual Environment
-
-### Windows
-
-```bash
-.venv\Scripts\activate
-```
-
-### Linux / macOS
-
-```bash
-source .venv/bin/activate
-```
-
----
-
-## 4. Install the Required Dependencies
-
-```bash
+.\.venv\Scripts\activate
 pip install -r requirements.txt
-```
-
----
-
-## 5. Start the PostgreSQL Database
-
-Build and start the Podman containers:
-
-```bash
-podman-compose up -d
-```
-
-Verify the containers are running:
-
-```bash
-podman ps
-```
-
----
-
-## 6. Access the Database Using pgAdmin (Optional)
-
-To inspect the database using **pgAdmin**, register a new server with the following configuration.
-
-| Parameter | Value |
-|-----------|-------|
-| **Server Name** | `ecommerce_fraud` |
-| **Host Name / Address** | `localhost` |
-| **Port** | `5434` |
-| **Maintenance Database** | `postgres` (or your configured database) |
-| **Username** | Value of `POSTGRES_USER` from the `.env` file |
-| **Password** | Value of `POSTGRES_PASSWORD` from the `.env` file |
-
-After registering the server, you can browse the schemas, tables, views, and execute SQL queries directly from pgAdmin.
-
----
-
-## 7. Start the FastAPI Backend
-
-Open a new terminal, activate the virtual environment, and start the FastAPI service:
-
-```bash
-uvicorn api.main:app --reload
-```
-
-The API will be available at:
-
-```
-http://127.0.0.1:8000
-```
-
----
-
-## 8. Launch the Streamlit Applications
-
-Open **two separate terminals**, activate the Python virtual environment in both, and run the following commands.
-
-### Terminal 1 – Customer Portal
-
-```bash
+Copy-Item .env.example .env   # edit DB_* / GROQ_API_KEY
+podman-compose -f podman-compose.yaml up -d
+uvicorn api.main:app --reload --host 127.0.0.1 --port 8000
 streamlit run customer_app.py --server.port 8501
-```
-
-Customer Portal:
-
-```
-http://localhost:8501
-```
-
----
-
-### Terminal 2 – Fraud Analyst Portal
-
-```bash
 streamlit run analyst_app.py --server.port 8502
 ```
 
-Fraud Analyst Portal:
+## Tests
 
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
 ```
-http://localhost:8502
-```
+
+## pgAdmin (optional)
+
+| Parameter | Value |
+|-----------|-------|
+| Host | `localhost` |
+| Port | `5434` (or `DB_PORT` from `.env`) |
+| Database | `DB_NAME` / `POSTGRES_DB` |
+| Username | `DB_USER` / `POSTGRES_USER` |
+| Password | `DB_PASSWORD` / `POSTGRES_PASSWORD` |
 
 ---
 
-# 👥 User Roles
+# User roles
 
 ## Customer
 
 - Place orders
 - Track order status
 
-## Fraud Analyst
+## Fraud analyst
 
-- Review suspicious orders
-- Approve orders
-- Reject orders
-- Flag fraudulent orders
-- Investigate rule triggers
+- Review holds / pending reviews / backlog
+- Approve, reject, or flag fraud
+- Use AI chatbot and allowed dashboards (per permissions)
 
 ## Administrator
 
-- Create and manage analyst accounts
-- Configure fraud rules
-- Modify thresholds and time intervals
-- Manage blacklist entries
-- Assign dashboard permissions
-- Manage platform access
+- Manage analysts and page permissions
+- Configure rules and delay minutes
+- Manage blacklists
+- Full portal access
 
 ---
 
-# 📊 Platform Workflow
+# Platform workflow
 
 ```text
                  Customer Places Order
@@ -322,26 +280,24 @@ http://localhost:8502
         └──────────────────────────────────┘
                          │
                          ▼
-              Fraud Analyst Portal
+         Delay window (rule_master.delay_minutes)
                          │
-          ┌──────────────┼──────────────┐
-          ▼              ▼              ▼
-      Approve        Reject       Flag Fraud
-                         │
-                         ▼
-                 Final Order Status
+            ┌────────────┴────────────┐
+            ▼                         ▼
+     Analyst Workspace         Auto-approval
+     (backlog / review)        (after timeout)
+            │
+            ▼
+     Final status + order_review_audit
 ```
 
 ---
 
-# 🔒 Security Features
+# Security
 
-- Role-Based Access Control (RBAC)
-- Secure User Authentication
-- IP Address Blacklisting
-- Email Address Blacklisting
-- Phone Number Blacklisting
-- Configurable Rule-Based Fraud Detection
-- Administrative Access Control
-
----
+- RBAC page permissions
+- bcrypt password hashing (create user + change password + seed data)
+- Legacy plain-text passwords upgraded on successful login when present
+- IP / email / phone blacklists
+- Chatbot PII masking for email, phone, address, and IP in UI/charts/logs
+- Analyst password change on the login page (verified current password required)

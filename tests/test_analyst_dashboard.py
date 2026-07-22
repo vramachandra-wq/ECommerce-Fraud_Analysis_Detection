@@ -5,8 +5,8 @@ import requests
 from portals.analyst_dashboard import (
     _build_api_url,
     _send_api_request,
-    sync_database_holds,
 )
+from portals.hold_sync import sync_database_holds
 
 
 def test_build_api_url():
@@ -64,8 +64,8 @@ def test_send_api_request_timeout(mock_put, mock_st):
     mock_st.error.assert_called()
 
 
-@patch("portals.analyst_dashboard.sync_expired_holds")
-@patch("portals.analyst_dashboard.get_cursor")
+@patch("portals.hold_sync.sync_expired_holds")
+@patch("portals.hold_sync.get_cursor")
 def test_sync_database_holds_calls_auto_approval(mock_get_cursor, mock_sync):
     sync_database_holds.clear()
 
