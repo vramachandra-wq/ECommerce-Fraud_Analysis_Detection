@@ -15,6 +15,10 @@ def pytest_configure(config):
         "markers",
         "integration: end-to-end tests that require a live PostgreSQL database",
     )
+    config.addinivalue_line(
+        "markers",
+        "live_groq: optional smoke tests that call the real Groq API (set RUN_LIVE_GROQ=1)",
+    )
 
 
 def pytest_collection_modifyitems(config, items):
