@@ -235,35 +235,58 @@ def update_permissions_bulk(payload: BulkPermissionUpdate):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+ALLOWED_RULE_ACTIONS = {"HOLD", "REVIEW", "REJECTED", "PASS"}
+
+
 @router.put("/update-rule")
 def update_rule(data: RuleUpdate):
+    action = (data.action or "").strip().upper()
+    if action not in ALLOWED_RULE_ACTIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid action '{data.action}'. Must be one of: {', '.join(sorted(ALLOWED_RULE_ACTIONS))}",
+        )
+
+    unit = (data.time_interval_unit or "").strip().upper() or None
+    if unit is not None and unit not in {"MINUTE", "HOUR", "DAY", "WEEK"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid time_interval_unit '{data.time_interval_unit}'.",
+        )
+
     try:
         with psycopg2.connect(**DB_CONFIG) as conn:
             with conn.cursor() as cur:
+                # COALESCE keeps existing threshold/interval when the UI sends null
+                # for fields that are N/A for that rule type (e.g. linkage has no window).
                 cur.execute(
                     """
-                    UPDATE master.rule_master 
-                    SET action = %s, 
-                        threshold_value = %s, 
-                        time_interval_value = %s, 
-                        time_interval_unit = %s
+                    UPDATE master.rule_master
+                    SET action = %s,
+                        threshold_value = COALESCE(%s, threshold_value),
+                        time_interval_value = COALESCE(%s, time_interval_value),
+                        time_interval_unit = COALESCE(%s, time_interval_unit)
                     WHERE rule_id = %s
                     """,
                     (
-                        data.action,
+                        action,
                         data.threshold_value,
                         data.time_interval_value,
-                        data.time_interval_unit,
-                        data.rule_id
-                    )
+                        unit,
+                        data.rule_id,
+                    ),
                 )
-                
+                if cur.rowcount == 0:
+                    raise HTTPException(status_code=404, detail=f"Rule {data.rule_id} not found")
+
         # Clear the in-memory caches so the engine picks up the new config instantly
         clear_interval_cache(data.rule_id)
         clear_metadata_cache(data.rule_id)
-        
-        return {"message": f"Rule {data.rule_id} updated successfully"}
-        
+
+        return {"message": f"Rule {data.rule_id} updated successfully", "action": action}
+
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"Backend Error updating rule: {str(e)}") 
+        print(f"Backend Error updating rule: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

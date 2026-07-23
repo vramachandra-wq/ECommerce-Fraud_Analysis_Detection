@@ -270,11 +270,42 @@ http://localhost:8501
 
 ### Terminal 2 – Fraud Analyst Portal
 
+**Option A — Web UI (no Node.js required)**
+
+```bash
+uvicorn api.main:app --reload
+```
+
+Analyst Portal (served by FastAPI):
+
+```
+http://127.0.0.1:8000/portal/
+```
+
+**Option B — React dev server (requires Node.js 18+)**
+
+```bash
+uvicorn api.main:app --reload
+cd analyst-portal
+npm install
+npm run dev
+```
+
+React Analyst Portal:
+
+```
+http://localhost:5173
+```
+
+See `analyst-portal/README.md` for React setup. Use Option A if Node.js is not installed.
+
+**Option C — Streamlit UI (legacy)**
+
 ```bash
 streamlit run analyst_app.py --server.port 8502
 ```
 
-Fraud Analyst Portal:
+Fraud Analyst Portal (Streamlit):
 
 ```
 http://localhost:8502
@@ -283,6 +314,8 @@ http://localhost:8502
 ---
 
 # 👥 User Roles
+
+> **Company laptop / no Node.js?** See **[ANALYST_PORTAL.md](ANALYST_PORTAL.md)** — use `http://127.0.0.1:8000/portal/` or double-click `run_analyst_portal.bat`. Node.js is **not** required.
 
 ## Customer
 

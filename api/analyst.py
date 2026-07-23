@@ -13,7 +13,7 @@ class ApproveOrderRequest(BaseModel):
     order_id: str
     approved_at: str
     reviewed_by: str
-    review_comments: str
+    review_comments: Optional[str] = None
 
 class RejectOrderRequest(BaseModel):
     order_id: str
@@ -26,7 +26,7 @@ class BatchApproveRequest(BaseModel):
     order_ids: List[str]
     approved_at: str
     reviewed_by: str
-    review_comments: str
+    review_comments: Optional[str] = None
 
 class BatchRejectRequest(BaseModel):
     order_ids: List[str]

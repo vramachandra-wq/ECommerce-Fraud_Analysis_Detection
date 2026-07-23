@@ -1,4 +1,4 @@
-from config import GROQ_API_KEY, GROQ_REPAIR_MODEL, GROQ_SQL_MODEL, GROQ_SUMMARY_MODEL
+﻿from config import GROQ_API_KEY, GROQ_INTENT_MODEL, GROQ_REPAIR_MODEL, GROQ_SQL_MODEL, GROQ_SUMMARY_MODEL
 
 MAX_HISTORY = 8
 MAX_STORED_MESSAGES = 100
@@ -8,12 +8,40 @@ MARKDOWN_PREVIEW_ROWS = 15
 # of business commentary comfortably needs more headroom than that.
 SUMMARY_MAX_TOKENS = 900
 
-# Intent classification only ever returns a single label, so this stays tiny.
-INTENT_MAX_TOKENS = 12
+# NOTE ON REASONING MODELS (openai/gpt-oss-20b / gpt-oss-120b via Groq):
+# These models spend part of max_completion_tokens on an internal reasoning
+# pass BEFORE writing the visible answer. If reasoning eats the whole budget,
+# the visible content comes back empty/truncated. Every *_MAX_TOKENS value
+# below therefore includes headroom for reasoning, not just the final
+# answer, and every call site pairs its budget with an explicit
+# *_REASONING_EFFORT (kept "low" for mechanical/deterministic tasks to save
+# tokens, "medium" where real business reasoning improves answer quality).
 
-# Advisory answers (GENERAL intent) are prose recommendations, similar
-# budget need to the executive summary.
-ADVISORY_MAX_TOKENS = 900
+# Intent classification returns a single label, but the model still reasons
+# first ΓÇö 12 tokens left zero room for that reasoning, so the classifier was
+# effectively always timing out and silently defaulting to NEW_QUERY. This
+# is the main reason follow-up / advisory questions weren't being handled.
+INTENT_MAX_TOKENS = 200
+INTENT_REASONING_EFFORT = "low"
+
+# Advisory answers (GENERAL intent) are prose recommendations/strategy ΓÇö
+# "medium" effort because grounding strategic or creative advice in the
+# right numbers benefits from real reasoning, not just pattern completion.
+ADVISORY_MAX_TOKENS = 1400
+ADVISORY_REASONING_EFFORT = "medium"
+
+# SQL generation: schema + rules are fully spelled out in the prompt, so
+# this is a mechanical construction task ΓÇö "low" effort keeps it fast and
+# cheap without hurting correctness. Extra headroom covers reasoning + CTEs.
+SQL_MAX_TOKENS = 1800
+SQL_REASONING_EFFORT = "low"
+
+# Repair model only needs to output a corrected SQL block, not prose ΓÇö same
+# reasoning as SQL generation.
+REPAIR_MAX_TOKENS = 1200
+REPAIR_REASONING_EFFORT = "low"
+
+SUMMARY_REASONING_EFFORT = "medium"
 
 SCHEMA_CONTEXT = """
 Schema: master
@@ -37,7 +65,7 @@ Tables:
    - category (VARCHAR)
    - product_name (VARCHAR)
    - quantity (INTEGER)
-   - amount (NUMERIC)
+   - amount (NUMERIC, in INR)
    - order_timestamp (TIMESTAMP)
    - order_status (VARCHAR)
    - order_approved_at (TIMESTAMP)
@@ -91,7 +119,9 @@ Tables:
    - rule_description
    - rule_type
    - action
-   - threshold_value
+   - threshold_value (NUMERIC)
+   - time_interval_value (INTEGER)
+   - time_interval_unit (VARCHAR) -- e.g. MINUTE, HOUR, DAY, WEEK
    - created_at
 
 RELATIONSHIPS
@@ -139,9 +169,9 @@ NEW_QUERY
   frame (e.g. "Top 10 customers by spending", "Fraud rate by state").
 
 FOLLOWUP_QUERY
-  A question that requires a NEW database query — because it needs a
+  A question that requires a NEW database query ΓÇö because it needs a
   different grain, dimension, metric, filter, ranking, or time frame than
-  what's already in the conversation — AND only makes sense in light of the
+  what's already in the conversation ΓÇö AND only makes sense in light of the
   previous question or result. Signs of this include:
     - Pronouns or implicit references ("those orders", "that customer", "them", "it")
     - Requests to filter, narrow, sort, drill into, or re-aggregate the prior
@@ -152,7 +182,7 @@ FOLLOWUP_QUERY
       ("what about last month instead", "and for Bangalore?", "same but for devices")
     - Requests for advice/strategy/recommendations that first require
       numbers not yet fetched (e.g. asking about "lowest revenue states"
-      when only city-level data has been shown so far — the state-level
+      when only city-level data has been shown so far ΓÇö the state-level
       ranking must be queried before it can be discussed)
 
 GENERAL
@@ -160,12 +190,12 @@ GENERAL
   exact facts it depends on are ALREADY fully present in the conversation
   history below. This covers requests for opinions, explanations, strategy,
   recommendations, interpretation, or discussion that can be answered using
-  only the data already shown plus general business reasoning — with no new
+  only the data already shown plus general business reasoning ΓÇö with no new
   numbers needed. Examples: "why might this be happening", "what do you
   think is causing this trend in what we just saw", "summarize what we've
   found so far", "which of these results should we prioritize first".
 
-When in doubt between FOLLOWUP_QUERY and GENERAL, prefer FOLLOWUP_QUERY —
+When in doubt between FOLLOWUP_QUERY and GENERAL, prefer FOLLOWUP_QUERY ΓÇö
 running an unnecessary query is far less costly than giving strategic advice
 grounded in numbers that were never actually retrieved.
 
@@ -177,7 +207,7 @@ You are a Senior E-commerce Business and Fraud Strategy Analyst having an
 ongoing conversation with a business user.
 
 The user is asking a question that does NOT require running a new database
-query — it's a request for opinion, explanation, strategy, or interpretation.
+query ΓÇö it's a request for opinion, explanation, strategy, or interpretation.
 Answer it using:
 
 1. The conversation history below (previous questions and summarized results).
@@ -186,21 +216,26 @@ Answer it using:
 
 Guidelines:
 
-• Answer the question directly — do not say you are unable to query the database.
+ΓÇó Answer the question directly ΓÇö do not say you are unable to query the database.
 
-• Ground specific claims (numbers, city/state/product names) in the data
+ΓÇó Ground specific claims (numbers, city/state/product names) in the data
   provided below whenever possible; don't invent figures that aren't there.
 
-• If the data needed to fully answer isn't available in what's shown below,
+ΓÇó NEVER fabricate or estimate specific numbers, percentages, or named entities
+  that are not present in the data below. If you need a figure to make a point
+  and it isn't in the data, say "the data doesn't show this" and suggest the
+  follow-up question that would retrieve it.
+
+ΓÇó If the data needed to fully answer isn't available in what's shown below,
   say so plainly and suggest what follow-up question or data would help,
   but still give what useful guidance you can.
 
-• Do NOT write, mention, or offer to write SQL — this is a discussion turn,
+ΓÇó Do NOT write, mention, or offer to write SQL ΓÇö this is a discussion turn,
   not a query turn.
 
-• Use clear business language, not technical jargon.
+ΓÇó Use clear business language, not technical jargon.
 
-• Structure the answer as 3-8 concise bullet points, ending with one clear,
+ΓÇó Structure the answer as 3-8 concise bullet points, ending with one clear,
   actionable recommendation.
 
 Conversation so far:
@@ -216,114 +251,29 @@ User's question:
 SQL_SYSTEM_PROMPT = f"""
 You are an expert PostgreSQL Data Analyst specializing in E-commerce Fraud Detection, Sales Analytics, Customer Analytics, Product Analytics, Revenue Analytics, Device Analytics, and Fraud Rule Analytics.
 
-Generate accurate, optimized PostgreSQL SQL queries based ONLY on the schema provided below.
+Generate accurate, optimized PostgreSQL SQL queries based ONLY on the schema and rules below.
 
 {SCHEMA_CONTEXT}
-
-=========================
-DATABASE RULES
-=========================
-
-• Schema name is always master.
-
-• The primary fact table is:
-    master.orders
-
-• Dimension / Lookup tables:
-    master.customers
-    master.products
-    master.device_master
-    master.order_rule_hits
-    master.rule_master
-
-=========================
-TABLE RELATIONSHIPS
-=========================
-
-orders.user_id = customers.user_id
-
-orders.product_id = products.product_id
-
-orders.device_id = device_master.device_id
-
-orders.order_id = order_rule_hits.order_id
-
-order_rule_hits.rule_id = rule_master.rule_id
-
-Never invent joins.
-
-Never join unrelated tables.
-
-Only join a table when a column from that table is required.
-
-=========================
-BUSINESS RULES
-=========================
-
-Fraud Order
-
-orders.is_fraud = TRUE
-
-Legitimate Order
-
-orders.is_fraud = FALSE
-
-Order Status values
-
-APPROVED
-REJECTED
-
-One order may trigger multiple fraud rules.
-
-Every fraud order has at least one record inside order_rule_hits.
-
-orders already contains
-
-customer_name
-email
-phone_number
-address
-city
-state
-country
-category
-product_name
-
-Therefore do NOT join customers or products unless additional columns are needed.
 
 =========================
 SQL GENERATION RULES
 =========================
 
-Always generate PostgreSQL SQL.
+ΓÇó Always generate PostgreSQL SQL.
 
-Always generate only SELECT statements.
+ΓÇó Always generate only SELECT statements. WITH (CTEs) are allowed.
 
-WITH (CTEs) are allowed.
+ΓÇó Never generate: INSERT, UPDATE, DELETE, DROP, TRUNCATE, ALTER, CREATE, GRANT, REVOKE.
 
-Never generate
+ΓÇó Never use SELECT *.
 
-INSERT
+ΓÇó Never include comments (-- or /* */) in the generated SQL. Return the bare query only.
 
-UPDATE
+ΓÇó All monetary amounts (orders.amount) are in Indian Rupees (INR, Γé╣). Format aggregates accordingly.
 
-DELETE
+ΓÇó Always apply a LIMIT clause (default LIMIT 100) unless the question explicitly asks for all records or a specific count like "Top N". For ranking queries use the N requested.
 
-DROP
-
-TRUNCATE
-
-ALTER
-
-CREATE
-
-GRANT
-
-REVOKE
-
-Never use SELECT *.
-
-Never include comments (-- or /* */) in the generated SQL. Return the bare query only.
+ΓÇó For date/time filtering, use orders.order_timestamp. Cast or truncate using PostgreSQL date functions (DATE_TRUNC, EXTRACT, ::date) as needed.
 """
 
 SUMMARY_SYSTEM_PROMPT_BASE = """
@@ -333,25 +283,27 @@ Your job is to explain query results to business users in simple English.
 
 Guidelines:
 
-• Start with a direct answer.
+ΓÇó Start with a direct answer.
 
-• Mention important numbers.
+ΓÇó Mention important numbers. All monetary amounts are in Indian Rupees (INR, Γé╣) ΓÇö always prefix currency figures with Γé╣.
 
-• Highlight fraud patterns if present.
+ΓÇó NEVER invent or estimate numbers not present in the query result below. Only cite figures that appear in the data.
 
-• Highlight customer, product, device, revenue or rule insights whenever applicable.
+ΓÇó Highlight fraud patterns if present.
 
-• Mention unusual spikes, trends or anomalies.
+ΓÇó Highlight customer, product, device, revenue or rule insights whenever applicable.
 
-• Do NOT explain SQL.
+ΓÇó Mention unusual spikes, trends or anomalies.
 
-• Do NOT mention tables, joins, queries or databases.
+ΓÇó Do NOT explain SQL.
 
-• Use business language only.
+ΓÇó Do NOT mention tables, joins, queries or databases.
 
-• End with one actionable recommendation if the data supports it.
+ΓÇó Use business language only.
 
-• Keep the summary between 4 and 8 bullet points.
+ΓÇó End with one actionable recommendation if the data supports it.
+
+ΓÇó Keep the summary between 4 and 8 bullet points.
 
 User Question:
 {user_query}
@@ -365,31 +317,31 @@ You are a Senior E-commerce Growth Strategist and Business Analyst.
 
 The user is asking for STRATEGIES or RECOMMENDATIONS, grounded in the fresh
 query result below. Your job is to turn that data into concrete, actionable
-strategies — not just a one-line insight summary.
+strategies ΓÇö not just a one-line insight summary.
 
 Guidelines:
 
-• Open with one sentence naming the specific entities the data points to
+ΓÇó Open with one sentence naming the specific entities the data points to
   (e.g. the actual lowest-performing states/cities/products named in the
   result), not a generic statement.
 
-• Propose 4-6 distinct, concrete strategies. Each should be specific to what
+ΓÇó Propose 4-6 distinct, concrete strategies. Each should be specific to what
   the data shows, not generic business advice that could apply to any company.
 
-• Where useful, tie a strategy to a specific number from the result (e.g.
-  "State X trails the median by ₹Y — targeted local promotions here could
+ΓÇó Where useful, tie a strategy to a specific number from the result (e.g.
+  "State X trails the median by Γé╣Y ΓÇö targeted local promotions here could
   close much of that gap").
 
-• Mention fraud, device, or customer-behavior risk factors only if the data
+ΓÇó Mention fraud, device, or customer-behavior risk factors only if the data
   or prior conversation suggests they're relevant to the growth question.
 
-• Do NOT explain SQL. Do NOT mention tables, joins, queries, or databases.
+ΓÇó Do NOT explain SQL. Do NOT mention tables, joins, queries, or databases.
 
-• Use clear business language.
+ΓÇó Use clear business language.
 
-• Close with a single sentence on which strategy to prioritize first and why.
+ΓÇó Close with a single sentence on which strategy to prioritize first and why.
 
-• Keep the response to 4-6 bullet points plus the closing prioritization line.
+ΓÇó Keep the response to 4-6 bullet points plus the closing prioritization line.
 
 User Question:
 {user_query}
@@ -431,39 +383,53 @@ TRUNCATE
 GRANT
 REVOKE
 
-6. Never access:
-customers.password
+6. Never access: customers.password
 
-7. Use only these tables:
+7. Use only the tables, columns, and joins defined in the schema above. Do not invent tables, columns, or relationships.
 
-master.orders
-master.customers
-master.products
-master.device_master
-master.order_rule_hits
-master.rule_master
+8. Do not join unnecessary tables. Prefer master.orders whenever possible.
 
-8. Use these joins only:
+9. Preserve the original business intent of the query.
 
-orders.user_id = customers.user_id
-
-orders.product_id = products.product_id
-
-orders.device_id = device_master.device_id
-
-orders.order_id = order_rule_hits.order_id
-
-order_rule_hits.rule_id = rule_master.rule_id
-
-9. Do not join unnecessary tables.
-
-10. Prefer orders whenever possible.
-
-11. Preserve the original business intent.
-
-12. Never include comments (-- or /* */) in the returned SQL. Return the bare query only.
+10. Never include comments (-- or /* */) in the returned SQL. Return the bare query only.
 
 Original SQL
 
 {sql}
+"""
+
+RECOMMENDATION_MAX_TOKENS = 900
+RECOMMENDATION_REASONING_EFFORT = "medium"
+
+AI_RECOMMENDATION_PROMPT = """
+You are an analytics assistant for an e-commerce fraud detection platform.
+
+Given the user question, SQL, executive summary, conversation history, and a small data preview,
+return ONLY valid JSON with this exact shape:
+
+{{
+  "followups": ["question 1", "question 2", "question 3"],
+  "business_advice": ["advice 1", "advice 2", "advice 3"]
+}}
+
+Rules:
+- followups must be short, concrete analytics questions a fraud analyst would ask next
+- business_advice must be actionable and grounded in the provided summary/data
+- Do not invent tables or metrics that are not supported by the schema/result
+- Return JSON only. No markdown fences.
+
+User Question:
+{user_query}
+
+SQL:
+{sql_query}
+
+Executive Summary:
+{summary}
+
+Conversation History:
+{conversation_history}
+
+Data Preview:
+{data_preview}
 """

@@ -43,9 +43,11 @@ def _get_rule_metadata(cursor: Any, rule_id: str) -> Dict[str, Any]:
                 delay_minutes = interval_val * 60
             elif interval_unit == "DAY":
                 delay_minutes = interval_val * 1440
+            elif interval_unit == "WEEK":
+                delay_minutes = interval_val * 10080
             else:
-                delay_minutes = interval_val # Defaults to MINUTE
-                
+                delay_minutes = interval_val  # Defaults to MINUTE
+
             _RULE_METADATA_CACHE[rule_id] = {
                 "action": DB_ACTION_TO_STATUS.get(action_str, "PENDING_REVIEW"),
                 "delay_minutes": delay_minutes
@@ -80,22 +82,24 @@ def evaluate_order(cursor: Any, ctx: Dict[str, Any]) -> Dict[str, Any]:
             "is_fraud": False,
         }
 
-    final_status = "PENDING_REVIEW"
+    # Start at APPROVED so PASS (least strict) can resolve correctly when it
+    # is the only / softest triggered action. Stricter actions then escalate.
+    final_status = "APPROVED"
     delay_minutes = 0
 
     # Resolve strictness conflict[cite: 7]
     for rule in triggered:
         meta = _get_rule_metadata(cursor, rule["rule_id"])
         action = meta["action"]
-        
+
         if STATUS_PRIORITY[action] > STATUS_PRIORITY[final_status]:
             final_status = action
-            
+
         if action == "ON_HOLD":
             delay_minutes = max(delay_minutes, meta["delay_minutes"])
 
     # Discard delay if stricter outcome found[cite: 7]
-    if final_status == "REJECTED":
+    if final_status != "ON_HOLD":
         delay_minutes = 0
 
     combined_reason = "; ".join(rule["rule_description"] for rule in triggered)

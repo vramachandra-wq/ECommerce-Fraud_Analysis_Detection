@@ -195,6 +195,20 @@ def get_permission_matrix(cursor: Any) -> List[Dict[str, Any]]:
     return analysts
 
 
+def get_all_rules(cursor: Any) -> List[Dict[str, Any]]:
+    """Fetches all fraud rules for admin configuration."""
+    cursor.execute(
+        """
+        SELECT rule_id, rule_name, rule_description, rule_type,
+               action, threshold_value, time_interval_value, time_interval_unit
+        FROM master.rule_master
+        ORDER BY rule_id
+        """
+    )
+    cols = [d.name for d in cursor.description]
+    return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+
 def get_analyst_performance(cursor: Any) -> pd.DataFrame:
     """Calculates analyst review statistics."""
     cursor.execute(
