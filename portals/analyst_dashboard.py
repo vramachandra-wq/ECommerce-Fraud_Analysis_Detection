@@ -23,13 +23,6 @@ from utils.queries import (
 from utils.pii import display_pii
 from ui.i18n import t, cur_sym, format_duration_minutes
 
-STATUS_ICONS = {
-    "ON_HOLD": "⏳",
-    "PENDING_REVIEW": "🕵️",
-    "APPROVED": "✅",
-    "REJECTED": "🚫",
-}
-
 
 def _build_api_url(path: str) -> str:
     return f"{API_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
@@ -69,6 +62,11 @@ def inject_dashboard_css():
           gap: 0.55rem;
           font-size: 1.25rem;
         }
+        .workspace-kicker {
+          color: var(--mc-muted, #9ca3af);
+          font-size: 0.9rem;
+          margin: 0 0 1rem 0;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -77,7 +75,7 @@ def inject_dashboard_css():
 
 # --- CONFIRMATION DIALOGS (single set used by queue + backlog) ---
 
-@st.dialog("Confirm Approval")
+@st.dialog(t("dlg_confirm_approval_title"))
 def confirm_approve_order(analyst_id, order_id, comments, *, backlog_bulk_wording=False):
     st.write(t("confirm_approve_one"))
     if st.button(t("confirm_approve_btn"), type="primary", use_container_width=True):
@@ -99,7 +97,7 @@ def confirm_approve_order(analyst_id, order_id, comments, *, backlog_bulk_wordin
         st.rerun()
 
 
-@st.dialog("Confirm Rejection")
+@st.dialog(t("dlg_confirm_rejection_title"))
 def confirm_reject_order(analyst_id, order_id, comments, is_fraud=False):
     st.write(t("confirm_fraud_one") if is_fraud else t("confirm_reject_one"))
     if st.button(t("confirm"), type="primary", use_container_width=True):
@@ -127,7 +125,7 @@ def confirm_reject_order(analyst_id, order_id, comments, is_fraud=False):
         st.rerun()
 
 
-@st.dialog("Confirm Batch Approval")
+@st.dialog(t("dlg_confirm_batch_approval_title"))
 def confirm_batch_approve(analyst_id, order_ids, comments, *, for_backlog=False):
     if for_backlog:
         st.write(t("confirm_approve_all_backlog"))
@@ -152,7 +150,7 @@ def confirm_batch_approve(analyst_id, order_ids, comments, *, for_backlog=False)
         st.rerun()
 
 
-@st.dialog("Confirm Batch Rejection")
+@st.dialog(t("dlg_confirm_batch_rejection_title"))
 def confirm_batch_reject(analyst_id, order_ids, comments, is_fraud=False, *, for_backlog=False):
     if for_backlog:
         st.write(t("confirm_fraud_all_backlog") if is_fraud else t("confirm_reject_all_backlog"))
@@ -184,14 +182,14 @@ def confirm_batch_reject(analyst_id, order_ids, comments, is_fraud=False, *, for
         st.rerun()
 
 
-@st.dialog("No Backlog Orders")
+@st.dialog(t("dlg_no_backlog_title"))
 def show_no_backlog_dialog():
     st.write(t("no_backlog_message"))
     if st.button(t("ok"), use_container_width=True):
         st.rerun()
 
 
-@st.dialog("Confirm Blacklist")
+@st.dialog(t("dlg_confirm_blacklist_title"))
 def confirm_blacklist_ip(analyst_id, ip_address, reason):
     st.write(t("confirm_blacklist_ip", value=ip_address))
     st.error(t("blacklist_ip_warning"))
@@ -213,7 +211,7 @@ def confirm_blacklist_ip(analyst_id, ip_address, reason):
         st.rerun()
 
 
-@st.dialog("Confirm Blacklist")
+@st.dialog(t("dlg_confirm_blacklist_title"))
 def confirm_blacklist_phone(analyst_id, phone_number, reason):
     st.write(t("confirm_blacklist_phone", value=phone_number))
     st.error(t("blacklist_phone_warning"))
@@ -235,7 +233,7 @@ def confirm_blacklist_phone(analyst_id, phone_number, reason):
         st.rerun()
 
 
-@st.dialog("Confirm Blacklist")
+@st.dialog(t("dlg_confirm_blacklist_title"))
 def confirm_blacklist_email(analyst_id, email, reason):
     st.write(t("confirm_blacklist_email", value=email))
     st.error(t("blacklist_email_warning"))
@@ -437,7 +435,7 @@ def render_queue_and_review(analyst: dict):
 
     st.markdown(f"#### {t('review_queue')}")
     if queue_df.empty:
-        st.success(t("queue_clear"))
+        st.info(t("queue_clear"))
         return
 
     queue_display = queue_df.copy()
@@ -548,7 +546,7 @@ def render_queue_and_review(analyst: dict):
         f"""
         <div class="dashboard-card">
             <h3 style="margin-top: 0;">Order {order['order_id']}
-            <span class="status-badge {status_class}">{STATUS_ICONS.get(order['order_status'], '')} {order['order_status']}</span>
+            <span class="status-badge {status_class}">{order['order_status']}</span>
             </h3>
         </div>
         """,
@@ -636,18 +634,19 @@ def render_queue_and_review(analyst: dict):
 
 
 def _blacklist_ip_action(analyst: dict, ip_address: str, blacklist_entry: dict, key_suffix: str):
+    shown_ip = display_pii(ip_address, field="ip", analyst=analyst)
     if blacklist_entry:
         st.info(
             t(
                 "already_blacklisted_ip",
-                value=ip_address,
+                value=shown_ip,
                 reason=blacklist_entry["reason"],
                 by=blacklist_entry["blacklisted_by_name"] or blacklist_entry["blacklisted_by"],
                 at=blacklist_entry["blacklisted_at"],
             )
         )
         return
-    with st.expander(t("security_blacklist_ip", value=ip_address)):
+    with st.expander(t("security_blacklist_ip", value=shown_ip)):
         with st.form(f"blacklist_ip_form_{key_suffix}"):
             reason = st.text_area(t("blacklist_reason"), key=f"blacklist_ip_reason_{key_suffix}")
             if st.form_submit_button(t("lock_ip")):
@@ -660,18 +659,19 @@ def _blacklist_ip_action(analyst: dict, ip_address: str, blacklist_entry: dict, 
 def _blacklist_phone_action(analyst: dict, phone_number: str, blacklist_entry: dict, key_suffix: str):
     if not phone_number:
         return
+    shown_phone = display_pii(str(phone_number), field="phone", analyst=analyst)
     if blacklist_entry:
         st.info(
             t(
                 "already_blacklisted_phone",
-                value=phone_number,
+                value=shown_phone,
                 reason=blacklist_entry["reason"],
                 by=blacklist_entry["blacklisted_by_name"] or blacklist_entry["blacklisted_by"],
                 at=blacklist_entry["blacklisted_at"],
             )
         )
         return
-    with st.expander(t("security_blacklist_phone", value=phone_number)):
+    with st.expander(t("security_blacklist_phone", value=shown_phone)):
         with st.form(f"blacklist_phone_form_{key_suffix}"):
             reason = st.text_area(t("blacklist_reason"), key=f"blacklist_phone_reason_{key_suffix}")
             if st.form_submit_button(t("lock_phone")):
@@ -684,18 +684,19 @@ def _blacklist_phone_action(analyst: dict, phone_number: str, blacklist_entry: d
 def _blacklist_email_action(analyst: dict, email: str, blacklist_entry: dict, key_suffix: str):
     if not email:
         return
+    shown_email = display_pii(email, field="email", analyst=analyst)
     if blacklist_entry:
         st.info(
             t(
                 "already_blacklisted_email",
-                value=email,
+                value=shown_email,
                 reason=blacklist_entry["reason"],
                 by=blacklist_entry["blacklisted_by_name"] or blacklist_entry["blacklisted_by"],
                 at=blacklist_entry["blacklisted_at"],
             )
         )
         return
-    with st.expander(t("security_blacklist_email", value=email)):
+    with st.expander(t("security_blacklist_email", value=shown_email)):
         with st.form(f"blacklist_email_form_{key_suffix}"):
             reason = st.text_area(t("blacklist_reason"), key=f"blacklist_email_reason_{key_suffix}")
             if st.form_submit_button(t("lock_email")):
@@ -710,6 +711,15 @@ def render():
     if not analyst:
         st.error(t("access_denied"))
         return
-    st.header(t("fraud_analyst_workspace"))
-    st.caption(t("logged_in_as", name=analyst["employee_name"]))
+    inject_dashboard_css()
+    st.markdown(
+        f'<p class="page-heading">{t("fraud_analyst_workspace")}</p>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"""
+        <p class="workspace-kicker">{t("logged_in_as", name=analyst["employee_name"]).replace("**", "")}</p>
+        """,
+        unsafe_allow_html=True,
+    )
     render_queue_and_review(analyst)

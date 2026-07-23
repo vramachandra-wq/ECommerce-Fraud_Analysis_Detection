@@ -26,19 +26,19 @@ SUPPORTED_LANGS = ("en", "th")
 # ---------------------------------------------------------------------------
 TRANSLATIONS: dict[str, dict[str, str]] = {
     # --- App shells / headers ---
-    "customer_app_title": {"en": "🛒 Metro Cart", "th": "🛒 เมโทรคาร์ท"},
+    "customer_app_title": {"en": "Metro Cart", "th": "เมโทรคาร์ท"},
     "customer_app_subtitle": {
         "en": "Customer Purchase Portal",
         "th": "พอร์ทัลสั่งซื้อสำหรับลูกค้า",
     },
-    "internal_app_title": {"en": "Metro Cart PRO", "th": "เมโทรคาร์ท โปร"},
+    "internal_app_title": {"en": "Metro Cart", "th": "เมโทรคาร์ท"},
     "internal_app_subtitle": {
         "en": "Fraud Analyst Workspace",
         "th": "พื้นที่ทำงานนักวิเคราะห์การทุจริต",
     },
     "internal_brand": {
-        "en": "🏢 Metro Cart Internal",
-        "th": "🏢 เมโทรคาร์ท (ภายในองค์กร)",
+        "en": "Metro Cart",
+        "th": "เมโทรคาร์ท",
     },
     "employee_login": {"en": "Employee Login", "th": "เข้าสู่ระบบพนักงาน"},
     "welcome_user": {"en": "Welcome, **{name}**", "th": "ยินดีต้อนรับ **{name}**"},
@@ -95,19 +95,37 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Enter your username and current password, then choose a new password (min. 8 characters).",
         "th": "กรอกชื่อผู้ใช้และรหัสผ่านปัจจุบัน จากนั้นตั้งรหัสผ่านใหม่ (อย่างน้อย 8 ตัวอักษร)",
     },
-    "back_to_login": {"en": "Back to login", "th": "กลับไปหน้าเข้าสู่ระบบ"},
+    "back_to_login": {"en": "Back to Login", "th": "กลับไปหน้าเข้าสู่ระบบ"},
     "cancel": {"en": "Cancel", "th": "ยกเลิก"},
     "confirm": {"en": "Confirm", "th": "ยืนยัน"},
     "ok": {"en": "OK", "th": "ตกลง"},
     "save": {"en": "Save", "th": "บันทึก"},
     "language": {"en": "Language", "th": "ภาษา"},
-    "processing": {"en": "Processing...", "th": "กำลังดำเนินการ..."},
+    "processing": {"en": "Processing…", "th": "กำลังดำเนินการ..."},
     "minutes_unit": {"en": "{n} min", "th": "{n} นาที"},
     "seconds_unit": {"en": "{n}s", "th": "{n} วินาที"},
-    "overdue_flag": {"en": "🔴 Overdue", "th": "🔴 เกินเวลา"},
+    "overdue_flag": {"en": "Overdue", "th": "🔴 เกินเวลา"},
 
     # --- Customer login / order form ---
     "customer_login": {"en": "Customer Login", "th": "เข้าสู่ระบบลูกค้า"},
+    "login_welcome_back": {"en": "Welcome back", "th": "ยินดีต้อนรับกลับ"},
+    "analyst_login_welcome": {
+        "en": "Internal access",
+        "th": "สำหรับพนักงานภายใน",
+    },
+    "analyst_login_hint": {
+        "en": "Use your Metro Cart employee credentials.",
+        "th": "ใช้บัญชีพนักงานเมโทรคาร์ทของคุณ",
+    },
+    "sign_in": {"en": "Sign In", "th": "เข้าสู่ระบบ"},
+    "sign_in_cta": {"en": "Sign In", "th": "เข้าสู่ระบบ →"},
+    "forgot_password": {"en": "Forgot password?", "th": "ลืมรหัสผ่าน ?"},
+    "no_account": {"en": "I don't have an account?", "th": "ยังไม่มีบัญชี ?"},
+    "sign_up": {"en": "Sign up", "th": "สมัครสมาชิก"},
+    "login_demo_hint": {
+        "en": "Demo account: U1001 / password123",
+        "th": "บัญชีทดสอบ: U1001 / password123",
+    },
     "user_id": {"en": "User ID", "th": "รหัสผู้ใช้"},
     "password": {"en": "Password", "th": "รหัสผ่าน"},
     "invalid_login": {
@@ -119,7 +137,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "th": "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง",
     },
     "username": {"en": "Username", "th": "ชื่อผู้ใช้"},
-    "contact_details": {"en": "👤 Contact Details", "th": "👤 ข้อมูลติดต่อ"},
+    "contact_details": {"en": "Contact Details", "th": "ข้อมูลติดต่อ"},
     "name": {"en": "Name", "th": "ชื่อ"},
     "email": {"en": "Email", "th": "อีเมล"},
     "phone": {"en": "Phone", "th": "เบอร์โทรศัพท์"},
@@ -127,15 +145,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "No phone number on file for your account. Please contact support to add one before placing an order.",
         "th": "บัญชีของคุณยังไม่มีเบอร์โทรศัพท์ กรุณาติดต่อฝ่ายสนับสนุนเพื่อเพิ่มเบอร์ก่อนสั่งซื้อ",
     },
-    "delivery_address": {"en": "📍 Delivery Address", "th": "📍 ที่อยู่จัดส่ง"},
+    "delivery_address": {"en": "Delivery Address", "th": "ที่อยู่จัดส่ง"},
     "street": {"en": "Street", "th": "ถนน / ซอย"},
     "city": {"en": "City", "th": "อำเภอ / เขต"},
     "state": {"en": "State", "th": "จังหวัด"},
     "zip_code": {"en": "ZIP Code", "th": "รหัสไปรษณีย์"},
     "country": {"en": "Country", "th": "ประเทศ"},
     "sim_fields": {
-        "en": "⚙️ E-Commerce Demo Simulation Fields",
-        "th": "⚙️ ฟิลด์จำลองสำหรับการสาธิตอีคอมเมิร์ซ",
+        "en": "E-Commerce Demo Simulation Fields",
+        "th": "ฟิลด์จำลองสำหรับการสาธิตอีคอมเมิร์ซ",
     },
     "sim_caption": {
         "en": "IP address, program track, and device are entered manually for testing purposes.",
@@ -144,7 +162,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "ip_address": {"en": "IP Address", "th": "ที่อยู่ IP"},
     "program_track": {"en": "Program Track", "th": "กลุ่มโปรแกรม"},
     "device": {"en": "Device", "th": "อุปกรณ์"},
-    "product_selection": {"en": "🛍️ Product Selection", "th": "🛍️ เลือกสินค้า"},
+    "product_selection": {"en": "Product Selection", "th": "เลือกสินค้า"},
     "product": {"en": "Product", "th": "สินค้า"},
     "quantity": {"en": "Quantity", "th": "จำนวน"},
     "total_price": {"en": "Total Price", "th": "ราคารวม"},
@@ -157,15 +175,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "### Order Summary — Metro Cart",
         "th": "### สรุปคำสั่งซื้อ — เมโทรคาร์ท",
     },
-    "confirm_place_order": {"en": "Confirm Place Order", "th": "ยืนยันการสั่งซื้อ"},
+    "confirm_place_order": {"en": "Confirm Order", "th": "ยืนยันการสั่งซื้อ"},
     "confirm_purchase": {"en": "Confirm Purchase", "th": "ยืนยันการซื้อ"},
     "completing_purchase": {
         "en": "Completing your purchase...",
         "th": "กำลังทำรายการซื้อให้เสร็จสิ้น...",
     },
     "order_success": {
-        "en": "🎉 Order placed successfully. Thank you for shopping at Metro Cart!",
-        "th": "🎉 สั่งซื้อสำเร็จแล้ว ขอบคุณที่เลือกซื้อกับเมโทรคาร์ท!",
+        "en": "Order placed successfully. Thank you for shopping at Metro Cart!",
+        "th": "สั่งซื้อสำเร็จแล้ว ขอบคุณที่เลือกซื้อกับเมโทรคาร์ท!",
     },
     "your_order_id": {"en": "Your Order ID", "th": "หมายเลขคำสั่งซื้อของคุณ"},
     "place_another_order": {"en": "Place Another Order", "th": "สั่งซื้อเพิ่ม"},
@@ -210,36 +228,36 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 
     # --- Analyst dashboard ---
     "fraud_analyst_workspace": {
-        "en": "🛡️ Fraud Analyst Workspace",
-        "th": "🛡️ พื้นที่ทำงานนักวิเคราะห์การทุจริต",
+        "en": "Fraud Analyst Workspace",
+        "th": "พื้นที่ทำงานนักวิเคราะห์การทุจริต",
     },
     "logged_in_as": {
         "en": "Logged in as: **{name}**",
         "th": "เข้าสู่ระบบในชื่อ: **{name}**",
     },
-    "queue_overview": {"en": "📊 Queue Overview", "th": "📊 ภาพรวมคิวงาน"},
+    "queue_overview": {"en": "Queue Overview", "th": "ภาพรวมคิวงาน"},
     "total_in_queue": {"en": "Total in Queue", "th": "จำนวนทั้งหมดในคิว"},
     "pending_review": {"en": "Pending Review", "th": "รอตรวจสอบ"},
     "on_hold": {"en": "On Hold", "th": "ระงับชั่วคราว"},
-    "review_queue": {"en": "📋 Review Queue", "th": "📋 คิวตรวจสอบ"},
+    "review_queue": {"en": "Review Queue", "th": "คิวตรวจสอบ"},
     "queue_clear": {
-        "en": "✅ Queue is clear. No orders pending review.",
-        "th": "✅ คิวว่าง ไม่มีคำสั่งซื้อรอตรวจสอบ",
+        "en": "Queue is clear. No orders pending review.",
+        "th": "คิวว่าง ไม่มีคำสั่งซื้อรอตรวจสอบ",
     },
     "select_all_queue": {
         "en": "Select All Orders in Queue",
         "th": "เลือกคำสั่งซื้อทั้งหมดในคิว",
     },
     "batch_actions": {
-        "en": "⚡ Batch Actions ({n} selected)",
+        "en": "Batch Actions ({n} selected)",
         "th": "⚡ ดำเนินการเป็นกลุ่ม (เลือก {n} รายการ)",
     },
     "batch_comments": {
         "en": "Batch Review Comments (applied to all selected orders, required)",
         "th": "ความคิดเห็นการตรวจสอบแบบกลุ่ม (ใช้กับทุกรายการที่เลือก — จำเป็น)",
     },
-    "approve_selected": {"en": "✅ Approve Selected", "th": "✅ อนุมัติรายการที่เลือก"},
-    "reject_selected": {"en": "🚫 Reject Selected", "th": "🚫 ปฏิเสธรายการที่เลือก"},
+    "approve_selected": {"en": "Approve Selected", "th": "✅ อนุมัติรายการที่เลือก"},
+    "reject_selected": {"en": "Reject Selected", "th": "🚫 ปฏิเสธรายการที่เลือก"},
     "warn_comment_approve": {
         "en": "Please provide a reason in the comments before approving.",
         "th": "กรุณาระบุเหตุผลในความคิดเห็นก่อนอนุมัติ",
@@ -249,8 +267,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "th": "กรุณาระบุเหตุผลในความคิดเห็นก่อนปฏิเสธ",
     },
     "single_order_investigation": {
-        "en": "🔍 Single Order Investigation",
-        "th": "🔍 ตรวจสอบคำสั่งซื้อรายการเดียว",
+        "en": "Single Order Investigation",
+        "th": "ตรวจสอบคำสั่งซื้อรายการเดียว",
     },
     "select_order_review": {
         "en": "Select an Order ID to review in detail",
@@ -260,22 +278,22 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Order not found (it may have just been resolved).",
         "th": "ไม่พบคำสั่งซื้อ (อาจเพิ่งได้รับการดำเนินการแล้ว)",
     },
-    "customer_details": {"en": "**👤 Customer Details**", "th": "**👤 ข้อมูลลูกค้า**"},
-    "order_details": {"en": "**📦 Order Details**", "th": "**📦 รายละเอียดคำสั่งซื้อ**"},
+    "customer_details": {"en": "**Customer Details**", "th": "**ข้อมูลลูกค้า**"},
+    "order_details": {"en": "**Order Details**", "th": "**รายละเอียดคำสั่งซื้อ**"},
     "flagged_reason": {
-        "en": "**🚨 Flagged Reason:** {reason}",
-        "th": "**🚨 เหตุผลที่ถูกตั้งค่าสถานะ:** {reason}",
+        "en": "**Flagged Reason:** {reason}",
+        "th": "**เหตุผลที่ถูกตั้งค่าสถานะ:** {reason}",
     },
     "analyst_decision": {
-        "en": "⚖️ Analyst Decision",
-        "th": "⚖️ การตัดสินใจของนักวิเคราะห์",
+        "en": "Analyst Decision",
+        "th": "การตัดสินใจของนักวิเคราะห์",
     },
     "review_comments": {
         "en": "Review Comments (required)",
         "th": "ความคิดเห็นการตรวจสอบ (จำเป็น)",
     },
-    "approve_order": {"en": "✅ Approve Order", "th": "✅ อนุมัติคำสั่งซื้อ"},
-    "reject_order": {"en": "🚫 Reject Order", "th": "🚫 ปฏิเสธคำสั่งซื้อ"},
+    "approve_order": {"en": "Approve Order", "th": "✅ อนุมัติคำสั่งซื้อ"},
+    "reject_order": {"en": "Reject Order", "th": "🚫 ปฏิเสธคำสั่งซื้อ"},
     "reject_order_fraud": {
         "en": "☠️ Reject & Mark as Fraud",
         "th": "☠️ ปฏิเสธและระบุว่าเป็นการทุจริต",
@@ -469,43 +487,43 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 
     # --- Admin panel ---
     "admin_control_panel": {
-        "en": "⚙️ Admin Control Panel",
-        "th": "⚙️ แผงควบคุมผู้ดูแลระบบ",
+        "en": "Admin Control Panel",
+        "th": "แผงควบคุมผู้ดูแลระบบ",
     },
     "logged_in_as_role": {
         "en": "Logged in as: **{name}** ({role})",
         "th": "เข้าสู่ระบบในชื่อ: **{name}** ({role})",
     },
     "tab_review_queue": {
-        "en": "⚖️ Review Queue (Override)",
-        "th": "⚖️ คิวตรวจสอบ (แทนที่การตัดสินใจ)",
+        "en": "Review Queue",
+        "th": "คิวตรวจสอบ",
     },
-    "tab_blacklists": {"en": "🛡️ Entity Blacklists", "th": "🛡️ บัญชีดำ"},
+    "tab_blacklists": {"en": "Entity Blacklists", "th": "บัญชีดำ"},
     "tab_permissions": {
-        "en": "🔐 Analyst Permissions",
-        "th": "🔐 สิทธิ์การเข้าถึงของนักวิเคราะห์",
+        "en": "Analyst Permissions",
+        "th": "สิทธิ์การเข้าถึงของนักวิเคราะห์",
     },
-    "tab_user_mgmt": {"en": "👥 User Management", "th": "👥 การจัดการผู้ใช้"},
-    "tab_analytics": {"en": "📊 Analytics", "th": "📊 การวิเคราะห์ข้อมูล"},
-    "tab_rule_mgmt": {"en": "📋 Rule Management", "th": "📋 การจัดการกฎ"},
+    "tab_user_mgmt": {"en": "User Management", "th": "การจัดการผู้ใช้"},
+    "tab_analytics": {"en": "Analytics", "th": "การวิเคราะห์ข้อมูล"},
+    "tab_rule_mgmt": {"en": "Rule Management", "th": "การจัดการกฎ"},
     "user_management": {
-        "en": "### 👥 User Management",
-        "th": "### 👥 การจัดการผู้ใช้",
+        "en": "### User Management",
+        "th": "### การจัดการผู้ใช้",
     },
     "user_mgmt_caption": {
         "en": "Create new analyst profiles and monitor current team performance.",
         "th": "สร้างโปรไฟล์นักวิเคราะห์ใหม่และติดตามผลการทำงานของทีม",
     },
     "create_analyst_profile": {
-        "en": "➕ Create New Analyst Profile",
-        "th": "➕ สร้างโปรไฟล์นักวิเคราะห์ใหม่",
+        "en": "Create New Analyst Profile",
+        "th": "สร้างโปรไฟล์นักวิเคราะห์ใหม่",
     },
     "analyst_id": {"en": "Analyst ID", "th": "รหัสนักวิเคราะห์"},
     "employee_name": {"en": "Employee Name", "th": "ชื่อพนักงาน"},
     "role": {"en": "Role", "th": "ตำแหน่ง"},
     "confirm_create_analyst_chk": {
-        "en": "⚠️ I confirm that I want to create this analyst profile.",
-        "th": "⚠️ ฉันยืนยันว่าต้องการสร้างโปรไฟล์นักวิเคราะห์นี้",
+        "en": "I confirm that I want to create this analyst profile.",
+        "th": "ฉันยืนยันว่าต้องการสร้างโปรไฟล์นักวิเคราะห์นี้",
     },
     "create_analyst": {"en": "Create Analyst", "th": "สร้างนักวิเคราะห์"},
     "err_all_fields_required": {
@@ -517,12 +535,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "th": "กรุณาทำเครื่องหมายยืนยันเพื่อดำเนินการสร้าง",
     },
     "analyst_performance": {
-        "en": "#### 📈 Analyst Performance",
-        "th": "#### 📈 ผลการปฏิบัติงานของนักวิเคราะห์",
+        "en": "#### Analyst Performance",
+        "th": "#### ผลการปฏิบัติงานของนักวิเคราะห์",
     },
     "entity_blacklist_mgmt": {
-        "en": "### 🛡️ Entity Blacklist Management",
-        "th": "### 🛡️ การจัดการบัญชีดำ",
+        "en": "### Entity Blacklist Management",
+        "th": "### การจัดการบัญชีดำ",
     },
     "blacklist_caption": {
         "en": "Check, blacklist, or whitelist IP addresses, phone numbers, and emails.",
@@ -546,8 +564,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "entity_phone": {"en": "📱 Phone Number", "th": "📱 เบอร์โทรศัพท์"},
     "entity_email": {"en": "📧 Email", "th": "📧 อีเมล"},
     "analyst_page_permissions": {
-        "en": "### 🔐 Analyst Page Permissions",
-        "th": "### 🔐 สิทธิ์การเข้าถึงหน้าของนักวิเคราะห์",
+        "en": "### Analyst Page Permissions",
+        "th": "### สิทธิ์การเข้าถึงหน้าของนักวิเคราะห์",
     },
     "permissions_caption": {
         "en": "Grant or revoke access to each page. Admins always have full access and aren't listed here.",
@@ -581,7 +599,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "No orders placed yet this month.",
         "th": "ยังไม่มีคำสั่งซื้อในเดือนนี้",
     },
-    "recent_orders_live": {"en": "#### 🕒 Recent Orders", "th": "#### 🕒 คำสั่งซื้อล่าสุด"},
+    "recent_orders_live": {"en": "#### Recent Orders", "th": "#### คำสั่งซื้อล่าสุด"},
     "recent_orders_caption": {
         "en": "Live view of the latest system transactions.",
         "th": "มุมมองแบบเรียลไทม์ของธุรกรรมล่าสุดในระบบ",
@@ -591,8 +609,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "th": "ไม่พบคำสั่งซื้อล่าสุด",
     },
     "rule_trigger_stats": {
-        "en": "### 📋 Rule Trigger Statistics",
-        "th": "### 📋 สถิติการทำงานของกฎ",
+        "en": "### Rule Trigger Statistics",
+        "th": "### สถิติการทำงานของกฎ",
     },
     "rule_stats_caption": {
         "en": "Visibility into which automated fraud rules are firing most frequently.",
@@ -603,8 +621,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "th": "ไม่มีข้อมูลการทำงานของกฎให้แสดง",
     },
     "rule_config_mgmt": {
-        "en": "### ⚙️ Rule Configuration Management",
-        "th": "### ⚙️ การจัดการค่ากำหนดของกฎ",
+        "en": "### Rule Configuration Management",
+        "th": "### การจัดการค่ากำหนดของกฎ",
     },
     "rule_config_caption": {
         "en": "Adjust actions, thresholds, and time windows for e-commerce fraud detection rules.",
@@ -685,15 +703,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "th": "คลิก **ค้นหาคำสั่งซื้อค้างตรวจสอบ** เพื่อสแกนรายการที่เกินเวลารอตรวจสอบ",
     },
     "backlog_bulk_actions": {
-        "en": "⚡ Backlog Bulk Actions",
+        "en": "Backlog Bulk Actions",
         "th": "⚡ การดำเนินการกลุ่มสำหรับค้างตรวจสอบ",
     },
     "approve_all_backlog": {
-        "en": "✅ Approve All Backlog Orders",
+        "en": "Approve All Backlog Orders",
         "th": "✅ อนุมัติค้างตรวจสอบทั้งหมด",
     },
     "reject_all_backlog": {
-        "en": "🚫 Reject All Backlog Orders",
+        "en": "Reject All Backlog Orders",
         "th": "🚫 ปฏิเสธค้างตรวจสอบทั้งหมด",
     },
     "fraud_all_backlog": {
@@ -749,6 +767,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Analytics Dashboards",
         "th": "แดชบอร์ดการวิเคราะห์ข้อมูล",
     },
+    "err_power_bi_missing": {
+        "en": "POWER_BI_EMBED_URL is missing from the .env file.",
+        "th": "ไม่มี POWER_BI_EMBED_URL ในไฟล์ .env",
+    },
     "nav_ai_chatbot": {"en": "AI Chatbot", "th": "แชทบอตเอไอ"},
     "chatbot_title": {
         "en": "Metro Cart Analytics Chatbot",
@@ -762,12 +784,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Orders & sales · Revenue · Fraud & backlog · Customers · Products · Devices · Rules · Geography",
         "th": "คำสั่งซื้อและยอดขาย · รายได้ · การทุจริตและคิวค้าง · ลูกค้า · สินค้า · อุปกรณ์ · กฎ · พื้นที่",
     },
-    "chatbot_examples_title": {"en": "Example questions", "th": "ตัวอย่างคำถาม"},
+    "chatbot_examples_title": {"en": "Try asking", "th": "ลองถาม"},
+    "chatbot_examples_hint": {
+        "en": "Pick a starter question or type your own below.",
+        "th": "เลือกคำถามเริ่มต้น หรือพิมพ์คำถามของคุณด้านล่าง",
+    },
     "chatbot_example_1": {"en": "Total fraudulent orders", "th": "จำนวนคำสั่งซื้อทุจริตรวม"},
     "chatbot_example_2": {"en": "Fraud rate by state", "th": "อัตราการทุจริตตามจังหวัด"},
     "chatbot_example_3": {"en": "Top 10 customers by spending", "th": "ลูกค้าที่ใช้จ่ายสูงสุด 10 อันดับ"},
     "chatbot_example_4": {"en": "Orders currently on hold or pending review", "th": "คำสั่งซื้อที่ถูกพักหรือรอตรวจสอบ"},
     "chatbot_example_5": {"en": "Revenue by product category", "th": "รายได้ตามหมวดสินค้า"},
+    "chatbot_ready": {"en": "Ready", "th": "พร้อมใช้งาน"},
+    "chatbot_offline": {"en": "API key missing", "th": "ไม่มีคีย์ API"},
     "chatbot_input_placeholder": {
         "en": "Ask a Metro Cart analytics question…",
         "th": "ถามคำถามวิเคราะห์เมโทรคาร์ท…",
@@ -846,21 +874,29 @@ def cur_sym() -> str:
     return "฿"
 
 
-def language_toggle() -> None:
-    """Renders a compact EN / Thai language switch."""
+def language_toggle(*, inline: bool = False) -> None:
+    """Renders an EN / Thai language dropdown."""
     if LANG_KEY not in st.session_state:
         st.session_state[LANG_KEY] = DEFAULT_LANG
+    if "_lang_selector" not in st.session_state:
+        st.session_state["_lang_selector"] = st.session_state[LANG_KEY]
 
-    cols = st.columns([0.78, 0.22])
-    with cols[1]:
-        choice = st.selectbox(
+    def _select() -> str:
+        return st.selectbox(
             t("language"),
             options=list(SUPPORTED_LANGS),
-            format_func=lambda code: "English" if code == "en" else "ไทย (Thai)",
-            index=list(SUPPORTED_LANGS).index(_lang()),
+            format_func=lambda code: "English" if code == "en" else "ไทย",
             key="_lang_selector",
             label_visibility="collapsed",
         )
+
+    if inline:
+        choice = _select()
+    else:
+        cols = st.columns([0.65, 0.35])
+        with cols[1]:
+            choice = _select()
+
     if choice != st.session_state[LANG_KEY]:
         st.session_state[LANG_KEY] = choice
         st.rerun()

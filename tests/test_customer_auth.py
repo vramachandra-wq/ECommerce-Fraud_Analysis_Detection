@@ -3,6 +3,30 @@ from unittest.mock import MagicMock, patch
 from auth.customer_auth import authenticate_customer
 
 
+def _customer_row(
+    *,
+    street="21 MG Road",
+    city="Bengaluru",
+    state="Karnataka",
+    country="India",
+    zip_code="560001",
+):
+    return (
+        "U001",
+        "John Doe",
+        "john@example.com",
+        "9876543210",
+        "21 MG Road, Bengaluru, Karnataka 560001",
+        street,
+        city,
+        state,
+        country,
+        zip_code,
+        "P2",
+        "hashed_password",
+    )
+
+
 # ---------- authenticate_customer ----------
 
 @patch("auth.customer_auth.verify_password")
@@ -10,16 +34,7 @@ def test_authenticate_customer_success(mock_verify):
     mock_verify.return_value = True
 
     cursor = MagicMock()
-
-    cursor.fetchone.return_value = (
-        "U001",
-        "John Doe",
-        "john@example.com",
-        "9876543210",
-        "Chennai",
-        "P2",
-        "hashed_password",
-    )
+    cursor.fetchone.return_value = _customer_row()
 
     customer = authenticate_customer(cursor, "U001", "password123")
 
@@ -30,7 +45,12 @@ def test_authenticate_customer_success(mock_verify):
     assert customer["customer_name"] == "John Doe"
     assert customer["email"] == "john@example.com"
     assert customer["phone_number"] == "9876543210"
-    assert customer["default_address"] == "Chennai"
+    assert customer["default_address"] == "21 MG Road, Bengaluru, Karnataka 560001"
+    assert customer["street"] == "21 MG Road"
+    assert customer["city"] == "Bengaluru"
+    assert customer["state"] == "Karnataka"
+    assert customer["country"] == "India"
+    assert customer["zip_code"] == "560001"
     assert customer["program_id"] == "P2"
     assert "password" not in customer
 
@@ -40,16 +60,7 @@ def test_authenticate_customer_invalid_credentials(mock_verify):
     mock_verify.return_value = False
 
     cursor = MagicMock()
-
-    cursor.fetchone.return_value = (
-        "U001",
-        "John Doe",
-        "john@example.com",
-        "9876543210",
-        "Chennai",
-        "P2",
-        "hashed_password",
-    )
+    cursor.fetchone.return_value = _customer_row()
 
     customer = authenticate_customer(cursor, "U001", "wrongpassword")
 
@@ -76,15 +87,7 @@ def test_authenticate_customer_upgrades_password_when_conn_provided(
     cursor = MagicMock()
     conn = MagicMock()
 
-    cursor.fetchone.return_value = (
-        "U001",
-        "John Doe",
-        "john@example.com",
-        "9876543210",
-        "Chennai",
-        "P2",
-        "hashed_password",
-    )
+    cursor.fetchone.return_value = _customer_row()
 
     customer = authenticate_customer(cursor, "U001", "password123", conn=conn)
 

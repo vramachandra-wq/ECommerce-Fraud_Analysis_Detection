@@ -24,7 +24,128 @@ from utils.queries import (
     list_products, 
     list_programs
 )
-from ui.i18n import t, cur_sym
+from ui.i18n import t, cur_sym, language_toggle
+from ui.customer_login import (
+    render_login_header,
+    render_login_close,
+    render_login_illustration,
+    render_customer_shell,
+)
+
+_CHECKOUT_ADDRESS_KEYS = (
+    "checkout_street",
+    "checkout_city",
+    "checkout_state",
+    "checkout_zip_code",
+    "checkout_country",
+)
+
+
+def _clear_checkout_address_fields() -> None:
+    for key in _CHECKOUT_ADDRESS_KEYS:
+        st.session_state.pop(key, None)
+
+
+def _parse_default_address(default_address: str) -> dict:
+    """Best-effort parse of 'street, city, state zip' into structured fields."""
+    raw = (default_address or "").strip()
+    if not raw:
+        return {}
+
+    parts = [part.strip() for part in raw.split(",") if part.strip()]
+    if len(parts) < 2:
+        return {"street": raw}
+
+    street = parts[0]
+    city = parts[1] if len(parts) > 1 else ""
+    state = ""
+    zip_code = ""
+    if len(parts) >= 3:
+        tail = parts[2].rsplit(" ", 1)
+        if len(tail) == 2 and tail[1].replace("-", "").isalnum():
+            state, zip_code = tail[0].strip(), tail[1].strip()
+        else:
+            state = parts[2]
+    return {
+        "street": street,
+        "city": city,
+        "state": state,
+        "zip_code": zip_code,
+    }
+
+
+def _resolve_address_defaults(customer: dict) -> dict:
+    """Prefer structured master.customers columns; fall back to default_address."""
+    street = (customer.get("street") or "").strip()
+    city = (customer.get("city") or "").strip()
+    state = (customer.get("state") or "").strip()
+    zip_code = str(customer.get("zip_code") or "").strip()
+    country = (customer.get("country") or "").strip() or "India"
+
+    if not street or not city:
+        parsed = _parse_default_address(customer.get("default_address") or "")
+        street = street or parsed.get("street", "")
+        city = city or parsed.get("city", "")
+        state = state or parsed.get("state", "")
+        zip_code = zip_code or parsed.get("zip_code", "")
+
+    return {
+        "street": street,
+        "city": city,
+        "state": state,
+        "zip_code": zip_code,
+        "country": country,
+    }
+
+
+def _ensure_customer_address(customer: dict) -> dict:
+    """Backfill address fields from DB when an older session is missing them."""
+    if (customer.get("street") or "").strip() and (customer.get("city") or "").strip():
+        return customer
+
+    user_id = customer.get("user_id")
+    if not user_id:
+        return customer
+
+    with get_cursor() as (conn, cur):
+        cur.execute(
+            """
+            SELECT street, city, state, country, zip_code, default_address
+            FROM master.customers
+            WHERE user_id = %s
+            """,
+            (user_id,),
+        )
+        row = cur.fetchone()
+
+    if not row:
+        return customer
+
+    street, city, state, country, zip_code, default_address = row
+    customer = dict(customer)
+    customer["street"] = street
+    customer["city"] = city
+    customer["state"] = state
+    customer["country"] = country
+    customer["zip_code"] = zip_code
+    customer["default_address"] = default_address
+    return customer
+
+
+def _seed_checkout_address_fields(customer: dict) -> None:
+    """Initialize editable address widgets once from master.customers defaults."""
+    defaults = _resolve_address_defaults(customer)
+    mapping = {
+        "checkout_street": defaults["street"],
+        "checkout_city": defaults["city"],
+        "checkout_state": defaults["state"],
+        "checkout_zip_code": defaults["zip_code"],
+        "checkout_country": defaults["country"],
+    }
+    for key, value in mapping.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
 
 
 def _build_api_url(path: str) -> str:
@@ -54,10 +175,10 @@ def _send_api_request(method: str, path: str, **kwargs):
     return resp
 
 
-@st.dialog("Confirm Place Order")
+@st.dialog(t("confirm_place_order"))
 def confirm_place_order(payload: dict, customer_session_key: str = "customer"):
     st.markdown(t("order_summary"))
-    # Show a compact summary
+    # Show a compact summary (full PII visible on customer portal)
     st.write(
         f"**{t('label_customer')}:** {payload.get('customer_name')} — "
         f"**{t('email')}:** {payload.get('email')}"
@@ -94,6 +215,7 @@ def confirm_place_order(payload: dict, customer_session_key: str = "customer"):
                 st.session_state[customer_session_key]["zip_code"] = payload.get("zip_code")
                 st.session_state[customer_session_key]["country"] = payload.get("country")
                 st.session_state["last_order_id"] = payload.get("order_id")
+                _clear_checkout_address_fields()
 
                 time.sleep(0.25)
                 st.rerun()
@@ -118,47 +240,66 @@ def fetch_form_options():
 
 
 def _login_form():
-    # Placeholder hero banner — swap the URL below for a real banner image.
-    # Suggested image: a wide e-commerce storefront banner showing shopping
-    # bags, gift boxes, or a "big sale" graphic in Metro Cart's red/blue brand colors.
-    st.image(
-        "images//banner_3.png",
-        use_container_width=True,
-    )
-    _, mid, _ = st.columns([1, 1.2, 1])
-    with mid:
-        st.subheader(t("customer_login"))
-        with st.form("customer_login"):
-            user_id = st.text_input(t("user_id"), placeholder="e.g. U1001")
-            password = st.text_input(t("password"), type="password")
-            submitted = st.form_submit_button(t("log_in"), use_container_width=True)
+    st.markdown('<div class="customer-login-marker"></div>', unsafe_allow_html=True)
 
-        if submitted:
-            with get_cursor(commit=True) as (conn, cur):
-                customer = authenticate_customer(cur, user_id, password, conn=conn)
-            if customer:
-                st.session_state.customer = customer
-                st.rerun()
-            else:
-                st.error(t("invalid_login"))
+    _, row, _ = st.columns([0.04, 0.92, 0.04])
+    with row:
+        st.markdown('<div class="customer-login-row"></div>', unsafe_allow_html=True)
+        left, right = st.columns([1.15, 0.85], gap="small")
+
+        with left:
+            render_login_header(
+                logo=t("customer_app_title"),
+                welcome=t("login_welcome_back"),
+                title=t("sign_in"),
+            )
+            with st.form("customer_login"):
+                user_id = st.text_input(t("user_id"), placeholder="e.g. U1001")
+                password = st.text_input(t("password"), type="password")
+                submitted = st.form_submit_button(
+                    t("sign_in_cta"),
+                    type="primary",
+                    use_container_width=True,
+                )
+            render_login_close()
+
+            if submitted:
+                with get_cursor(commit=True) as (conn, cur):
+                    customer = authenticate_customer(cur, user_id, password, conn=conn)
+                if customer:
+                    _clear_checkout_address_fields()
+                    st.session_state.customer = customer
+                    st.rerun()
+                else:
+                    st.error(t("invalid_login"))
+
+        with right:
+            render_login_illustration("images/login_hero.png")
 
 
 def _order_form():
 
-    customer = st.session_state.customer
-    
-    col_header, col_logout = st.columns([0.85, 0.15])
+    customer = _ensure_customer_address(st.session_state.customer)
+    st.session_state.customer = customer
+    _seed_checkout_address_fields(customer)
+
+    col_header, col_lang, col_logout = st.columns([0.62, 0.22, 0.16], gap="small")
     with col_header:
-        st.title(t("customer_app_title"))
-        st.subheader(t("welcome_back", name=customer['customer_name']))
-        st.image(
-        "images//banner_2.png",
-        use_container_width=True,
-    )
+        render_customer_shell(
+            logo=t("customer_app_title"),
+            welcome=t("welcome_back", name=customer["customer_name"]),
+            title=t("customer_app_subtitle"),
+        )
+    with col_lang:
+        language_toggle(inline=True)
     with col_logout:
-        if st.button(t("log_out"), key="customer_logout", use_container_width=True):
+        if st.button(t("log_out"), key="customer_logout", use_container_width=True, type="secondary"):
+            _clear_checkout_address_fields()
             del st.session_state.customer
             st.rerun()
+
+    st.image("images/banner_2.png", use_container_width=True)
+    st.markdown('<div class="mc-spacer-sm" aria-hidden="true"></div>', unsafe_allow_html=True)
 
     # Load cached static options
     products, programs, devices = fetch_form_options()
@@ -167,68 +308,71 @@ def _order_form():
     program_options = {f"{pid} — {name}": pid for pid, name in programs}
     device_options = {f"{did} — {name}": did for did, name, dtype in devices}
 
-    st.divider()
-    st.markdown(f"#### {t('contact_details')}")
-    # Email and phone are pulled straight from master.customers and are NOT
-    # editable at checkout. This isn't just a UX choice — it keeps the
-    # blacklist rule checks (R011/R012) honest, since a customer could
-    # otherwise type in a different phone/email to dodge those checks.
     name = customer["customer_name"]
     email = customer["email"]
     phone = customer["phone_number"] or ""
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.text_input(t("name"), value=name, disabled=True)
-        st.text_input(t("email"), value=email, disabled=True)
-    with col2:
-        st.text_input(t("phone"), value=phone, disabled=True)
-
-    if not phone:
-        st.warning(
-            t("no_phone_warning")
-        )
-
-    st.divider()
-    st.markdown(f"#### {t('delivery_address')}")
-    
-    col_addr1, col_addr2 = st.columns(2)
-    with col_addr1:
-        street = st.text_input(t("street"), value=customer.get("street") or "", placeholder="e.g. 21 MG Road")
-        city = st.text_input(t("city"), value=customer.get("city") or "", placeholder="e.g. Bengaluru")
-    with col_addr2:
-        state = st.text_input(t("state"), value=customer.get("state") or "", placeholder="e.g. Karnataka")
-        zip_code = st.text_input(t("zip_code"), value=customer.get("zip_code") or "", placeholder="e.g. 560001")
-        
-    country = st.text_input(t("country"), value=customer.get("country") or "India")
-
-    st.divider()
-    st.markdown(f"#### {t('sim_fields')}")
-    st.caption(t("sim_caption"))
-    col3, col4, col5 = st.columns(3)
-    with col3:
-        ip_address = st.text_input(t("ip_address"), placeholder="e.g. 203.0.113.111")
-    with col4:
-        program_label = st.selectbox(
-            t("program_track"),
-            list(program_options.keys()),
-            index=list(program_options.values()).index(customer["program_id"])
-            if customer["program_id"] in program_options.values()
-            else 0,
-        )
-        program_id = program_options[program_label]
-    with col5:
-        device_label = st.selectbox(t("device"), list(device_options.keys()))
-        device_id = device_options[device_label]
-
-    st.divider()
-    st.markdown(f"#### {t('product_selection')}")
-    product_label = st.selectbox(t("product"), list(product_options.keys()))
-    product_id, product_name, category, price = product_options[product_label]
-    quantity = st.number_input(t("quantity"), min_value=1, value=1, step=1)
-
-    total = calculate_total(price, quantity)
     with st.container(border=True):
+        st.markdown(
+            f'<p class="customer-section-title">{t("contact_details")}</p>',
+            unsafe_allow_html=True,
+        )
+        # Email and phone come from master.customers and stay read-only so
+        # blacklist checks (R011/R012) cannot be bypassed at checkout.
+        col1, col2 = st.columns(2)
+        with col1:
+            st.text_input(t("name"), value=name, disabled=True)
+            st.text_input(t("email"), value=email, disabled=True)
+        with col2:
+            st.text_input(t("phone"), value=phone, disabled=True)
+        if not phone:
+            st.warning(t("no_phone_warning"))
+
+    with st.container(border=True):
+        st.markdown(
+            f'<p class="customer-section-title">{t("delivery_address")}</p>',
+            unsafe_allow_html=True,
+        )
+        col_addr1, col_addr2 = st.columns(2)
+        with col_addr1:
+            street = st.text_input(t("street"), key="checkout_street", placeholder="e.g. 21 MG Road")
+            city = st.text_input(t("city"), key="checkout_city", placeholder="e.g. Bengaluru")
+        with col_addr2:
+            state = st.text_input(t("state"), key="checkout_state", placeholder="e.g. Karnataka")
+            zip_code = st.text_input(t("zip_code"), key="checkout_zip_code", placeholder="e.g. 560001")
+        country = st.text_input(t("country"), key="checkout_country")
+
+    with st.container(border=True):
+        st.markdown(
+            f'<p class="customer-section-title">{t("sim_fields")}</p>',
+            unsafe_allow_html=True,
+        )
+        st.caption(t("sim_caption"))
+        col3, col4, col5 = st.columns(3)
+        with col3:
+            ip_address = st.text_input(t("ip_address"), placeholder="e.g. 203.0.113.111")
+        with col4:
+            program_label = st.selectbox(
+                t("program_track"),
+                list(program_options.keys()),
+                index=list(program_options.values()).index(customer["program_id"])
+                if customer["program_id"] in program_options.values()
+                else 0,
+            )
+            program_id = program_options[program_label]
+        with col5:
+            device_label = st.selectbox(t("device"), list(device_options.keys()))
+            device_id = device_options[device_label]
+
+    with st.container(border=True):
+        st.markdown(
+            f'<p class="customer-section-title">{t("product_selection")}</p>',
+            unsafe_allow_html=True,
+        )
+        product_label = st.selectbox(t("product"), list(product_options.keys()))
+        product_id, product_name, category, price = product_options[product_label]
+        quantity = st.number_input(t("quantity"), min_value=1, value=1, step=1)
+        total = calculate_total(price, quantity)
         st.metric(t("total_price"), f"{cur_sym()}{total:,.2f}")
 
     if st.button(t("complete_purchase"), type="primary", use_container_width=True, key="open_confirm"):
@@ -335,9 +479,21 @@ def render():
         return
 
     if "last_order_id" in st.session_state:
-        st.title(t("customer_app_title"))
+        col_header, col_lang, col_logout = st.columns([0.62, 0.22, 0.16], gap="small")
+        with col_header:
+            render_customer_shell(
+                logo=t("customer_app_title"),
+                welcome=t("order_success"),
+            )
+        with col_lang:
+            language_toggle(inline=True)
+        with col_logout:
+            if st.button(t("log_out"), key="customer_logout_success", use_container_width=True, type="secondary"):
+                _clear_checkout_address_fields()
+                st.session_state.pop("customer", None)
+                st.session_state.pop("last_order_id", None)
+                st.rerun()
         with st.container(border=True):
-            st.success(t("order_success"))
             st.metric(t("your_order_id"), st.session_state.last_order_id)
         if st.button(t("place_another_order"), type="primary", use_container_width=True):
             del st.session_state.last_order_id
