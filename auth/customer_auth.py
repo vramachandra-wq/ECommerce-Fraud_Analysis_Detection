@@ -3,9 +3,19 @@ from typing import Optional, Dict, Any
 from auth.passwords import upgrade_password_if_needed, verify_password
 
 CUSTOMER_FIELDS = [
-    "user_id", "customer_name", "email", "phone_number",
-    "default_address", "program_id",
+    "user_id",
+    "customer_name",
+    "email",
+    "phone_number",
+    "default_address",
+    "street",
+    "city",
+    "state",
+    "country",
+    "zip_code",
+    "program_id",
 ]
+
 
 def authenticate_customer(
     cursor,
@@ -19,7 +29,19 @@ def authenticate_customer(
     """
     cursor.execute(
         """
-        SELECT user_id, customer_name, email, phone_number, default_address, program_id, password
+        SELECT
+            user_id,
+            customer_name,
+            email,
+            phone_number,
+            default_address,
+            street,
+            city,
+            state,
+            country,
+            zip_code,
+            program_id,
+            password
         FROM master.customers
         WHERE user_id = %s
         """,

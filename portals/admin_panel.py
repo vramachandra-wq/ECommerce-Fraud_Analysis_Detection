@@ -13,6 +13,7 @@ from config import API_BASE_URL, API_TIMEOUT
 from database.connection import get_cursor
 from auth.analyst_auth import ALL_PAGES, creatable_roles_for, is_admin
 from portals.analyst_dashboard import render_queue_and_review
+from ui.brand import MC_CHART_COLORS, MC_CHART_SCALE
 from portals.hold_sync import sync_database_holds
 from utils.queries import (
     get_active_blacklist_entry,
@@ -47,26 +48,30 @@ def _inject_tab_bar_css():
             justify-content: center;
             align-items: center;
             text-align: center;
-            background-color: var(--secondary-background-color) !important;
-            border: 1px solid rgba(128, 128, 128, 0.3) !important;
-            border-radius: 8px !important;
-            padding: 0.5rem 0.75rem !important;
+            background-color: var(--mc-surface, #ffffff) !important;
+            border: 1px solid var(--mc-border, rgba(30, 30, 30, 0.08)) !important;
+            border-radius: 14px !important;
+            padding: 0.55rem 0.85rem !important;
             margin: 0 !important;
             cursor: pointer;
-            transition: background-color 0.15s ease, border-color 0.15s ease;
+            box-shadow: 0 8px 18px rgba(30, 30, 30, 0.05);
+            transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
         }
         div[class*="st-key-admin_tab_bar"] div[role="radiogroup"] label div[data-testid="stMarkdownContainer"] p {
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            font-weight: 600 !important;
+            color: var(--mc-text, #111827) !important;
         }
         div[class*="st-key-admin_tab_bar"] div[role="radiogroup"] label:has(input:checked) {
-            background-color: #dc2626 !important;
-            border-color: #dc2626 !important;
+            background-color: var(--mc-coral, #2563eb) !important;
+            border-color: var(--mc-coral, #2563eb) !important;
+            transform: translateY(-1px);
         }
         div[class*="st-key-admin_tab_bar"] div[role="radiogroup"] label:has(input:checked) div[data-testid="stMarkdownContainer"] p {
             color: #ffffff !important;
-            font-weight: 600 !important;
+            font-weight: 700 !important;
         }
         div[class*="st-key-admin_tab_bar"] div[role="radiogroup"] label > div:first-child {
             display: none;
@@ -100,20 +105,20 @@ def _send_api_request(method: str, endpoint: str, payload: dict):
 
 @st.dialog("Confirm Create Analyst")
 def confirm_create_analyst(payload: dict):
-    st.markdown("### Create New Analyst — Confirm Details")
+    st.markdown("### Confirm new analyst")
     display_payload = {**payload, "password": "********"}
     st.json(display_payload)
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Create Analyst Account", type="primary", use_container_width=True):
-            with st.spinner("Creating analyst account..."):
+            with st.spinner("Creating analyst account…"):
                 resp = _send_api_request("post", "create-analyst", payload)
             if resp is not None:
-                st.success(f"✅ Analyst {payload.get('employee_name')} created.")
+                st.success(f"Analyst {payload.get('employee_name')} created.")
                 time.sleep(1)
                 st.rerun()
     with col2:
-        if st.button("Cancel", use_container_width=True):
+        if st.button("Cancel", use_container_width=True, type="secondary"):
             st.rerun()
 
 
@@ -121,29 +126,32 @@ def confirm_create_analyst(payload: dict):
 def confirm_blacklist_action(endpoint: str, payload: dict, entity_label: str):
     st.warning(f"Are you sure you want to blacklist {entity_label}?")
     st.json(payload)
-    if st.button(f"Confirm Blacklist", type="primary", use_container_width=True):
-        with st.spinner("Applying blacklist..."):
+    if st.button("Confirm Blacklist", type="primary", use_container_width=True):
+        with st.spinner("Applying blacklist…"):
             resp = _send_api_request("post", endpoint, payload)
         if resp is not None:
             st.success(f"{entity_label} blacklisted.")
             time.sleep(1)
             st.rerun()
-    if st.button("Cancel", use_container_width=True):
+    if st.button("Cancel", use_container_width=True, type="secondary"):
         st.rerun()
 
 
 @st.dialog("Confirm Whitelist Action")
 def confirm_whitelist_action(endpoint: str, payload: dict, entity_label: str):
-    st.warning(f"Are you sure you want to whitelist {entity_label}? This will remove it from the blacklist.")
+    st.warning(
+        f"Are you sure you want to whitelist {entity_label}? "
+        "This will remove it from the blacklist."
+    )
     st.json(payload)
-    if st.button(f"Confirm Whitelist", type="primary", use_container_width=True):
-        with st.spinner("Removing from blacklist..."):
+    if st.button("Confirm Whitelist", type="primary", use_container_width=True):
+        with st.spinner("Removing from blacklist…"):
             resp = _send_api_request("put", endpoint, payload)
         if resp is not None:
             st.success(f"{entity_label} whitelisted.")
             time.sleep(1)
             st.rerun()
-    if st.button("Cancel", use_container_width=True):
+    if st.button("Cancel", use_container_width=True, type="secondary"):
         st.rerun()
 
 
@@ -396,7 +404,13 @@ def _tab_analytics():
                 names=list(status_counts.keys()),
                 values=list(status_counts.values()),
                 title="Order Status Distribution",
-                hole=0.4
+                hole=0.4,
+                color_discrete_sequence=MC_CHART_COLORS,
+            )
+            fig.update_layout(
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                font_family="DM Sans",
             )
             st.plotly_chart(fig, use_container_width=True)
 
@@ -412,6 +426,12 @@ def _tab_analytics():
                 y="order_count",
                 markers=True,
                 title="Daily Order Volume — Current Month",
+            )
+            trend_fig.update_traces(line_color="#2563eb", marker_color="#1e40af")
+            trend_fig.update_layout(
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                font_family="DM Sans",
             )
             trend_fig.update_xaxes(title="Date")
             trend_fig.update_yaxes(title="Orders", rangemode="tozero")
@@ -487,7 +507,12 @@ def _tab_rule_stats():
             y="times_triggered", 
             title="Rule Trigger Counts",
             color="times_triggered",
-            color_continuous_scale="Reds"
+            color_continuous_scale=MC_CHART_SCALE
+        )
+        fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font_family="DM Sans",
         )
         st.plotly_chart(fig, use_container_width=True)
         
@@ -686,7 +711,10 @@ def render():
         st.error(t("access_denied"))
         return
 
-    st.header(t("admin_control_panel"))
+    st.markdown(
+        f'<p class="page-heading">{t("admin_control_panel")}</p>',
+        unsafe_allow_html=True,
+    )
     st.caption(t("logged_in_as_role", name=analyst["employee_name"], role=analyst["role"]))
 
     # Run the cached synchronization task

@@ -4,6 +4,8 @@ import requests
 
 from portals.customer_portal import (
     _build_api_url,
+    _parse_default_address,
+    _resolve_address_defaults,
     _send_api_request,
     fetch_form_options,
 )
@@ -13,6 +15,47 @@ def test_build_api_url():
     with patch("portals.customer_portal.API_BASE_URL", "http://127.0.0.1:8000"):
         assert _build_api_url("create-order") == "http://127.0.0.1:8000/create-order"
         assert _build_api_url("/create-order") == "http://127.0.0.1:8000/create-order"
+
+
+def test_parse_default_address():
+    assert _parse_default_address("21 MG Road, Bengaluru, Karnataka 560001") == {
+        "street": "21 MG Road",
+        "city": "Bengaluru",
+        "state": "Karnataka",
+        "zip_code": "560001",
+    }
+    assert _parse_default_address("Only Street") == {"street": "Only Street"}
+    assert _parse_default_address("") == {}
+
+
+def test_resolve_address_defaults_prefers_structured_fields():
+    customer = {
+        "street": "21 MG Road",
+        "city": "Bengaluru",
+        "state": "Karnataka",
+        "zip_code": "560001",
+        "country": "India",
+        "default_address": "ignored",
+    }
+    assert _resolve_address_defaults(customer)["street"] == "21 MG Road"
+
+
+def test_resolve_address_defaults_falls_back_to_default_address():
+    customer = {
+        "street": None,
+        "city": None,
+        "state": None,
+        "zip_code": None,
+        "country": None,
+        "default_address": "14 Marine Drive, Mumbai, Maharashtra 400002",
+    }
+    assert _resolve_address_defaults(customer) == {
+        "street": "14 Marine Drive",
+        "city": "Mumbai",
+        "state": "Maharashtra",
+        "zip_code": "400002",
+        "country": "India",
+    }
 
 
 @patch("portals.customer_portal.requests.post")
