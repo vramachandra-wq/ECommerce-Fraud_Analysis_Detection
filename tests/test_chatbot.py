@@ -225,29 +225,43 @@ def test_get_followup_context_includes_previous_sql_and_columns():
     assert "Chennai" in ctx
 
 
-def test_get_followup_context_empty_without_prior_result():
-    assert _get_followup_context([{"role": "user", "content": "hello"}]) == ""
+def test_get_followup_context_masks_pii_in_sample():
+    history = [
+        {"role": "user", "content": "show emails"},
+        {
+            "role": "assistant",
+            "content": "done",
+            "sql": "SELECT email FROM master.customers LIMIT 1",
+            "df": [{"email": "john@example.com"}],
+        },
+    ]
+    ctx = _get_followup_context(history)
+    assert "john@" not in ctx
+    assert "example.com" in ctx
 
 
 # ---------- masking / sanitize ----------
 
 def test_mask_email_phone_address_ip():
-    assert _mask_email("john@example.com") == "j***@example.com"
+    assert _mask_email("john@example.com") == "jo**@example.com"
     assert _mask_phone("9876543210") == "98******10"
     assert _mask_phone("1234") == "***"
-    assert _mask_address("12 Main Street Chennai") == "12 Main ***"
+    assert _mask_address("12 Main Street Chennai") == "12********************"
+    assert _mask_address("21 MG Road, Bengaluru, Karnataka 560001") == (
+        "21********, Bengaluru, Karnataka 560001"
+    )
     assert _mask_ip("192.168.1.100") == "192.168.***.***"
 
 
 def test_mask_value_by_column():
-    assert _mask_value("email", "jane@test.com") == "j***@test.com"
+    assert _mask_value("email", "jane@test.com") == "ja**@test.com"
     assert _mask_value("phone_number", "9876543210") == "98******10"
-    assert _mask_value("address", "12 Main Street Chennai") == "12 Main ***"
+    assert _mask_value("address", "12 Main Street Chennai") == "12********************"
     assert _mask_value("ip_address", "10.0.0.1") == "10.0.***.***"
     assert _mask_value("city", "Chennai") == "Chennai"
 
 
-def test_mask_sensitive_dataframe_and_alias():
+def test_mask_sensitive_dataframe_role_based():
     df = pd.DataFrame(
         {
             "email": ["alice@example.com"],
@@ -256,15 +270,31 @@ def test_mask_sensitive_dataframe_and_alias():
             "city": ["Chennai"],
         }
     )
-    out = mask_sensitive_dataframe(df)
-    assert out.loc[0, "email"] == "a****@example.com"
-    assert out.loc[0, "phone_number"] == "98******10"
-    assert out.loc[0, "ip_address"] == "10.0.***.***"
-    assert out.loc[0, "city"] == "Chennai"
+    masked = mask_sensitive_dataframe(df, analyst={"role": "Fraud Analyst"})
+    assert masked.loc[0, "email"] == "al***@example.com"
+    assert masked.loc[0, "phone_number"] == "98******10"
+    assert masked.loc[0, "ip_address"] == "10.0.***.***"
+    assert masked.loc[0, "city"] == "Chennai"
     assert df.loc[0, "email"] == "alice@example.com"
 
+    admin_view = mask_sensitive_dataframe(df, analyst={"role": "Admin"})
+    assert admin_view.loc[0, "email"] == "alice@example.com"
+    assert admin_view.loc[0, "phone_number"] == "9876543210"
+    assert admin_view.loc[0, "ip_address"] == "10.0.0.5"
+
+    senior = mask_sensitive_dataframe(df, analyst={"role": "Senior Fraud Analyst"})
+    assert senior.loc[0, "email"] == "al***@example.com"
+
+    anonymous = mask_sensitive_dataframe(df)
+    assert anonymous.loc[0, "email"] == "al***@example.com"
+
+
+def test_sanitize_dataframe_for_llm_always_masks():
+    df = pd.DataFrame({"email": ["alice@example.com"], "city": ["Chennai"]})
+    # Even if caller would be Admin, LLM path must never receive raw PII.
     aliased = sanitize_dataframe_for_llm(df)
-    assert aliased.loc[0, "email"] == "a****@example.com"
+    assert aliased.loc[0, "email"] == "al***@example.com"
+    assert aliased.loc[0, "city"] == "Chennai"
 
 
 # ---------- dataframe / chart helpers ----------
