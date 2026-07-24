@@ -12,9 +12,9 @@ DB_CONFIG = {
     "dbname": os.environ.get("DB_NAME", "fraud_detection"),
     "user": os.environ.get("DB_USER", "postgres"),
     "password": os.environ.get("DB_PASSWORD", ""),
-    # Order timestamps are written with Python datetime.now() (local IST).
-    # Align the DB session so NOW() vs TIMESTAMP comparisons are not skewed by UTC.
-    "options": "-c timezone=Asia/Kolkata",
+    # Order timestamps are written as UTC wall-clock (naive). Keep the DB session
+    # on UTC so NOW() / CURRENT_DATE match those values.
+    "options": "-c timezone=UTC",
 }
 
 def _get_env_str(key: str, default: str = "") -> str:

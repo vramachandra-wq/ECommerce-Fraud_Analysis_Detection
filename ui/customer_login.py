@@ -1,7 +1,7 @@
 """Customer portal visual system (login + authenticated checkout).
 
-Matches the Metro Cart login look: DM Sans, cool gray-blue canvas, blue accent,
-soft blue inputs, and white surfaces.
+Matches the analyst portal Matx theme: Roboto, navy sidebar accents,
+#1976d2 primary, #f5f6fa surface, white cards.
 """
 
 import streamlit as st
@@ -10,8 +10,7 @@ from ui.brand import brand_wordmark_html
 from ui.tokens import DIALOG_CSS
 
 _CUSTOMER_FONT = (
-    "@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@"
-    "0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap');"
+    "@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');"
 )
 
 
@@ -23,19 +22,21 @@ def apply_customer_theme() -> None:
     {DIALOG_CSS}
 
     :root {{
-      --mc-bg: #eef2f7;
+      --mc-bg: #f5f6fa;
       --mc-surface: #ffffff;
-      --mc-peach: #e8f0fe;
-      --mc-art: #dbe7f7;
-      --mc-coral: #2563eb;
-      --mc-coral-deep: #1e40af;
-      --mc-text: #111827;
-      --mc-muted: #6b7280;
-      --mc-label: #374151;
-      --mc-border: rgba(30, 30, 30, 0.08);
-      --mc-radius: 18px;
-      --mc-shadow: 0 18px 48px rgba(30, 30, 30, 0.08);
-      --mc-font: "DM Sans", "Segoe UI", sans-serif;
+      --mc-peach: #e3f2fd;
+      --mc-art: #1a2038;
+      --mc-coral: #1976d2;
+      --mc-coral-deep: #1565c0;
+      --mc-text: #2c3345;
+      --mc-text-strong: #1a2038;
+      --mc-muted: #8b95a8;
+      --mc-label: #2c3345;
+      --mc-border: #e6e9f0;
+      --mc-radius: 10px;
+      --mc-shadow: 0 2px 8px rgba(26, 32, 56, 0.06);
+      --mc-shadow-btn: 0 4px 12px rgba(25, 118, 210, 0.28);
+      --mc-font: Roboto, system-ui, sans-serif;
     }}
 
     .stApp {{
@@ -64,8 +65,8 @@ def apply_customer_theme() -> None:
 
     .stApp h1, .stApp h2, .stApp h3, .stApp h4 {{
       font-family: var(--mc-font) !important;
-      color: var(--mc-text) !important;
-      letter-spacing: -0.02em;
+      color: var(--mc-text-strong) !important;
+      letter-spacing: 0.01em;
       font-weight: 700 !important;
     }}
 
@@ -90,16 +91,17 @@ def apply_customer_theme() -> None:
       opacity: 1 !important;
     }}
 
-    /* Brand shell (authenticated) */
+    /* Brand shell (authenticated) — Matx-style white card */
     .customer-portal-shell {{
       display: flex;
       flex-direction: column;
       gap: 0.2rem;
       margin: 0 0 1.1rem 0;
-      padding: 1.35rem 1.5rem 1.25rem;
+      padding: 1.25rem 1.4rem 1.15rem;
       background: var(--mc-surface);
       border-radius: var(--mc-radius);
       box-shadow: var(--mc-shadow);
+      border: 1px solid var(--mc-border);
       position: relative;
       overflow: hidden;
     }}
@@ -107,14 +109,14 @@ def apply_customer_theme() -> None:
       content: "";
       position: absolute;
       left: 0; top: 0; bottom: 0;
-      width: 5px;
-      background: var(--mc-coral);
+      width: 4px;
+      background: linear-gradient(180deg, #42a5f5, #1976d2);
     }}
     .customer-portal-logo {{
-      color: var(--mc-coral);
-      font-size: 1.35rem;
+      color: var(--mc-text-strong);
+      font-size: 1.25rem;
       font-weight: 700;
-      letter-spacing: -0.02em;
+      letter-spacing: 0.02em;
       margin: 0;
       padding-left: 0.65rem;
     }}
@@ -130,6 +132,7 @@ def apply_customer_theme() -> None:
       border-radius: 8px;
       object-fit: cover;
       flex-shrink: 0;
+      box-shadow: 0 4px 12px rgba(25, 118, 210, 0.25);
     }}
     .mc-brand-name {{
       color: inherit;
@@ -138,25 +141,25 @@ def apply_customer_theme() -> None:
     }}
     .customer-portal-welcome {{
       color: var(--mc-muted);
-      font-size: 0.95rem;
+      font-size: 0.9rem;
       margin: 0;
       padding-left: 0.65rem;
     }}
     .customer-portal-title {{
-      color: var(--mc-text);
-      font-size: 1.75rem;
+      color: var(--mc-text-strong);
+      font-size: 1.55rem;
       font-weight: 700;
-      letter-spacing: -0.03em;
-      line-height: 1.15;
+      letter-spacing: 0.01em;
+      line-height: 1.2;
       margin: 0.15rem 0 0;
       padding-left: 0.65rem;
     }}
 
     .customer-section-title {{
-      color: var(--mc-text);
-      font-size: 1.05rem;
+      color: var(--mc-text-strong);
+      font-size: 1rem;
       font-weight: 700;
-      letter-spacing: -0.01em;
+      letter-spacing: 0.01em;
       margin: 0.15rem 0 0.85rem;
     }}
     .mc-spacer-sm {{
@@ -176,7 +179,7 @@ def apply_customer_theme() -> None:
       box-shadow: var(--mc-shadow) !important;
     }}
 
-    /* Inputs — soft blue fill like login */
+    /* Inputs — soft accent fill like portal */
     .stApp input,
     .stApp textarea,
     .stApp .stTextInput input,
@@ -185,7 +188,7 @@ def apply_customer_theme() -> None:
     .stApp .stDateInput input {{
       background: var(--mc-peach) !important;
       border: 1px solid transparent !important;
-      border-radius: 10px !important;
+      border-radius: 8px !important;
       min-height: 2.55rem !important;
       color: var(--mc-text) !important;
       -webkit-text-fill-color: var(--mc-text) !important;
@@ -194,13 +197,13 @@ def apply_customer_theme() -> None:
     .stApp input:focus,
     .stApp textarea:focus {{
       border-color: var(--mc-coral) !important;
-      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18) !important;
+      box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.18) !important;
     }}
     .stApp input:disabled,
     .stApp .stTextInput input:disabled {{
-      background: #f3f4f6 !important;
-      color: #6b7280 !important;
-      -webkit-text-fill-color: #6b7280 !important;
+      background: #eef0f5 !important;
+      color: var(--mc-muted) !important;
+      -webkit-text-fill-color: var(--mc-muted) !important;
     }}
     .stApp label {{
       font-size: 0.82rem !important;
@@ -218,31 +221,31 @@ def apply_customer_theme() -> None:
     .stApp div[data-testid="stSelectbox"]:not([class*="st-key-_lang_selector"]) div[data-baseweb="select"] > div {{
       background: var(--mc-peach) !important;
       border-color: transparent !important;
-      border-radius: 10px !important;
+      border-radius: 8px !important;
     }}
     .stApp div[data-testid="stSelectbox"]:not([class*="st-key-_lang_selector"]) div[data-baseweb="select"] > div:focus-within {{
       border-color: var(--mc-coral) !important;
-      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18) !important;
+      box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.18) !important;
     }}
 
-    /* Primary CTA — rounded square like login */
+    /* Primary CTA — portal accent blue */
     button[kind="primary"],
     .stButton button[kind="primary"],
     button[kind="primaryFormSubmit"] {{
       background: var(--mc-coral) !important;
       border: none !important;
-      border-radius: 14px !important;
-      min-height: 2.75rem !important;
+      border-radius: 8px !important;
+      min-height: 2.65rem !important;
       padding: 0.5rem 1.1rem !important;
       font-weight: 700 !important;
-      letter-spacing: 0.04em !important;
+      letter-spacing: 0.02em !important;
       color: #ffffff !important;
-      box-shadow: 0 10px 24px rgba(37, 99, 235, 0.28) !important;
-      transition: transform 0.12s ease, filter 0.12s ease;
+      box-shadow: var(--mc-shadow-btn) !important;
+      transition: transform 0.12s ease, filter 0.12s ease, background 0.12s ease;
     }}
     button[kind="primary"]:hover,
     button[kind="primaryFormSubmit"]:hover {{
-      filter: brightness(1.03);
+      filter: brightness(1.05);
       transform: translateY(-1px);
       background: var(--mc-coral-deep) !important;
     }}
@@ -256,7 +259,7 @@ def apply_customer_theme() -> None:
       background: var(--mc-surface) !important;
       border: 1px solid var(--mc-border) !important;
       color: var(--mc-text) !important;
-      border-radius: 14px !important;
+      border-radius: 8px !important;
       font-weight: 600 !important;
     }}
 
@@ -276,11 +279,12 @@ def apply_customer_theme() -> None:
     div[data-testid="stMetric"] [data-testid="stMetricValue"] {{
       font-family: var(--mc-font) !important;
       font-weight: 700 !important;
+      color: var(--mc-text-strong) !important;
     }}
 
     /* Banner image soft corners */
     .stApp [data-testid="stImage"] img {{
-      border-radius: 14px !important;
+      border-radius: 10px !important;
     }}
 
     hr {{
@@ -290,7 +294,7 @@ def apply_customer_theme() -> None:
     }}
 
     div[data-testid="stAlert"] {{
-      border-radius: 14px !important;
+      border-radius: 10px !important;
       border: 1px solid var(--mc-border) !important;
     }}
 
@@ -318,7 +322,7 @@ def apply_customer_theme() -> None:
       background: var(--mc-surface) !important;
       border: 1px solid var(--mc-border) !important;
       box-shadow: var(--mc-shadow) !important;
-      border-radius: 14px !important;
+      border-radius: 8px !important;
       min-height: 2.6rem !important;
       padding-left: 0.9rem !important;
       padding-right: 0.65rem !important;
@@ -345,7 +349,7 @@ def apply_customer_theme() -> None:
     }}
 
     @media (max-width: 768px) {{
-      .customer-portal-title {{ font-size: 1.4rem; }}
+      .customer-portal-title {{ font-size: 1.35rem; }}
       .stApp [data-testid="stMainBlockContainer"] {{
         max-width: 100% !important;
       }}
@@ -375,27 +379,31 @@ def apply_customer_login_theme() -> None:
     }
     .stApp:has(.customer-login-marker) div[data-testid="column"]:has(.customer-login-card-inner) {
       background: #ffffff !important;
-      border-radius: 18px 0 0 18px !important;
-      box-shadow: 0 18px 48px rgba(30, 30, 30, 0.08) !important;
+      border-radius: 10px 0 0 10px !important;
+      box-shadow: 0 2px 8px rgba(26, 32, 56, 0.06) !important;
+      border: 1px solid #e6e9f0 !important;
+      border-right: none !important;
       padding: 2.25rem 2.35rem 2rem !important;
       display: flex !important;
       flex-direction: column !important;
       justify-content: center !important;
     }
     .stApp:has(.customer-login-marker) div[data-testid="column"]:has(.customer-login-art-host) {
-      background: #dbe7f7 !important;
-      border-radius: 0 18px 18px 0 !important;
+      background: #1a2038 !important;
+      border-radius: 0 10px 10px 0 !important;
       display: flex !important;
       align-items: center !important;
       justify-content: center !important;
       padding: 2rem 1.5rem !important;
+      border: 1px solid #e6e9f0 !important;
+      border-left: none !important;
     }
 
     .customer-login-logo {
-      color: #2563eb;
-      font-size: 1.35rem;
+      color: #1a2038;
+      font-size: 1.25rem;
       font-weight: 700;
-      letter-spacing: -0.02em;
+      letter-spacing: 0.02em;
       margin: 0 0 1.75rem 0;
     }
     .customer-login-logo .mc-brand-wordmark {
@@ -407,9 +415,10 @@ def apply_customer_login_theme() -> None:
       display: block;
       width: 2rem;
       height: 2rem;
-      border-radius: 9px;
+      border-radius: 8px;
       object-fit: cover;
       flex-shrink: 0;
+      box-shadow: 0 4px 12px rgba(25, 118, 210, 0.35);
     }
     .customer-login-logo .mc-brand-name {
       color: inherit;
@@ -417,22 +426,22 @@ def apply_customer_login_theme() -> None:
       letter-spacing: inherit;
     }
     .customer-login-welcome {
-      color: var(--mc-muted, #6b7280);
-      font-size: 0.95rem;
+      color: var(--mc-muted, #8b95a8);
+      font-size: 0.9rem;
       margin: 0 0 0.35rem 0;
     }
     .customer-login-title {
-      color: #111827;
-      font-size: 2.35rem;
+      color: #1a2038;
+      font-size: 2.15rem;
       font-weight: 700;
-      letter-spacing: -0.03em;
-      line-height: 1.1;
+      letter-spacing: 0.01em;
+      line-height: 1.15;
       margin: 0 0 1.65rem 0;
     }
     .customer-login-demo {
       margin-top: 1.1rem;
       text-align: center;
-      color: var(--mc-muted, #6b7280);
+      color: var(--mc-muted, #8b95a8);
       font-size: 0.78rem;
       line-height: 1.45;
     }
@@ -448,7 +457,8 @@ def apply_customer_login_theme() -> None:
       width: 100%;
       height: auto;
       object-fit: contain;
-      border-radius: 12px;
+      border-radius: 10px;
+      filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.25));
     }
 
     .stApp:has(.customer-login-marker) div[data-testid="column"]:has(.customer-login-card-inner) div[data-testid="stForm"] {
@@ -461,36 +471,37 @@ def apply_customer_login_theme() -> None:
     .stApp:has(.customer-login-marker) div[data-testid="column"]:has(.customer-login-card-inner) label {
       font-size: 0.82rem !important;
       font-weight: 500 !important;
-      color: #374151 !important;
+      color: #2c3345 !important;
       margin-bottom: 0.35rem !important;
     }
     .stApp:has(.customer-login-marker) div[data-testid="column"]:has(.customer-login-card-inner) input {
-      background: #e8f0fe !important;
+      background: #e3f2fd !important;
       border: 1px solid transparent !important;
-      border-radius: 10px !important;
+      border-radius: 8px !important;
       min-height: 2.55rem !important;
       padding: 0.65rem 0.9rem !important;
-      color: #111827 !important;
-      -webkit-text-fill-color: #111827 !important;
+      color: #2c3345 !important;
+      -webkit-text-fill-color: #2c3345 !important;
       box-shadow: none !important;
     }
     .stApp:has(.customer-login-marker) div[data-testid="column"]:has(.customer-login-card-inner) input:focus {
-      border-color: #2563eb !important;
-      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18) !important;
+      border-color: #1976d2 !important;
+      box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.18) !important;
     }
     .stApp:has(.customer-login-marker) div[data-testid="column"]:has(.customer-login-card-inner) button[kind="primaryFormSubmit"] {
-      background: var(--mc-coral, #2563eb) !important;
+      background: #1976d2 !important;
       border: none !important;
-      border-radius: 14px !important;
-      min-height: 2.75rem !important;
+      border-radius: 8px !important;
+      min-height: 2.65rem !important;
       font-weight: 700 !important;
-      letter-spacing: 0.04em !important;
-      box-shadow: 0 10px 24px rgba(37, 99, 235, 0.28) !important;
+      letter-spacing: 0.02em !important;
+      box-shadow: 0 4px 12px rgba(25, 118, 210, 0.28) !important;
       margin-top: 0.35rem !important;
     }
     .stApp:has(.customer-login-marker) div[data-testid="column"]:has(.customer-login-card-inner) button[kind="primaryFormSubmit"]:hover {
-      filter: brightness(1.03);
+      filter: brightness(1.05);
       transform: translateY(-1px);
+      background: #1565c0 !important;
     }
 
     /* Login: language control stays above the split card */
@@ -506,10 +517,11 @@ def apply_customer_login_theme() -> None:
         display: none !important;
       }
       .stApp:has(.customer-login-marker) div[data-testid="column"]:has(.customer-login-card-inner) {
-        border-radius: 18px !important;
+        border-radius: 10px !important;
+        border-right: 1px solid #e6e9f0 !important;
       }
       .customer-login-title {
-        font-size: 2rem;
+        font-size: 1.85rem;
       }
     }
     </style>

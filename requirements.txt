@@ -9,3 +9,4 @@ plotly
 groq
 httpx
 bcrypt
+tabulate

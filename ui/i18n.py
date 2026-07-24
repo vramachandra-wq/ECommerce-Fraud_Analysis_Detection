@@ -91,9 +91,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "No analyst account found for that username.",
         "th": "ไม่พบบัญชีนักวิเคราะห์สำหรับชื่อผู้ใช้นี้",
     },
+    "password_change_customer_not_found": {
+        "en": "No customer account found for that user ID.",
+        "th": "ไม่พบบัญชีลูกค้าสำหรับรหัสผู้ใช้นี้",
+    },
     "password_change_login_hint": {
         "en": "Enter your username and current password, then choose a new password (min. 8 characters).",
         "th": "กรอกชื่อผู้ใช้และรหัสผ่านปัจจุบัน จากนั้นตั้งรหัสผ่านใหม่ (อย่างน้อย 8 ตัวอักษร)",
+    },
+    "password_change_customer_login_hint": {
+        "en": "Enter your user ID and current password, then choose a new password (min. 8 characters).",
+        "th": "กรอกรหัสผู้ใช้และรหัสผ่านปัจจุบัน จากนั้นตั้งรหัสผ่านใหม่ (อย่างน้อย 8 ตัวอักษร)",
+    },
+    "password_reset_email_mismatch": {
+        "en": "User ID and email do not match our records.",
+        "th": "รหัสผู้ใช้และอีเมลไม่ตรงกับข้อมูลในระบบ",
+    },
+    "password_reset_success": {
+        "en": "Password reset successfully. Please log in with your new password.",
+        "th": "รีเซ็ตรหัสผ่านสำเร็จแล้ว กรุณาเข้าสู่ระบบด้วยรหัสผ่านใหม่",
+    },
+    "password_reset_hint": {
+        "en": "Enter your User ID and the email on your account, then choose a new password (min. 8 characters).",
+        "th": "กรอกรหัสผู้ใช้และอีเมลในบัญชี จากนั้นตั้งรหัสผ่านใหม่ (อย่างน้อย 8 ตัวอักษร)",
     },
     "back_to_login": {"en": "Back to Login", "th": "กลับไปหน้าเข้าสู่ระบบ"},
     "cancel": {"en": "Cancel", "th": "ยกเลิก"},

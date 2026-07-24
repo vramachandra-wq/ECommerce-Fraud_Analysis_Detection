@@ -170,6 +170,116 @@ def get_orders_over_time(cursor: Any) -> pd.DataFrame:
     return pd.DataFrame(cursor.fetchall(), columns=cols)
 
 
+def get_dashboard_order_trend(cursor: Any, period: str = "month") -> Dict[str, Any]:
+    """
+    Order volume by status for dashboard Statistics chart.
+
+    period:
+      - today  → hourly buckets for the current calendar day
+      - week   → daily buckets for the current ISO week (Mon–Sun)
+      - month  → daily buckets for the current calendar month
+    """
+    period = (period or "month").lower().strip()
+    if period not in {"today", "week", "month"}:
+        period = "month"
+
+    if period == "today":
+        granularity = "hour"
+        start_sql = "date_trunc('day', CURRENT_TIMESTAMP)"
+        end_sql = "date_trunc('day', CURRENT_TIMESTAMP) + INTERVAL '1 day'"
+        step_sql = "INTERVAL '1 hour'"
+    elif period == "week":
+        granularity = "day"
+        # PostgreSQL date_trunc('week') starts Monday.
+        start_sql = "date_trunc('week', CURRENT_DATE)"
+        end_sql = "date_trunc('week', CURRENT_DATE) + INTERVAL '7 days'"
+        step_sql = "INTERVAL '1 day'"
+    else:
+        granularity = "day"
+        start_sql = "date_trunc('month', CURRENT_DATE)"
+        end_sql = "date_trunc('month', CURRENT_DATE) + INTERVAL '1 month'"
+        step_sql = "INTERVAL '1 day'"
+
+    cursor.execute(
+        f"""
+        WITH bounds AS (
+            SELECT {start_sql} AS start_ts, {end_sql} AS end_ts
+        ),
+        buckets AS (
+            SELECT generate_series(
+                (SELECT start_ts FROM bounds),
+                (SELECT end_ts FROM bounds) - {step_sql},
+                {step_sql}
+            ) AS bucket_ts
+        ),
+        agg AS (
+            SELECT
+                date_trunc('{granularity}', o.order_timestamp) AS bucket_ts,
+                COUNT(*)::int AS orders,
+                COUNT(*) FILTER (
+                    WHERE o.order_status IN ('PENDING_REVIEW', 'ON_HOLD')
+                )::int AS in_review,
+                COUNT(*) FILTER (
+                    WHERE o.order_status = 'APPROVED'
+                )::int AS approved,
+                COUNT(*) FILTER (
+                    WHERE o.order_status = 'REJECTED' OR o.is_fraud IS TRUE
+                )::int AS rejected
+            FROM master.orders o
+            CROSS JOIN bounds b
+            WHERE o.order_timestamp >= b.start_ts
+              AND o.order_timestamp < b.end_ts
+            GROUP BY 1
+        )
+        SELECT
+            b.bucket_ts,
+            COALESCE(a.orders, 0) AS orders,
+            COALESCE(a.in_review, 0) AS in_review,
+            COALESCE(a.approved, 0) AS approved,
+            COALESCE(a.rejected, 0) AS rejected
+        FROM buckets b
+        LEFT JOIN agg a ON a.bucket_ts = b.bucket_ts
+        ORDER BY b.bucket_ts
+        """
+    )
+    cols = [d.name for d in cursor.description]
+    rows = [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+    points: List[Dict[str, Any]] = []
+    totals = {"orders": 0, "in_review": 0, "approved": 0, "rejected": 0}
+    for row in rows:
+        ts = row["bucket_ts"]
+        if hasattr(ts, "strftime"):
+            if granularity == "hour":
+                key = ts.strftime("%Y-%m-%dT%H:00:00")
+                label = ts.strftime("%H:%M")
+            else:
+                key = ts.strftime("%Y-%m-%d")
+                label = ts.strftime("%a %d") if period == "week" else ts.strftime("%d %b")
+        else:
+            key = str(ts)
+            label = str(ts)
+
+        point = {
+            "key": key,
+            "label": label,
+            "orders": int(row["orders"] or 0),
+            "in_review": int(row["in_review"] or 0),
+            "approved": int(row["approved"] or 0),
+            "rejected": int(row["rejected"] or 0),
+        }
+        points.append(point)
+        for metric in totals:
+            totals[metric] += point[metric]
+
+    return {
+        "period": period,
+        "granularity": granularity,
+        "totals": totals,
+        "points": points,
+    }
+
+
 def get_permission_matrix(cursor: Any) -> List[Dict[str, Any]]:
     """Gets all analysts and their granted page permissions."""
     cursor.execute(
@@ -211,3 +321,18 @@ def get_analyst_performance(cursor: Any) -> pd.DataFrame:
     )
     cols = [d.name for d in cursor.description]
     return pd.DataFrame(cursor.fetchall(), columns=cols)
+
+
+def get_all_rules(cursor: Any) -> List[Dict[str, Any]]:
+    """All fraud rules from rule_master (for portal rule configuration)."""
+    cursor.execute(
+        """
+        SELECT rule_id, rule_name, rule_description, rule_type,
+               action, threshold_value, time_interval_value, time_interval_unit,
+               delay_minutes
+        FROM master.rule_master
+        ORDER BY rule_id
+        """
+    )
+    cols = [d.name for d in cursor.description]
+    return [dict(zip(cols, row)) for row in cursor.fetchall()]

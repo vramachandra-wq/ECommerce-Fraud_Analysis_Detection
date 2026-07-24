@@ -1,12 +1,12 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, Dict
-from datetime import datetime
 import psycopg2
 from psycopg2.extras import execute_batch
 from config import DB_CONFIG
 from auth.analyst_auth import ROLE_ADMIN
 from auth.passwords import hash_password
+from utils.time_utils import utcnow_naive
 
 # Note: Adjust these import paths as needed
 from fraud_engine.rules import clear_interval_cache
@@ -220,7 +220,7 @@ def whitelist_email(data: WhitelistRequest):
 
 @router.put("/permissions/bulk")
 def update_permissions_bulk(payload: BulkPermissionUpdate):
-    timestamp = datetime.now()
+    timestamp = utcnow_naive()
     
     # Prepare list of tuples for batch execution
     data_to_insert = [

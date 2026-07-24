@@ -5,8 +5,6 @@ import requests
 import time
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from datetime import datetime
-
 import plotly.express as px
 import streamlit as st
 from config import API_BASE_URL, API_TIMEOUT
@@ -15,6 +13,7 @@ from auth.analyst_auth import ALL_PAGES, creatable_roles_for, is_admin
 from portals.analyst_dashboard import render_queue_and_review
 from ui.brand import MC_CHART_COLORS, MC_CHART_SCALE
 from portals.hold_sync import sync_database_holds
+from utils.time_utils import format_utc, utcnow_naive
 from utils.queries import (
     get_active_blacklist_entry,
     get_active_phone_blacklist_entry,
@@ -239,9 +238,9 @@ def _tab_blacklists(analyst: dict):
 
             if entry:
                 st.error(f"🚫 **{checked_ip}** is currently blacklisted.")
-                st.write(f"**Reason:** {entry['reason']} | **By:** {entry['blacklisted_by_name'] or entry['blacklisted_by']} | **Date:** {str(entry['blacklisted_at']).split()[0]}")
+                st.write(f"**Reason:** {entry['reason']} | **By:** {entry['blacklisted_by_name'] or entry['blacklisted_by']} | **Date:** {format_utc(entry['blacklisted_at'])}")
                 if st.button(t("whitelist_ip"), type="primary", key="whitelist_ip"):
-                    payload = {"removed_by": analyst["analyst_id"], "removed_at": str(datetime.now()), "blacklist_id": entry["blacklist_id"]}
+                    payload = {"removed_by": analyst["analyst_id"], "removed_at": str(utcnow_naive()), "blacklist_id": entry["blacklist_id"]}
                     confirm_whitelist_action("whitelist-ip", payload, f"IP {checked_ip}")
             else:
                 st.success(f"✅ **{checked_ip}** is safe.")
@@ -267,9 +266,9 @@ def _tab_blacklists(analyst: dict):
 
             if entry:
                 st.error(f"🚫 **{checked_phone}** is currently blacklisted.")
-                st.write(f"**Reason:** {entry['reason']} | **By:** {entry['blacklisted_by_name'] or entry['blacklisted_by']} | **Date:** {str(entry['blacklisted_at']).split()[0]}")
+                st.write(f"**Reason:** {entry['reason']} | **By:** {entry['blacklisted_by_name'] or entry['blacklisted_by']} | **Date:** {format_utc(entry['blacklisted_at'])}")
                 if st.button(t("whitelist_phone"), type="primary", key="whitelist_phone"):
-                    payload = {"removed_by": analyst["analyst_id"], "removed_at": str(datetime.now()), "blacklist_id": entry["blacklist_id"]}
+                    payload = {"removed_by": analyst["analyst_id"], "removed_at": str(utcnow_naive()), "blacklist_id": entry["blacklist_id"]}
                     confirm_whitelist_action("whitelist-phone", payload, f"Phone {checked_phone}")
             else:
                 st.success(f"✅ **{checked_phone}** is safe.")
@@ -295,9 +294,9 @@ def _tab_blacklists(analyst: dict):
 
             if entry:
                 st.error(f"🚫 **{checked_email}** is currently blacklisted.")
-                st.write(f"**Reason:** {entry['reason']} | **By:** {entry['blacklisted_by_name'] or entry['blacklisted_by']} | **Date:** {str(entry['blacklisted_at']).split()[0]}")
+                st.write(f"**Reason:** {entry['reason']} | **By:** {entry['blacklisted_by_name'] or entry['blacklisted_by']} | **Date:** {format_utc(entry['blacklisted_at'])}")
                 if st.button(t("whitelist_email"), type="primary", key="whitelist_email"):
-                    payload = {"removed_by": analyst["analyst_id"], "removed_at": str(datetime.now()), "blacklist_id": entry["blacklist_id"]}
+                    payload = {"removed_by": analyst["analyst_id"], "removed_at": str(utcnow_naive()), "blacklist_id": entry["blacklist_id"]}
                     confirm_whitelist_action("whitelist-email", payload, f"Email {checked_email}")
             else:
                 st.success(f"✅ **{checked_email}** is safe.")
@@ -479,7 +478,7 @@ def _tab_analytics():
                 ),
                 "order_status": st.column_config.TextColumn("Status"),
                 "delay_minutes": st.column_config.NumberColumn("Delay (mins)"),
-                "order_timestamp": st.column_config.DatetimeColumn("Order Date", format="MMM DD, YYYY, h:mm a"),
+                "order_timestamp": st.column_config.DatetimeColumn("Order Date (UTC)", format="YYYY-MM-DD HH:mm:ss"),
                 "is_fraud": st.column_config.CheckboxColumn("Fraud?", help="Indicates if the order was flagged as fraud"),
                 "flagged_reason": st.column_config.TextColumn(
                     "Flagged Reason", 

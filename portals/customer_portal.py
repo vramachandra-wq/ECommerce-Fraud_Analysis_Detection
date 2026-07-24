@@ -1,12 +1,11 @@
 """Customer Portal: login -> order form -> fraud evaluation -> confirmation."""
 import sys
-from datetime import datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 import requests
 import time
 
 from config import API_BASE_URL, API_TIMEOUT
+from utils.time_utils import utcnow_naive
 
 # Defensive: ensure the project root (parent of this portals/ folder) is on
 # sys.path, so imports below resolve even if Streamlit is launched directly
@@ -15,7 +14,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import streamlit as st
 
-from auth.customer_auth import authenticate_customer
+from auth.customer_auth import (
+    authenticate_customer,
+    change_customer_password,
+    reset_customer_password,
+)
 from database.connection import get_cursor
 from fraud_engine.engine import evaluate_order
 from utils.order_utils import calculate_total, generate_order_id
@@ -241,6 +244,7 @@ def fetch_form_options():
 
 def _login_form():
     st.markdown('<div class="customer-login-marker"></div>', unsafe_allow_html=True)
+    mode = st.session_state.get("auth_mode", "login")
 
     _, row, _ = st.columns([0.04, 0.92, 0.04])
     with row:
@@ -248,30 +252,138 @@ def _login_form():
         left, right = st.columns([1.15, 0.85], gap="small")
 
         with left:
-            render_login_header(
-                logo=t("customer_app_title"),
-                welcome=t("login_welcome_back"),
-                title=t("sign_in"),
-            )
-            with st.form("customer_login"):
-                user_id = st.text_input(t("user_id"), placeholder="e.g. U1001")
-                password = st.text_input(t("password"), type="password")
-                submitted = st.form_submit_button(
-                    t("sign_in_cta"),
-                    type="primary",
-                    use_container_width=True,
+            if mode == "forgot_password":
+                render_login_header(
+                    logo=t("customer_app_title"),
+                    welcome=t("login_welcome_back"),
+                    title=t("forgot_password"),
                 )
-            render_login_close()
+                st.caption(t("password_reset_hint"))
+                with st.form("customer_forgot_password"):
+                    user_id = st.text_input(t("user_id"), key="fp_user_id")
+                    email = st.text_input(t("email"), key="fp_email")
+                    new_password = st.text_input(
+                        t("new_password"), type="password", key="fp_new"
+                    )
+                    confirm_password = st.text_input(
+                        t("confirm_new_password"), type="password", key="fp_confirm"
+                    )
+                    submitted = st.form_submit_button(
+                        t("update_password"),
+                        use_container_width=True,
+                        type="primary",
+                    )
+                render_login_close(demo_hint=t("login_demo_hint"))
 
-            if submitted:
-                with get_cursor(commit=True) as (conn, cur):
-                    customer = authenticate_customer(cur, user_id, password, conn=conn)
-                if customer:
-                    _clear_checkout_address_fields()
-                    st.session_state.customer = customer
+                if submitted:
+                    with get_cursor(commit=True) as (conn, cur):
+                        ok, message_key = reset_customer_password(
+                            cur,
+                            conn,
+                            user_id=user_id,
+                            email=email,
+                            new_password=new_password,
+                            confirm_password=confirm_password,
+                        )
+                    if ok:
+                        st.success(t("password_reset_success"))
+                        st.session_state.auth_mode = "login"
+                        st.rerun()
+                    else:
+                        st.error(t(message_key))
+
+                if st.button(t("back_to_login"), use_container_width=True, key="back_from_forgot"):
+                    st.session_state.auth_mode = "login"
                     st.rerun()
-                else:
-                    st.error(t("invalid_login"))
+            elif mode == "change_password":
+                render_login_header(
+                    logo=t("customer_app_title"),
+                    welcome=t("login_welcome_back"),
+                    title=t("change_password"),
+                )
+                st.caption(t("password_change_customer_login_hint"))
+                with st.form("customer_change_password_login"):
+                    user_id = st.text_input(t("user_id"), key="cp_login_user_id")
+                    current_password = st.text_input(
+                        t("current_password"), type="password", key="cp_login_current"
+                    )
+                    new_password = st.text_input(
+                        t("new_password"), type="password", key="cp_login_new"
+                    )
+                    confirm_password = st.text_input(
+                        t("confirm_new_password"), type="password", key="cp_login_confirm"
+                    )
+                    submitted = st.form_submit_button(
+                        t("update_password"),
+                        use_container_width=True,
+                        type="primary",
+                    )
+                render_login_close(demo_hint=t("login_demo_hint"))
+
+                if submitted:
+                    with get_cursor(commit=True) as (conn, cur):
+                        ok, message_key = change_customer_password(
+                            cur,
+                            conn,
+                            user_id=user_id,
+                            current_password=current_password,
+                            new_password=new_password,
+                            confirm_password=confirm_password,
+                        )
+                    if ok:
+                        st.success(t("password_change_then_login"))
+                        st.session_state.auth_mode = "login"
+                        st.rerun()
+                    else:
+                        st.error(t(message_key))
+
+                if st.button(t("back_to_login"), use_container_width=True, key="back_to_login_btn"):
+                    st.session_state.auth_mode = "login"
+                    st.rerun()
+            else:
+                render_login_header(
+                    logo=t("customer_app_title"),
+                    welcome=t("login_welcome_back"),
+                    title=t("sign_in"),
+                )
+                with st.form("customer_login"):
+                    user_id = st.text_input(t("user_id"), placeholder="e.g. U1001")
+                    password = st.text_input(t("password"), type="password")
+                    submitted = st.form_submit_button(
+                        t("sign_in_cta"),
+                        type="primary",
+                        use_container_width=True,
+                    )
+                render_login_close(demo_hint=t("login_demo_hint"))
+
+                col_forgot, col_change = st.columns(2)
+                with col_forgot:
+                    if st.button(
+                        t("forgot_password"),
+                        use_container_width=True,
+                        key="goto_forgot_password",
+                    ):
+                        st.session_state.auth_mode = "forgot_password"
+                        st.rerun()
+                with col_change:
+                    if st.button(
+                        t("change_password"),
+                        use_container_width=True,
+                        key="goto_change_password",
+                    ):
+                        st.session_state.auth_mode = "change_password"
+                        st.rerun()
+
+                if submitted:
+                    with get_cursor(commit=True) as (conn, cur):
+                        customer = authenticate_customer(cur, user_id, password, conn=conn)
+                    if customer:
+                        _clear_checkout_address_fields()
+                        st.session_state.customer = customer
+                        st.session_state.pop("auth_mode", None)
+                        st.rerun()
+                    else:
+                        st.error(t("invalid_login"))
 
         with right:
             render_login_illustration("images/login_hero.png")
@@ -396,8 +508,8 @@ def _order_form():
             return
 
         with st.spinner(t("processing_purchase")):
-            # Wall-clock Asia/Kolkata (matches DB session timezone)
-            order_timestamp = datetime.now(ZoneInfo("Asia/Kolkata")).replace(tzinfo=None)
+            # Wall-clock UTC (matches DB session timezone)
+            order_timestamp = utcnow_naive()
             
             # FORMAT ADDRESS: "street, city, state zip_code"
             formatted_address = f"{street.strip()}, {city.strip()}, {state.strip()} {zip_code.strip()}"
