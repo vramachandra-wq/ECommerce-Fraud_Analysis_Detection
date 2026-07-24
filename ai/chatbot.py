@@ -1,6 +1,5 @@
-import re
+﻿import re
 import logging
-import html
 import pandas as pd
 import streamlit as st
 import json
@@ -39,20 +38,6 @@ from ai.prompt_constants import (
 )
 from database.connection import get_pooled_connection, release_pooled_connection
 from database.transaction_repository import log_chatbot_interaction
-from config import is_groq_api_key_configured
-from ui.i18n import t
-from ui.brand import MC_CHART_COLORS
-
-
-class _SilentProgress:
-    """Drop-in stand-in for st.status — no expander UI."""
-
-    def write(self, *_args, **_kwargs) -> None:
-        return None
-
-    def update(self, *_args, **_kwargs) -> None:
-        return None
-
 
 _KNOWN_DIMENSION_TABLES = [
     "customers",
@@ -69,14 +54,34 @@ _BLOCKED_KEYWORDS = [
 
 SENSITIVE_COLUMNS = {
     "email": "email",
-    "phone": "phone",
     "phone_number": "phone",
+    "phone": "phone",
+    "mobile": "phone",
+    "mobile_number": "phone",
     "address": "address",
     "default_address": "address",
-    "street": "address",
-    "ip": "ip",
     "ip_address": "ip",
+    "password": "secret",
 }
+
+
+def _sensitive_mask_type(column_name: str) -> str | None:
+    """Resolve mask type from an exact column name or common PII naming patterns."""
+    col = str(column_name).lower().strip()
+    if col in SENSITIVE_COLUMNS:
+        return SENSITIVE_COLUMNS[col]
+    if "email" in col:
+        return "email"
+    if "phone" in col or "mobile" in col:
+        return "phone"
+    if "password" in col or col in {"secret", "pwd"}:
+        return "secret"
+    if "ip_address" in col or col == "ip":
+        return "ip"
+    if "address" in col:
+        return "address"
+    return None
+
 
 PROHIBITED_SQL_COLUMNS = {
     "customers.password",
@@ -281,7 +286,7 @@ def _get_last_result_context(history: list[dict]) -> str:
             df = _restore_dataframe_types(df)
             df = sanitize_dataframe_for_llm(df)
             if not df.empty:
-                return df.head(MARKDOWN_PREVIEW_ROWS).to_markdown(index=False)
+                return dataframe_to_markdown(df, max_rows=MARKDOWN_PREVIEW_ROWS)
         except Exception:
             continue
     return ""
@@ -331,7 +336,7 @@ RETURNED COLUMNS:
 {", ".join(previous_df.columns)}
 
 SAMPLE RESULT (first 3 rows — full dataset is larger):
-{previous_df.head(3).to_markdown(index=False)}
+{dataframe_to_markdown(previous_df.head(3))}
 """
 
 # def _detect_analysis_context(
@@ -587,7 +592,7 @@ def _generate_ai_recommendations(
     Generate AI-powered follow-up questions and business advice.
     """
 
-    data_preview = sanitized_df.head(MARKDOWN_PREVIEW_ROWS).to_markdown(index=False)
+    data_preview = dataframe_to_markdown(sanitized_df, max_rows=MARKDOWN_PREVIEW_ROWS)
 
     prompt = AI_RECOMMENDATION_PROMPT.format(
         user_query=user_query,
@@ -636,7 +641,8 @@ def _generate_ai_recommendations(
 
     except Exception as e:
         logging.exception("AI recommendation generation failed")
-        st.caption(_friendly_error_message(e, "recommendations"))
+        # Avoid Streamlit UI calls here so the same helper works for the
+        # headless portal API (ai/chat_api.py) as well as Streamlit.
         return {
             "followups": [],
             "business_advice": [],
@@ -661,10 +667,14 @@ def _validate_sql(sql: str) -> tuple[bool, str]:
         if re.search(rf"\b{kw}\b", sql_lower):
             return False, f"Blocked keyword detected: `{kw.upper()}`."
 
+    for col in PROHIBITED_SQL_COLUMNS:
+        if re.search(rf"\b{re.escape(col.lower())}\b", sql_lower):
+            return False, f"Query may not select prohibited column: `{col}`."
+
     # NOTE: email/phone_number are intentionally NOT blocked here.
-    # Per the PII guardrail design, raw data may be queried and shown in the
-    # UI table; only the copy sent to any LLM is masked (see
-    # sanitize_dataframe_for_llm). Only truly forbidden columns are blocked below.
+    # They may be selected, but values are masked before LLM prompts and
+    # before any UI result table/chart display (see sanitize_dataframe_for_llm).
+    # Only truly forbidden columns are blocked below.
 
     # For the duplicate-join check, only inspect the outer query — strip CTE
     # bodies so joins inside CTEs don't inflate the count for the outer query.
@@ -747,64 +757,105 @@ def _restore_dataframe_types(df: pd.DataFrame) -> pd.DataFrame:
                 pass
     return df
 
-from utils.pii import mask_address, mask_email, mask_ip, mask_phone
-
-
 def _mask_email(value):
     if pd.isna(value):
         return value
-    return mask_email(str(value))
 
+    value = str(value)
+
+    if "@" not in value:
+        return value
+
+    name, domain = value.split("@", 1)
+
+    if len(name) <= 1:
+        masked = "*"
+    else:
+        masked = name[0] + "*" * (len(name) - 1)
+
+    return f"{masked}@{domain}"
 
 def _mask_phone(value):
     if pd.isna(value):
         return value
-    return mask_phone(str(value))
 
+    value = str(value)
+
+    if len(value) <= 4:
+        return value
+
+    return "*" * (len(value) - 4) + value[-4:]
 
 def _mask_address(value):
     if pd.isna(value):
         return value
-    return mask_address(str(value))
-
+    value = str(value).strip()
+    if len(value) <= 6:
+        return "***"
+    return value[:4] + "***" + value[-2:]
 
 def _mask_ip(value):
     if pd.isna(value):
         return value
-    return mask_ip(str(value))
-
+    value = str(value).strip()
+    parts = value.split(".")
+    if len(parts) == 4:
+        return f"{parts[0]}.{parts[1]}.*.*"
+    if len(value) <= 4:
+        return "***"
+    return value[:4] + "***"
 
 def _mask_value(column_name, value):
-    mask_type = SENSITIVE_COLUMNS.get(column_name.lower())
+    mask_type = _sensitive_mask_type(column_name)
+
     if mask_type == "email":
         return _mask_email(value)
+
     if mask_type == "phone":
         return _mask_phone(value)
+
     if mask_type == "address":
         return _mask_address(value)
+
     if mask_type == "ip":
         return _mask_ip(value)
+
+    if mask_type == "secret":
+        return "********" if not pd.isna(value) else value
+
     return value
 
+def sanitize_dataframe_for_llm(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Returns a dataframe with PII columns masked for LLM prompts and UI display.
+    """
 
-def mask_sensitive_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """Mask PII columns for UI tables, charts, logs, and LLM prompts."""
-    if df is None or df.empty:
-        return df
+    sanitized_df = df.copy()
 
-    masked_df = df.copy()
-    for column in masked_df.columns:
-        if column.lower() in SENSITIVE_COLUMNS:
-            masked_df[column] = masked_df[column].apply(
+    for column in sanitized_df.columns:
+        if _sensitive_mask_type(column):
+            sanitized_df[column] = sanitized_df[column].apply(
                 lambda value, col=column: _mask_value(col, value)
             )
-    return masked_df
+
+    return sanitized_df
 
 
-# Backward-compatible alias used by recommendation / follow-up context helpers.
-def sanitize_dataframe_for_llm(df: pd.DataFrame) -> pd.DataFrame:
-    return mask_sensitive_dataframe(df)
+# Alias kept for tests / older call sites.
+mask_sensitive_dataframe = sanitize_dataframe_for_llm
 
+
+def dataframe_to_markdown(df: pd.DataFrame, *, max_rows: int | None = None) -> str:
+    """Render a DataFrame as markdown with a safe fallback when tabulate is missing."""
+    if df is None or df.empty:
+        return "(empty result)"
+    preview = df if max_rows is None else df.head(max_rows)
+    try:
+        return preview.to_markdown(index=False)
+    except ImportError:
+        return preview.to_string(index=False)
+    except Exception:
+        return preview.to_string(index=False)
 
 def _get_best_axis(df: pd.DataFrame, cols_list: list, priority_patterns: list) -> str | None:
     """Select best axis column based on priority patterns."""
@@ -910,10 +961,7 @@ def _render_chart(df: pd.DataFrame, chart_key: str = "live") -> None:
     auto_x, auto_y = _detect_chart_columns(df)
 
     st.markdown("---")
-    st.markdown(
-        f'<p class="chatbot-section-label">{t("chatbot_viz_title")}</p>',
-        unsafe_allow_html=True,
-    )
+    st.markdown("## 📊 Visualization")
 
     control_col1, control_col2, control_col3 = st.columns(3)
 
@@ -1043,9 +1091,6 @@ def _render_chart(df: pd.DataFrame, chart_key: str = "live") -> None:
                 height=500,
                 yaxis_title=x_axis,
                 xaxis_title=y_axis,
-                colorway=MC_CHART_COLORS,
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
             )
 
             st.plotly_chart(
@@ -1129,7 +1174,6 @@ def _render_chart(df: pd.DataFrame, chart_key: str = "live") -> None:
                 names=x_axis,
                 values=y_axis,
                 hole=0.45,
-                color_discrete_sequence=MC_CHART_COLORS,
             )
 
             fig.update_traces(
@@ -1210,70 +1254,65 @@ def _render_chart(df: pd.DataFrame, chart_key: str = "live") -> None:
         st.warning(_friendly_error_message(e, "chart"))
 
     st.markdown("---")
-    st.caption(
-        f"{chart_type} · {len(chart_df)} rows · X: {x_axis} · Y: {y_axis}"
-    )
+
+    with st.expander("📊 Visualization Information", expanded=False):
+
+        st.markdown(
+            f"""
+**Chart Type:** {chart_type}
+
+**Rows Displayed:** {len(chart_df)}
+
+**Columns Available:** {len(chart_df.columns)}
+
+**Selected X Axis:** `{x_axis}`
+
+**Selected Y Axis:** `{y_axis}`
+"""
+        )
 
 
 def _run_query_pipeline(user_query: str) -> None:
     client = get_groq_client()
-    if not client or not is_groq_api_key_configured():
-        st.error(t("chatbot_groq_missing"))
+    if not client:
+        st.error("🔑 Groq API key missing — add `GROQ_API_KEY` to your `.env` file.")
         return
 
     recent_messages = st.session_state.messages[:-1][-MAX_HISTORY:]
     total_input_tokens = 0
     total_output_tokens = 0
 
-    with st.spinner("Analyzing your question…"):
-        status = _SilentProgress()
-        sql_query: str | None = None
-        assistant_payload: dict | None = None
-        try:
-            # NOTE: body below stays indented under spinner; chat_message wrapper removed.
-            status.write("🔍 Checking conversation context…")
-            intent, in_tok, out_tok = _classify_intent(client, user_query, recent_messages)
-            total_input_tokens += in_tok
-            total_output_tokens += out_tok
+    with st.chat_message("assistant"):
+        with st.status("Processing Analytics Request…", expanded=True) as status:
+            sql_query: str | None = None
+            try:
+                status.write("🔍 Checking conversation context…")
+                intent, in_tok, out_tok = _classify_intent(client, user_query, recent_messages)
+                total_input_tokens += in_tok
+                total_output_tokens += out_tok
 
-            if intent == "GENERAL":
-                status.write("💬 Detected advisory question — answering from prior context, no new query needed")
-                transcript = "\n".join(
-                    f"{m['role'].upper()}: {m['content']}" for m in recent_messages
-                )
-                data_context = _get_last_result_context(recent_messages)
-
-                try:
-                    advisory_messages = [{
-                        "role": "system",
-                        "content": ADVISORY_SYSTEM_PROMPT.format(
-                            conversation_context=transcript or "(no prior conversation)",
-                            data_context=data_context or "(no prior data table available)",
-                            user_query=user_query,
-                        ),
-                    }]
-                    advisory_completion = create_chat_completion(
-                        client,
-                        model=GROQ_SUMMARY_MODEL,
-                        messages=advisory_messages,
-                        temperature=0.4,
-                        max_tokens=ADVISORY_MAX_TOKENS,
-                        reasoning_effort=ADVISORY_REASONING_EFFORT,
-                        include_reasoning=False,
+                if intent == "GENERAL":
+                    status.write("💬 Detected advisory question — answering from prior context, no new query needed")
+                    transcript = "\n".join(
+                        f"{m['role'].upper()}: {m['content']}" for m in recent_messages
                     )
-                    advisory_answer = advisory_completion.choices[0].message.content or ""
-                    in_tok, out_tok = _extract_usage(advisory_completion)
-                    total_input_tokens += in_tok
-                    total_output_tokens += out_tok
-                    if getattr(advisory_completion.choices[0], "finish_reason", None) == "length":
-                        # Ran out of tokens mid-answer — retry once with a
-                        # larger budget rather than showing a cut-off answer.
+                    data_context = _get_last_result_context(recent_messages)
+
+                    try:
+                        advisory_messages = [{
+                            "role": "system",
+                            "content": ADVISORY_SYSTEM_PROMPT.format(
+                                conversation_context=transcript or "(no prior conversation)",
+                                data_context=data_context or "(no prior data table available)",
+                                user_query=user_query,
+                            ),
+                        }]
                         advisory_completion = create_chat_completion(
                             client,
                             model=GROQ_SUMMARY_MODEL,
                             messages=advisory_messages,
                             temperature=0.4,
-                            max_tokens=ADVISORY_MAX_TOKENS * 2,
+                            max_tokens=ADVISORY_MAX_TOKENS,
                             reasoning_effort=ADVISORY_REASONING_EFFORT,
                             include_reasoning=False,
                         )
@@ -1281,70 +1320,82 @@ def _run_query_pipeline(user_query: str) -> None:
                         in_tok, out_tok = _extract_usage(advisory_completion)
                         total_input_tokens += in_tok
                         total_output_tokens += out_tok
+                        if getattr(advisory_completion.choices[0], "finish_reason", None) == "length":
+                            # Ran out of tokens mid-answer — retry once with a
+                            # larger budget rather than showing a cut-off answer.
+                            advisory_completion = create_chat_completion(
+                                client,
+                                model=GROQ_SUMMARY_MODEL,
+                                messages=advisory_messages,
+                                temperature=0.4,
+                                max_tokens=ADVISORY_MAX_TOKENS * 2,
+                                reasoning_effort=ADVISORY_REASONING_EFFORT,
+                                include_reasoning=False,
+                            )
+                            advisory_answer = advisory_completion.choices[0].message.content or ""
+                            in_tok, out_tok = _extract_usage(advisory_completion)
+                            total_input_tokens += in_tok
+                            total_output_tokens += out_tok
 
-                    if not advisory_answer.strip():
-                        advisory_answer = (
-                            "I wasn't able to generate a written answer for that this time. "
-                            "Could you try rephrasing the question?"
+                        if not advisory_answer.strip():
+                            advisory_answer = (
+                                "I wasn't able to generate a written answer for that this time. "
+                                "Could you try rephrasing the question?"
+                            )
+                    except Exception as e:
+                        status.update(label="❌ Could not generate answer", state="complete", expanded=False)
+                        friendly = _friendly_error_message(e, "summary")
+                        st.error(friendly)
+                        log_chatbot_interaction(
+                            user_query,
+                            None,
+                            None,
+                            f"ADVISORY_ERROR: {str(e)}",
+                            input_tokens=total_input_tokens,
+                            output_tokens=total_output_tokens,
                         )
-                except Exception as e:
-                    status.update(label="❌ Could not generate answer", state="complete", expanded=False)
-                    friendly = _friendly_error_message(e, "summary")
-                    st.error(friendly)
+                        st.session_state.messages.append(
+                            {"role": "assistant", "content": friendly, "sql": None, "df": None}
+                        )
+                        return
+
+                    status.update(label="✅ Answer ready", state="complete", expanded=False)
+                    st.markdown(advisory_answer)
+
                     log_chatbot_interaction(
                         user_query,
                         None,
                         None,
-                        f"ADVISORY_ERROR: {str(e)}",
+                        advisory_answer,
                         input_tokens=total_input_tokens,
                         output_tokens=total_output_tokens,
                     )
-                    st.session_state.messages.append(
-                        {"role": "assistant", "content": friendly, "sql": None, "df": None}
-                    )
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": advisory_answer,
+                        "sql": None,
+                        "df": None,
+                    })
+                    if len(st.session_state.messages) > MAX_STORED_MESSAGES:
+                        st.session_state.messages = st.session_state.messages[-MAX_STORED_MESSAGES:]
                     return
 
-                status.update(label="✅ Answer ready", state="complete", expanded=False)
-                advisory_payload = {
-                    "role": "assistant",
-                    "content": advisory_answer,
-                    "sql": None,
-                    "df": None,
-                }
-                _render_assistant_panel(
-                    advisory_payload,
-                    key_prefix=f"live_{len(st.session_state.messages)}",
-                )
+                llm_payload = [
+                    {
+                        "role": "system",
+                        "content": SQL_SYSTEM_PROMPT,
+                    }
+                ]
 
-                log_chatbot_interaction(
-                    user_query,
-                    None,
-                    None,
-                    advisory_answer,
-                    input_tokens=total_input_tokens,
-                    output_tokens=total_output_tokens,
-                )
-                st.session_state.messages.append(advisory_payload)
-                if len(st.session_state.messages) > MAX_STORED_MESSAGES:
-                    st.session_state.messages = st.session_state.messages[-MAX_STORED_MESSAGES:]
-                return
+                if intent == "FOLLOWUP_QUERY":
+                    status.write("↪ Detected follow-up question — using previous query context")
 
-            llm_payload = [
-                {
-                    "role": "system",
-                    "content": SQL_SYSTEM_PROMPT,
-                }
-            ]
+                    followup_context = _get_followup_context(recent_messages)
 
-            if intent == "FOLLOWUP_QUERY":
-                status.write("↪ Detected follow-up question — using previous query context")
-
-                followup_context = _get_followup_context(recent_messages)
-
-                if followup_context:
-                    llm_payload.append({
-                        "role": "user",
-                        "content": f"""This is a follow-up question. Use the context below to understand what the user is referring to, then write a new SQL query that answers their follow-up.
+                    if followup_context:
+                        llm_payload.append({
+                            "role": "user",
+                            "content": f"""This is a follow-up question. Use the context below to understand what the user is referring to, then write a new SQL query that answers their follow-up.
 
 {followup_context}
 
@@ -1356,178 +1407,151 @@ FOLLOW-UP RULES:
 - Always apply LIMIT unless the question asks for all records.
 
 The user's follow-up question is below. Respond with ONLY the SQL query.""",
-                    })
+                        })
 
-            else:
-                status.write("🆕 Detected new question — starting fresh")
-
-            llm_payload.append({
-                "role": "user",
-                "content": user_query,
-            })
-
-            status.write("🧠 Generating SQL query…")
-            try:
-                completion = create_chat_completion(
-                    client,
-                    model=GROQ_SQL_MODEL,
-                    messages=llm_payload,
-                    temperature=0.0,
-                    max_tokens=SQL_MAX_TOKENS,
-                    reasoning_effort=SQL_REASONING_EFFORT,
-                    include_reasoning=False,
-                )
-                sql_query = _extract_sql(completion.choices[0].message.content or "")
-                in_tok, out_tok = _extract_usage(completion)
-                total_input_tokens += in_tok
-                total_output_tokens += out_tok
-            except APIConnectionError as e:
-                status.update(label="❌ Connection issue", state="complete", expanded=False)
-                friendly = _friendly_error_message(e, "connection")
-                st.error(friendly)
-                log_chatbot_interaction(
-                    user_query,
-                    None,
-                    None,
-                    f"CONNECTION_ERROR: {str(e)}",
-                    input_tokens=total_input_tokens,
-                    output_tokens=total_output_tokens,
-                )
-                st.session_state.messages.append(
-                    {"role": "assistant", "content": friendly, "sql": None, "df": None}
-                )
-                return
-            except Exception as e:
-                status.update(label="❌ Could not generate query", state="complete", expanded=False)
-                friendly = _friendly_error_message(e, "generation")
-                st.error(friendly)
-                log_chatbot_interaction(
-                    user_query,
-                    None,
-                    None,
-                    f"GENERATION_ERROR: {str(e)}",
-                    input_tokens=total_input_tokens,
-                    output_tokens=total_output_tokens,
-                )
-                st.session_state.messages.append(
-                    {"role": "assistant", "content": friendly, "sql": None, "df": None}
-                )
-                return
-
-            is_valid, validation_error = _validate_sql(sql_query)
-            if is_valid:
-                sql_query = _strip_sql_comments(sql_query)
-            else:
-                status.write("🔧 Attempting query repair…")
-                repaired, repair_in_tok, repair_out_tok = _repair_sql(sql_query, validation_error)
-                total_input_tokens += repair_in_tok
-                total_output_tokens += repair_out_tok
-                repaired_valid, repaired_error = _validate_sql(repaired)
-                if repaired_valid:
-                    sql_query = _strip_sql_comments(repaired)
-                    status.write("✅ Query repaired successfully")
                 else:
-                    status.update(label="⚠️ Query validation failed", state="complete", expanded=False)
-                    st.error(validation_error)
+                    status.write("🆕 Detected new question — starting fresh")
+
+                llm_payload.append({
+                    "role": "user",
+                    "content": user_query,
+                })
+
+                status.write("🧠 Generating SQL query…")
+                try:
+                    completion = create_chat_completion(
+                        client,
+                        model=GROQ_SQL_MODEL,
+                        messages=llm_payload,
+                        temperature=0.0,
+                        max_tokens=SQL_MAX_TOKENS,
+                        reasoning_effort=SQL_REASONING_EFFORT,
+                        include_reasoning=False,
+                    )
+                    sql_query = _extract_sql(completion.choices[0].message.content or "")
+                    in_tok, out_tok = _extract_usage(completion)
+                    total_input_tokens += in_tok
+                    total_output_tokens += out_tok
+                except APIConnectionError as e:
+                    status.update(label="❌ Connection issue", state="complete", expanded=False)
+                    friendly = _friendly_error_message(e, "connection")
+                    st.error(friendly)
                     log_chatbot_interaction(
                         user_query,
-                        sql_query,
                         None,
-                        f"BLOCKED: {validation_error}",
+                        None,
+                        f"CONNECTION_ERROR: {str(e)}",
                         input_tokens=total_input_tokens,
                         output_tokens=total_output_tokens,
                     )
                     st.session_state.messages.append(
-                        {"role": "assistant", "content": f"⚠️ {validation_error}", "sql": sql_query, "df": None}
+                        {"role": "assistant", "content": friendly, "sql": None, "df": None}
+                    )
+                    return
+                except Exception as e:
+                    status.update(label="❌ Could not generate query", state="complete", expanded=False)
+                    friendly = _friendly_error_message(e, "generation")
+                    st.error(friendly)
+                    log_chatbot_interaction(
+                        user_query,
+                        None,
+                        None,
+                        f"GENERATION_ERROR: {str(e)}",
+                        input_tokens=total_input_tokens,
+                        output_tokens=total_output_tokens,
+                    )
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": friendly, "sql": None, "df": None}
                     )
                     return
 
-            status.write("🗄️ Executing query against database…")
-            conn = None
-            try:
-                conn = get_pooled_connection()
-                result_df = pd.read_sql_query(sql_query, conn)
-            except Exception as e:
-                status.update(label="❌ Data not available", state="complete", expanded=False)
-                friendly = _friendly_error_message(e, "execution")
-                st.error(friendly)
-                log_chatbot_interaction(
-                    user_query,
-                    sql_query,
-                    None,
-                    f"DB_ERROR: {str(e)}",
-                    input_tokens=total_input_tokens,
-                    output_tokens=total_output_tokens,
-                )
-                st.session_state.messages.append(
-                    {"role": "assistant", "content": friendly, "sql": sql_query, "df": None}
-                )
-                return
-            finally:
-                if conn:
-                    release_pooled_connection(conn)
+                is_valid, validation_error = _validate_sql(sql_query)
+                if is_valid:
+                    sql_query = _strip_sql_comments(sql_query)
+                else:
+                    status.write("🔧 Attempting query repair…")
+                    repaired, repair_in_tok, repair_out_tok = _repair_sql(sql_query, validation_error)
+                    total_input_tokens += repair_in_tok
+                    total_output_tokens += repair_out_tok
+                    repaired_valid, repaired_error = _validate_sql(repaired)
+                    if repaired_valid:
+                        sql_query = _strip_sql_comments(repaired)
+                        status.write("✅ Query repaired successfully")
+                    else:
+                        status.update(label="⚠️ Query validation failed", state="complete", expanded=False)
+                        st.error(validation_error)
+                        log_chatbot_interaction(
+                            user_query,
+                            sql_query,
+                            None,
+                            f"BLOCKED: {validation_error}",
+                            input_tokens=total_input_tokens,
+                            output_tokens=total_output_tokens,
+                        )
+                        st.session_state.messages.append(
+                            {"role": "assistant", "content": f"⚠️ {validation_error}", "sql": sql_query, "df": None}
+                        )
+                        return
 
-            if result_df.empty:
-                status.update(label="⚠️ No matching data", state="complete", expanded=False)
-                msg = (
-                    "📭 No matching data found for your question. Try rephrasing it, "
-                    "or ask about a different metric, time period, or filter."
-                )
-                st.info(msg)
-                log_chatbot_interaction(
-                    user_query,
-                    sql_query,
-                    None,
-                    "The query executed successfully but returned no matching rows.",
-                    input_tokens=total_input_tokens,
-                    output_tokens=total_output_tokens,
-                )
-                st.session_state.messages.append(
-                    {"role": "assistant", "content": msg, "sql": sql_query, "df": None}
-                )
-                return
+                status.write("🗄️ Executing query against database…")
+                conn = None
+                try:
+                    conn = get_pooled_connection()
+                    result_df = pd.read_sql_query(sql_query, conn)
+                except Exception as e:
+                    status.update(label="❌ Data not available", state="complete", expanded=False)
+                    friendly = _friendly_error_message(e, "execution")
+                    st.error(friendly)
+                    log_chatbot_interaction(
+                        user_query,
+                        sql_query,
+                        None,
+                        f"DB_ERROR: {str(e)}",
+                        input_tokens=total_input_tokens,
+                        output_tokens=total_output_tokens,
+                    )
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": friendly, "sql": sql_query, "df": None}
+                    )
+                    return
+                finally:
+                    if conn:
+                        release_pooled_connection(conn)
 
-            result_df = _restore_dataframe_types(result_df)
-            # Mask PII for UI, charts, logs, and any LLM prompts
-            sanitized_df = mask_sensitive_dataframe(result_df)
-            strategy_mode = _wants_strategy_answer(user_query)
-            summary_prompt_template = (
-                STRATEGY_SUMMARY_PROMPT_BASE if strategy_mode else SUMMARY_SYSTEM_PROMPT_BASE
-            )
-            status.write(
-                "🚀 Turning results into growth strategies…" if strategy_mode
-                else "📝 Generating executive insight summary…"
-            )
-            # data_preview = result_df.head(MARKDOWN_PREVIEW_ROWS).to_markdown(index=False)
-            data_preview = sanitized_df.head(MARKDOWN_PREVIEW_ROWS).to_markdown(index=False)
+                if result_df.empty:
+                    status.update(label="⚠️ No matching data", state="complete", expanded=False)
+                    msg = (
+                        "📭 No matching data found for your question. Try rephrasing it, "
+                        "or ask about a different metric, time period, or filter."
+                    )
+                    st.info(msg)
+                    log_chatbot_interaction(
+                        user_query,
+                        sql_query,
+                        None,
+                        "The query executed successfully but returned no matching rows.",
+                        input_tokens=total_input_tokens,
+                        output_tokens=total_output_tokens,
+                    )
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": msg, "sql": sql_query, "df": None}
+                    )
+                    return
 
-            try:
-                summary_completion = create_chat_completion(
-                    client,
-                    model=GROQ_SUMMARY_MODEL,
-                    messages=[{
-                        "role": "system",
-                        "content": summary_prompt_template.format(
-                            user_query=user_query,
-                            data_preview=data_preview,
-                        ),
-                    }],
-                    temperature=0.3,
-                    max_tokens=SUMMARY_MAX_TOKENS,
-                    reasoning_effort=SUMMARY_REASONING_EFFORT,
-                    include_reasoning=False,
+                result_df = _restore_dataframe_types(result_df)
+                # Sanitize dataframe before sending it to any LLM
+                sanitized_df = sanitize_dataframe_for_llm(result_df)
+                strategy_mode = _wants_strategy_answer(user_query)
+                summary_prompt_template = (
+                    STRATEGY_SUMMARY_PROMPT_BASE if strategy_mode else SUMMARY_SYSTEM_PROMPT_BASE
                 )
-                assistant_summary = summary_completion.choices[0].message.content or ""
-                in_tok, out_tok = _extract_usage(summary_completion)
-                total_input_tokens += in_tok
-                total_output_tokens += out_tok
-                finish_reason = getattr(
-                    summary_completion.choices[0], "finish_reason", None
+                status.write(
+                    "🚀 Turning results into growth strategies…" if strategy_mode
+                    else "📝 Generating executive insight summary…"
                 )
-                if finish_reason == "length" or not assistant_summary.strip():
-                    # Ran out of tokens mid-summary (or reasoning ate the
-                    # whole budget) — retry once with a larger budget
-                    # rather than showing a cut-off/blank answer.
+                data_preview = dataframe_to_markdown(sanitized_df, max_rows=MARKDOWN_PREVIEW_ROWS)
+
+                try:
                     summary_completion = create_chat_completion(
                         client,
                         model=GROQ_SUMMARY_MODEL,
@@ -1539,7 +1563,7 @@ The user's follow-up question is below. Respond with ONLY the SQL query.""",
                             ),
                         }],
                         temperature=0.3,
-                        max_tokens=SUMMARY_MAX_TOKENS * 2,
+                        max_tokens=SUMMARY_MAX_TOKENS,
                         reasoning_effort=SUMMARY_REASONING_EFFORT,
                         include_reasoning=False,
                     )
@@ -1547,329 +1571,282 @@ The user's follow-up question is below. Respond with ONLY the SQL query.""",
                     in_tok, out_tok = _extract_usage(summary_completion)
                     total_input_tokens += in_tok
                     total_output_tokens += out_tok
+                    finish_reason = getattr(
+                        summary_completion.choices[0], "finish_reason", None
+                    )
+                    if finish_reason == "length" or not assistant_summary.strip():
+                        # Ran out of tokens mid-summary (or reasoning ate the
+                        # whole budget) — retry once with a larger budget
+                        # rather than showing a cut-off/blank answer.
+                        summary_completion = create_chat_completion(
+                            client,
+                            model=GROQ_SUMMARY_MODEL,
+                            messages=[{
+                                "role": "system",
+                                "content": summary_prompt_template.format(
+                                    user_query=user_query,
+                                    data_preview=data_preview,
+                                ),
+                            }],
+                            temperature=0.3,
+                            max_tokens=SUMMARY_MAX_TOKENS * 2,
+                            reasoning_effort=SUMMARY_REASONING_EFFORT,
+                            include_reasoning=False,
+                        )
+                        assistant_summary = summary_completion.choices[0].message.content or ""
+                        in_tok, out_tok = _extract_usage(summary_completion)
+                        total_input_tokens += in_tok
+                        total_output_tokens += out_tok
 
-                if not assistant_summary.strip():
+                    if not assistant_summary.strip():
+                        assistant_summary = "Unable to generate a written summary. Please review the data below."
+                except Exception as e:
+                    st.warning(_friendly_error_message(e, "summary"))
                     assistant_summary = "Unable to generate a written summary. Please review the data below."
+
+                status.update(label="✅ Analysis completed", state="complete", expanded=False)
+                with st.expander("📋 View Result Data", expanded=False):
+                    st.dataframe(sanitized_df, use_container_width=True)
+
+                _render_chart(sanitized_df, chart_key=f"live_{len(st.session_state.messages)}")
+                st.markdown("### 🚀 Growth Strategies" if strategy_mode else "### 📋 Key Insights")
+                st.markdown(assistant_summary)
+
+                # ============================================================
+                # AI Recommendation Engine
+                # ============================================================
+
+                conversation_history = "\n".join(
+                    f"{m['role'].upper()}: {m['content']}" for m in recent_messages
+                )
+                recommendations = _generate_ai_recommendations(
+                    client=client,
+                    user_query=user_query,
+                    sql_query=sql_query,
+                    sanitized_df=sanitized_df,
+                    executive_summary=assistant_summary,
+                    conversation_history=conversation_history,
+                )
+
+                if recommendations["business_advice"]:
+                    st.markdown("##### 📈 Business Advice")
+                    for advice in recommendations["business_advice"]:
+                        st.markdown(f"• {advice}")
+
+                if recommendations["followups"]:
+                    st.markdown("##### 💡 Suggested Questions")
+                    for i, question in enumerate(recommendations["followups"]):
+                        if st.button(
+                            f"💡 {question}",
+                            key=f"followup_live_{len(st.session_state.messages)}_{i}",
+                            use_container_width=True,
+                        ):
+                            st.session_state.selected_followup = question
+                            st.rerun()
+
+                log_chatbot_interaction(
+                    user_query,
+                    sql_query,
+                    result_df,
+                    assistant_summary,
+                    input_tokens=total_input_tokens,
+                    output_tokens=total_output_tokens,
+                )
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": assistant_summary,
+                    "sql": sql_query,
+                    "df": sanitized_df.to_dict(orient="records"),
+                    "followups": recommendations["followups"],
+                    "business_advice": recommendations["business_advice"],
+                })
+
+                if len(st.session_state.messages) > MAX_STORED_MESSAGES:
+                    st.session_state.messages = st.session_state.messages[-MAX_STORED_MESSAGES:]
+
             except Exception as e:
-                st.warning(_friendly_error_message(e, "summary"))
-                assistant_summary = "Unable to generate a written summary. Please review the data below."
-
-            status.update(label="✅ Analysis completed", state="complete", expanded=False)
-
-            conversation_history = "\n".join(
-                f"{m['role'].upper()}: {m['content']}" for m in recent_messages
-            )
-            recommendations = _generate_ai_recommendations(
-                client=client,
-                user_query=user_query,
-                sql_query=sql_query,
-                sanitized_df=sanitized_df,
-                executive_summary=assistant_summary,
-                conversation_history=conversation_history,
-            )
-
-            assistant_payload = {
-                "role": "assistant",
-                "content": assistant_summary,
-                "sql": sql_query,
-                "df": sanitized_df.to_dict(orient="records"),
-                "followups": recommendations.get("followups") or [],
-                "business_advice": recommendations.get("business_advice") or [],
-                "strategy_mode": strategy_mode,
-            }
-            _render_assistant_panel(
-                assistant_payload,
-                key_prefix=f"live_{len(st.session_state.messages)}",
-            )
-
-            log_chatbot_interaction(
-                user_query,
-                sql_query,
-                sanitized_df,
-                assistant_summary,
-                input_tokens=total_input_tokens,
-                output_tokens=total_output_tokens,
-            )
-            st.session_state.messages.append(assistant_payload)
-
-            if len(st.session_state.messages) > MAX_STORED_MESSAGES:
-                st.session_state.messages = st.session_state.messages[-MAX_STORED_MESSAGES:]
-
-        except Exception as e:
-            status.update(label="❌ Pipeline error", state="complete", expanded=False)
-            err_msg = _friendly_error_message(e, "pipeline")
-            logging.exception("Chatbot pipeline failed")
-            st.error(err_msg)
-            log_chatbot_interaction(
-                user_query,
-                sql_query,
-                None,
-                str(e),
-                input_tokens=total_input_tokens,
-                output_tokens=total_output_tokens,
-            )
-            st.session_state.messages.append(
-                {"role": "assistant", "content": err_msg, "sql": sql_query, "df": None}
-            )
-
-
-def _inject_chatbot_layout_css() -> None:
-    """Bubble layout injected on the chatbot page so it always applies."""
-    st.markdown(
-        """
-        <style>
-        .mc-chat-row--user {
-          display: flex !important;
-          justify-content: flex-end !important;
-          width: 100% !important;
-          margin: 0 0 0.85rem 0 !important;
-        }
-        .mc-chat-bubble--user {
-          display: inline-block !important;
-          max-width: min(78%, 42rem) !important;
-          background: #2563eb !important;
-          color: #ffffff !important;
-          border-radius: 14px 14px 4px 14px !important;
-          padding: 0.75rem 1rem !important;
-          font-size: 0.95rem !important;
-          font-weight: 500 !important;
-          line-height: 1.45 !important;
-          box-shadow: 0 8px 18px rgba(37, 99, 235, 0.22) !important;
-          white-space: pre-wrap !important;
-          word-break: break-word !important;
-        }
-        .mc-chat-assistant {
-          background: #ffffff !important;
-          border: 1px solid rgba(30, 30, 30, 0.08) !important;
-          border-radius: 14px !important;
-          box-shadow: 0 6px 16px rgba(30, 30, 30, 0.04) !important;
-          padding: 0.95rem 1.05rem 0.85rem !important;
-          margin: 0 0 0.85rem 0 !important;
-          max-width: 100% !important;
-        }
-        .stApp [data-testid="stVerticalBlock"]:has(.mc-chat-assistant-marker) {
-          background: var(--mc-surface, #ffffff) !important;
-          border: 1px solid var(--mc-border, rgba(30, 30, 30, 0.08)) !important;
-          border-radius: var(--mc-radius-control, 14px) !important;
-          box-shadow: var(--mc-shadow-sm, 0 8px 20px rgba(30, 30, 30, 0.05)) !important;
-          padding: 0.95rem 1.05rem 0.85rem !important;
-          margin: 0 0 0.85rem 0 !important;
-        }
-        .stApp [data-testid="stStatusWidget"] {
-          display: none !important;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def _queue_chat_query(question: str) -> None:
-    """Queue a starter/follow-up question for one-click send (same run)."""
-    st.session_state["pending_chat_query"] = question
-
-
-def _render_user_bubble(text: str) -> None:
-    """Right-aligned user question bubble via columns (reliable in Streamlit)."""
-    safe = html.escape(text or "").replace("\n", "<br>")
-    _spacer, right = st.columns([0.22, 0.78], gap="small")
-    with right:
-        st.markdown(
-            f'<div class="mc-chat-row--user"><div class="mc-chat-bubble--user">{safe}</div></div>',
-            unsafe_allow_html=True,
-        )
-
-
-def _render_assistant_panel(msg: dict, *, key_prefix: str) -> None:
-    """Left white assistant panel — no st.chat_message chrome."""
-    left, _spacer = st.columns([0.92, 0.08], gap="small")
-    with left:
-        st.markdown(
-            '<div class="mc-chat-assistant-marker" aria-hidden="true"></div>',
-            unsafe_allow_html=True,
-        )
-        _render_assistant_body(msg, key_prefix=key_prefix)
-
-
-def _chatbot_example_questions() -> list[str]:
-    return [
-        t("chatbot_example_1"),
-        t("chatbot_example_2"),
-        t("chatbot_example_3"),
-        t("chatbot_example_4"),
-        t("chatbot_example_5"),
-    ]
-
-
-def _render_assistant_body(msg: dict, *, key_prefix: str) -> None:
-    """Render an assistant message in a fixed, refresh-stable order.
-
-    Sequence (always the same live and after reload):
-      1. Result table
-      2. Chart / visualization
-      3. Insights / summary text
-      4. Business advice
-      5. Suggested follow-ups
-    """
-    df_restored = None
-    stored_df = msg.get("df")
-    if stored_df is not None:
-        try:
-            df_restored = pd.DataFrame(stored_df)
-            df_restored = _restore_dataframe_types(df_restored)
-            df_restored = mask_sensitive_dataframe(df_restored)
-            if df_restored.empty:
-                df_restored = None
-        except Exception:
-            logging.exception(
-                "Failed to reload stored results for message key_prefix=%s",
-                key_prefix,
-            )
-            st.warning("Couldn't reload the saved results for this message.")
-            df_restored = None
-
-    if df_restored is not None:
-        st.markdown(
-            f'<p class="chatbot-section-label">{t("chatbot_view_results")}</p>',
-            unsafe_allow_html=True,
-        )
-        st.dataframe(
-            df_restored,
-            use_container_width=True,
-            key=f"{key_prefix}_df",
-        )
-        _render_chart(df_restored, chart_key=f"{key_prefix}_chart")
-
-    content = (msg.get("content") or "").strip()
-    if content:
-        if df_restored is not None:
-            label = (
-                t("chatbot_strategies")
-                if msg.get("strategy_mode")
-                else t("chatbot_insights")
-            )
-            st.markdown(
-                f'<p class="chatbot-section-label">{label}</p>',
-                unsafe_allow_html=True,
-            )
-        st.markdown(content)
-
-    business_advice = msg.get("business_advice") or []
-    if business_advice:
-        st.markdown(
-            f'<p class="chatbot-section-label">{t("chatbot_advice")}</p>',
-            unsafe_allow_html=True,
-        )
-        for advice in business_advice:
-            st.markdown(f"• {advice}")
-
-    followups = msg.get("followups") or []
-    if followups:
-        _render_followup_buttons(followups, key_prefix=f"{key_prefix}_fu")
-
-
-def _render_followup_buttons(questions: list[str], *, key_prefix: str) -> None:
-    if not questions:
-        return
-    st.markdown(
-        f'<p class="chatbot-section-label">{t("chatbot_suggested")}</p>',
-        unsafe_allow_html=True,
-    )
-    for row_start in range(0, len(questions), 2):
-        cols = st.columns(2)
-        for offset, col in enumerate(cols):
-            idx = row_start + offset
-            if idx >= len(questions):
-                break
-            question = questions[idx]
-            with col:
-                if st.button(
-                    question,
-                    key=f"{key_prefix}_{idx}",
-                    use_container_width=True,
-                    type="secondary",
-                ):
-                    _queue_chat_query(question)
+                status.update(label="❌ Pipeline error", state="complete", expanded=False)
+                err_msg = _friendly_error_message(e, "pipeline")
+                st.exception(e)
+                st.error(err_msg)
+                log_chatbot_interaction(
+                    user_query,
+                    sql_query,
+                    None,
+                    str(e),
+                    input_tokens=total_input_tokens,
+                    output_tokens=total_output_tokens,
+                )
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": err_msg, "sql": sql_query, "df": None}
+                )
 
 
 def render_chatbot_tab() -> None:
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    _inject_chatbot_layout_css()
-    st.markdown('<div class="chatbot-shell" aria-hidden="true"></div>', unsafe_allow_html=True)
+    st.header("🛒 E-commerce Fraud Detection Analytics Chatbot")
 
-    groq_ok = is_groq_api_key_configured()
-    status_class = "chatbot-status--ok" if groq_ok else "chatbot-status--err"
-    status_label = t("chatbot_ready") if groq_ok else t("chatbot_offline")
+    st.markdown(
+        """
+Ask questions about:
 
-    col_title, col_status, col_clear = st.columns([0.56, 0.24, 0.20], gap="small")
-    with col_title:
-        st.markdown(
-            f'<p class="page-heading">{t("chatbot_title")}</p>',
-            unsafe_allow_html=True,
-        )
-        st.caption(t("chatbot_subtitle"))
-    with col_status:
-        st.markdown(
-            f'<div class="chatbot-status {status_class}">{status_label}</div>',
-            unsafe_allow_html=True,
-        )
-        if not groq_ok:
-            st.caption(t("chatbot_groq_missing"))
-    with col_clear:
+- 🛍️ Orders & Sales
+- 💰 Revenue Analysis
+- 🚨 Fraud Detection
+- 👥 Customer Analytics
+- 📦 Product Performance
+- 📱 Device Analysis
+- 📋 Fraud Rule Analysis
+- 🌍 Geographic Insights
+        """
+    )
+
+    st.info(
+        """
+### 💡 Example Questions
+
+• Total fraudulent orders
+
+• Fraud rate by state
+
+• Top 10 customers by spending
+
+• Revenue by product category
+
+• Top selling products
+
+• Fraud orders by device type
+
+• Revenue by city
+        """
+    )
+
+    st.markdown("---")
+
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("### 🔌 Connection Status")
+
+        if GROQ_API_KEY:
+            st.success("✅ Groq Connected")
+        else:
+            st.error("❌ Groq API Key Missing")
+
         if st.button(
-            t("chatbot_clear_history"),
+            "🗑️ Clear Chat History",
             use_container_width=True,
             key="clear_chat_btn",
-            type="secondary",
-            disabled=not st.session_state.messages,
         ):
             st.session_state.messages = []
             st.rerun()
 
-    topics = [part.strip() for part in t("chatbot_topics").split("·") if part.strip()]
-    if topics:
-        chips = "".join(f'<span class="chatbot-topic-chip">{topic}</span>' for topic in topics)
-        st.markdown(f'<div class="chatbot-topic-row">{chips}</div>', unsafe_allow_html=True)
 
-    st.markdown(
-        f"""
-        <div class="chatbot-empty">
-          <p class="chatbot-empty__title">{t("chatbot_examples_title")}</p>
-          <p class="chatbot-empty__hint">{t("chatbot_examples_hint")}</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    examples = _chatbot_example_questions()
-    for row_start in range(0, len(examples), 2):
-        cols = st.columns(2)
-        for offset, col in enumerate(cols):
-            idx = row_start + offset
-            if idx >= len(examples):
-                break
-            question = examples[idx]
-            with col:
-                if st.button(
-                    question,
-                    key=f"chat_ex_{idx}",
-                    use_container_width=True,
-                    type="secondary",
-                ):
-                    _queue_chat_query(question)
+    # =====================================================
+    # Chat History
+    # =====================================================
 
     for idx, msg in enumerate(st.session_state.messages):
-        if msg.get("role") == "user":
-            _render_user_bubble(msg.get("content") or "")
-        else:
-            _render_assistant_panel(msg, key_prefix=f"hist_{idx}")
 
-    # Always mount chat_input; prefer one-click pending suggestion if present.
-    typed_query = st.chat_input(t("chatbot_input_placeholder"))
-    user_query = st.session_state.pop("pending_chat_query", None) or typed_query
+        with st.chat_message(msg["role"]):
+
+            st.markdown(msg["content"])
+
+            # Suggested Follow-up Questions
+            followups = msg.get("followups", [])
+
+            if followups:
+
+                st.markdown("##### 💡 Suggested Questions")
+
+                for i, question in enumerate(followups):
+
+                    if st.button(
+                        f"💡 {question}",
+                        key=f"followup_{idx}_{i}",
+                        use_container_width=True,
+                    ):
+                        st.session_state.selected_followup = question
+                        st.rerun()
+
+            # Business Advice
+            business_advice = msg.get("business_advice", [])
+
+            if business_advice:
+
+                st.markdown("##### 📈 Business Advice")
+
+                for advice in business_advice:
+                    st.markdown(f"• {advice}")
+
+            # Restore DataFrame
+            stored_df = msg.get("df")
+
+            if stored_df is not None:
+
+                try:
+
+                    df_restored = pd.DataFrame(stored_df)
+                    df_restored = _restore_dataframe_types(df_restored)
+
+                    if not df_restored.empty:
+
+                        with st.expander(
+                            "📋 View Query Result",
+                            expanded=False,
+                        ):
+
+                            st.dataframe(
+                                df_restored,
+                                use_container_width=True,
+                                key=f"hist_df_{idx}",
+                            )
+
+                        _render_chart(
+                            df_restored,
+                            chart_key=f"hist_{idx}",
+                        )
+
+                except Exception:
+
+                    logging.exception(
+                        "Failed to reload stored results for history message idx=%s",
+                        idx,
+                    )
+
+                    st.warning(
+                        "📋 Couldn't reload the saved results for this message."
+                    )
+    # ---------------------------------------------------------
+# Handle Follow-up Button Click or Manual Chat Input
+# ---------------------------------------------------------
+
+    if "selected_followup" in st.session_state:
+
+        user_query = st.session_state.pop("selected_followup", None)
+        if user_query is None:
+            user_query = st.chat_input(
+                "Ask any E-commerce Analytics question..."
+            )
+
+    else:
+        user_query = st.chat_input(
+            "Ask any E-commerce Analytics question..."
+        )
+
+
 
     if user_query:
-        st.session_state.messages.append({"role": "user", "content": user_query})
-        _render_user_bubble(user_query)
+
+        st.session_state.messages.append(
+            {
+                "role": "user",
+                "content": user_query,
+            }
+        )
+
+        with st.chat_message("user"):
+            st.markdown(user_query)
+
         _run_query_pipeline(user_query)
