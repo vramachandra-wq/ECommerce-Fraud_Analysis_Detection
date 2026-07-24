@@ -319,6 +319,7 @@ def _get_followup_context(history: list[dict]) -> str:
         return ""
 
     previous_df = _restore_dataframe_types(previous_df)
+    previous_df = sanitize_dataframe_for_llm(previous_df)
 
     return f"""
 PREVIOUS USER QUESTION:
@@ -662,9 +663,9 @@ def _validate_sql(sql: str) -> tuple[bool, str]:
             return False, f"Blocked keyword detected: `{kw.upper()}`."
 
     # NOTE: email/phone_number are intentionally NOT blocked here.
-    # Per the PII guardrail design, raw data may be queried and shown in the
-    # UI table; only the copy sent to any LLM is masked (see
-    # sanitize_dataframe_for_llm). Only truly forbidden columns are blocked below.
+    # PII may be queried; UI masking is role-based (Admin full, others masked)
+    # via mask_sensitive_dataframe. Copies sent to any LLM are always masked
+    # via sanitize_dataframe_for_llm. Only truly forbidden columns are blocked below.
 
     # For the duplicate-join check, only inspect the outer query — strip CTE
     # bodies so joins inside CTEs don't inflate the count for the outer query.
@@ -747,7 +748,7 @@ def _restore_dataframe_types(df: pd.DataFrame) -> pd.DataFrame:
                 pass
     return df
 
-from utils.pii import mask_address, mask_email, mask_ip, mask_phone
+from utils.pii import can_view_full_pii, mask_address, mask_email, mask_ip, mask_phone
 
 
 def _mask_email(value):
@@ -787,11 +788,8 @@ def _mask_value(column_name, value):
     return value
 
 
-def mask_sensitive_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """Mask PII columns for UI tables, charts, logs, and LLM prompts."""
-    if df is None or df.empty:
-        return df
-
+def _apply_pii_masks(df: pd.DataFrame) -> pd.DataFrame:
+    """Unconditionally mask known PII columns."""
     masked_df = df.copy()
     for column in masked_df.columns:
         if column.lower() in SENSITIVE_COLUMNS:
@@ -801,9 +799,26 @@ def mask_sensitive_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     return masked_df
 
 
-# Backward-compatible alias used by recommendation / follow-up context helpers.
+def mask_sensitive_dataframe(
+    df: pd.DataFrame,
+    analyst: dict | None = None,
+) -> pd.DataFrame:
+    """Mask PII for UI tables/charts using the same role rules as the analyst portal.
+
+    Admin sees full values; all other roles (and anonymous) see masked values.
+    """
+    if df is None or df.empty:
+        return df
+    if can_view_full_pii(analyst):
+        return df.copy()
+    return _apply_pii_masks(df)
+
+
 def sanitize_dataframe_for_llm(df: pd.DataFrame) -> pd.DataFrame:
-    return mask_sensitive_dataframe(df)
+    """Always mask PII before any LLM prompt — never send raw PII to Groq."""
+    if df is None or df.empty:
+        return df
+    return _apply_pii_masks(df)
 
 
 def _get_best_axis(df: pd.DataFrame, cols_list: list, priority_patterns: list) -> str | None:
@@ -1488,8 +1503,10 @@ The user's follow-up question is below. Respond with ONLY the SQL query.""",
                 return
 
             result_df = _restore_dataframe_types(result_df)
-            # Mask PII for UI, charts, logs, and any LLM prompts
-            sanitized_df = mask_sensitive_dataframe(result_df)
+            analyst = st.session_state.get("analyst")
+            # Role-based masking for UI; always-masked copy for LLM + logs
+            display_df = mask_sensitive_dataframe(result_df, analyst=analyst)
+            sanitized_df = sanitize_dataframe_for_llm(result_df)
             strategy_mode = _wants_strategy_answer(user_query)
             summary_prompt_template = (
                 STRATEGY_SUMMARY_PROMPT_BASE if strategy_mode else SUMMARY_SYSTEM_PROMPT_BASE
@@ -1498,7 +1515,6 @@ The user's follow-up question is below. Respond with ONLY the SQL query.""",
                 "🚀 Turning results into growth strategies…" if strategy_mode
                 else "📝 Generating executive insight summary…"
             )
-            # data_preview = result_df.head(MARKDOWN_PREVIEW_ROWS).to_markdown(index=False)
             data_preview = sanitized_df.head(MARKDOWN_PREVIEW_ROWS).to_markdown(index=False)
 
             try:
@@ -1572,7 +1588,7 @@ The user's follow-up question is below. Respond with ONLY the SQL query.""",
                 "role": "assistant",
                 "content": assistant_summary,
                 "sql": sql_query,
-                "df": sanitized_df.to_dict(orient="records"),
+                "df": display_df.to_dict(orient="records"),
                 "followups": recommendations.get("followups") or [],
                 "business_advice": recommendations.get("business_advice") or [],
                 "strategy_mode": strategy_mode,
@@ -1717,7 +1733,9 @@ def _render_assistant_body(msg: dict, *, key_prefix: str) -> None:
         try:
             df_restored = pd.DataFrame(stored_df)
             df_restored = _restore_dataframe_types(df_restored)
-            df_restored = mask_sensitive_dataframe(df_restored)
+            df_restored = mask_sensitive_dataframe(
+                df_restored, analyst=st.session_state.get("analyst")
+            )
             if df_restored.empty:
                 df_restored = None
         except Exception:
