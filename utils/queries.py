@@ -211,3 +211,18 @@ def get_analyst_performance(cursor: Any) -> pd.DataFrame:
     )
     cols = [d.name for d in cursor.description]
     return pd.DataFrame(cursor.fetchall(), columns=cols)
+
+
+def get_all_rules(cursor: Any) -> List[Dict[str, Any]]:
+    """All fraud rules from rule_master (for portal rule configuration)."""
+    cursor.execute(
+        """
+        SELECT rule_id, rule_name, rule_description, rule_type,
+               action, threshold_value, time_interval_value, time_interval_unit,
+               delay_minutes
+        FROM master.rule_master
+        ORDER BY rule_id
+        """
+    )
+    cols = [d.name for d in cursor.description]
+    return [dict(zip(cols, row)) for row in cursor.fetchall()]
