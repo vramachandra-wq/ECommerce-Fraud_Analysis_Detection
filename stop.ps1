@@ -1,13 +1,14 @@
-# Stops FastAPI, Streamlit apps, and the PostgreSQL container.
-# Usage (from project root in PowerShell): .\stop.ps1
+# Metro Cart — stop FastAPI and the PostgreSQL container.
+# Usage (from project root): .\stop.ps1
 
 $ErrorActionPreference = "Stop"
 
-$ProjectRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Get-Location }
+$ProjectRoot = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 Set-Location $ProjectRoot
 
 $RunDir = Join-Path $ProjectRoot ".run"
 $StateFile = Join-Path $RunDir "services.json"
+$ApiPort = 8000
 
 function Write-Step([string]$Message) {
     Write-Host "==> $Message" -ForegroundColor Cyan
@@ -36,28 +37,19 @@ function Find-PodmanComposeExecutable {
     }
 
     $roots = @()
-    if ($env:APPDATA) {
-        $roots += Join-Path $env:APPDATA "Python"
-    }
-    if ($env:LOCALAPPDATA) {
-        $roots += Join-Path $env:LOCALAPPDATA "Programs\Python"
-    }
+    if ($env:APPDATA) { $roots += Join-Path $env:APPDATA "Python" }
+    if ($env:LOCALAPPDATA) { $roots += Join-Path $env:LOCALAPPDATA "Programs\Python" }
 
     foreach ($root in $roots) {
-        if (-not (Test-Path $root)) {
-            continue
-        }
+        if (-not (Test-Path $root)) { continue }
         $match = Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue |
             ForEach-Object {
                 $candidate = Join-Path $_.FullName "Scripts\podman-compose.exe"
                 if (Test-Path $candidate) { $candidate }
             } |
             Select-Object -First 1
-        if ($match) {
-            return $match
-        }
+        if ($match) { return $match }
     }
-
     return $null
 }
 
@@ -114,9 +106,7 @@ function Invoke-Compose {
 function Stop-ProcessTree {
     param([int]$ProcessId)
 
-    if ($ProcessId -le 0) {
-        return
-    }
+    if ($ProcessId -le 0) { return }
 
     Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
         Where-Object { $_.ParentProcessId -eq $ProcessId } |
@@ -129,11 +119,12 @@ function Stop-PortListeners {
     param([int[]]$Ports)
 
     foreach ($port in $Ports) {
-        $connections = netstat -ano | Select-String ":$port\s"
+        $connections = netstat -ano | Select-String ":$port\s" | Select-String "LISTENING"
         foreach ($line in $connections) {
             if ($line -match "\s(\d+)\s*$") {
                 $targetPid = [int]$Matches[1]
                 if ($targetPid -gt 0) {
+                    Write-Host "Stopping listener on port $port (PID $targetPid)..."
                     Stop-ProcessTree -ProcessId $targetPid
                 }
             }
@@ -141,23 +132,28 @@ function Stop-PortListeners {
     }
 }
 
-Write-Step "Stopping application services..."
+Write-Step "Stopping FastAPI..."
 
 if (Test-Path $StateFile) {
     $services = Get-Content $StateFile -Raw | ConvertFrom-Json
+    # ConvertFrom-Json returns a single object when one entry exists
+    if ($services -isnot [System.Array]) {
+        $services = @($services)
+    }
     foreach ($svc in $services) {
-        if (Get-Process -Id $svc.pid -ErrorAction SilentlyContinue) {
+        if ($svc.pid -and (Get-Process -Id $svc.pid -ErrorAction SilentlyContinue)) {
             Write-Host "Stopping $($svc.name) (PID $($svc.pid))..."
             Stop-ProcessTree -ProcessId $svc.pid
         }
     }
-    Remove-Item $StateFile -Force
+    Remove-Item $StateFile -Force -ErrorAction SilentlyContinue
 }
 else {
-    Write-Host "No service state file found. Attempting port-based cleanup..." -ForegroundColor Yellow
+    Write-Host "No service state file found. Cleaning API port..." -ForegroundColor Yellow
 }
 
-Stop-PortListeners -Ports @(8000, 8501, 8502)
+# Only the FastAPI port — Streamlit ports are no longer used
+Stop-PortListeners -Ports @($ApiPort)
 
 Write-Step "Stopping PostgreSQL container..."
 Invoke-Compose -ComposeArgs @("-f", "podman-compose.yaml", "down")

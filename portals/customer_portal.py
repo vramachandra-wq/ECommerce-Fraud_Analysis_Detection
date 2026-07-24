@@ -1,12 +1,11 @@
 """Customer Portal: login -> order form -> fraud evaluation -> confirmation."""
 import sys
-from datetime import datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 import requests
 import time
 
 from config import API_BASE_URL, API_TIMEOUT
+from utils.time_utils import utcnow_naive
 
 # Defensive: ensure the project root (parent of this portals/ folder) is on
 # sys.path, so imports below resolve even if Streamlit is launched directly
@@ -509,8 +508,8 @@ def _order_form():
             return
 
         with st.spinner(t("processing_purchase")):
-            # Wall-clock Asia/Kolkata (matches DB session timezone)
-            order_timestamp = datetime.now(ZoneInfo("Asia/Kolkata")).replace(tzinfo=None)
+            # Wall-clock UTC (matches DB session timezone)
+            order_timestamp = utcnow_naive()
             
             # FORMAT ADDRESS: "street, city, state zip_code"
             formatted_address = f"{street.strip()}, {city.strip()}, {state.strip()} {zip_code.strip()}"

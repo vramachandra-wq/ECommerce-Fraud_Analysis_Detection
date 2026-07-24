@@ -33,6 +33,7 @@ from utils.queries import (
     get_active_phone_blacklist_entry,
     get_all_rules,
     get_analyst_performance,
+    get_dashboard_order_trend,
     get_kpis,
     get_order_detail,
     get_orders_over_time,
@@ -40,6 +41,7 @@ from utils.queries import (
     get_recent_orders,
     get_rule_stats,
 )
+from utils.time_utils import utcnow_naive
 
 router = APIRouter()
 
@@ -95,9 +97,8 @@ def _order_timing(cur: Any, order: Dict[str, Any]) -> Dict[str, Any]:
         tagged_naive = tagged.replace(tzinfo=None)
     else:
         tagged_naive = tagged
-    from datetime import datetime, timezone
 
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = utcnow_naive()
     deadline = compute_deadline(tagged_naive, delay_minutes)
     remaining = (deadline - now).total_seconds() / 60.0
     return {
@@ -178,6 +179,22 @@ def queue(_: Dict[str, Any] = Depends(require_page(PAGE_FRAUD_DASHBOARD))):
             "max_minutes_overdue": float(backlog_stats.get("max_minutes_overdue") or 0),
         },
         "backlog": _jsonable_dict(backlog_stats),
+    }
+
+
+@router.get("/portal/dashboard/statistics")
+def dashboard_statistics(
+    period: str = "month",
+    _: Dict[str, Any] = Depends(require_page(PAGE_FRAUD_DASHBOARD)),
+):
+    """Actionable order-volume trend for Fraud Dashboard Statistics chart."""
+    with get_cursor() as (_, cur):
+        trend = get_dashboard_order_trend(cur, period)
+    return {
+        "period": trend["period"],
+        "granularity": trend["granularity"],
+        "totals": trend["totals"],
+        "points": [_jsonable_dict(p) for p in trend["points"]],
     }
 
 

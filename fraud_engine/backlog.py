@@ -19,7 +19,7 @@ Business rules
    (snapshot written at evaluation time), then default 60.
 5. An order is backlog when:
        current_timestamp >= tagged_timestamp + delay_minutes
-   where tagged_timestamp is orders.order_timestamp (Asia/Kolkata wall clock).
+   where tagged_timestamp is orders.order_timestamp (UTC wall clock).
 """
 
 from __future__ import annotations
@@ -32,8 +32,8 @@ import pandas as pd
 DEFAULT_DELAY_MINUTES = 60
 REVIEW_QUEUE_STATUSES = ("ON_HOLD", "PENDING_REVIEW")
 
-# Interpret naive order_timestamp as Asia/Kolkata (matches app + DB session).
-_TAGGED_TS = "(o.order_timestamp AT TIME ZONE 'Asia/Kolkata')"
+# Interpret naive order_timestamp as UTC (matches app + DB session).
+_TAGGED_TS = "(o.order_timestamp AT TIME ZONE 'UTC')"
 
 
 def _utcnow() -> datetime:

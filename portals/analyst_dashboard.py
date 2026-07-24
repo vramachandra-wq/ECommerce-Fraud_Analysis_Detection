@@ -1,6 +1,5 @@
 """Fraud Analyst Dashboard: queue of ON_HOLD / PENDING_REVIEW orders + backlog management."""
 import sys
-from datetime import datetime
 from pathlib import Path
 import requests
 import time
@@ -21,6 +20,7 @@ from utils.queries import (
     get_order_detail,
 )
 from utils.pii import display_pii
+from utils.time_utils import format_utc, utcnow_naive
 from ui.i18n import t, cur_sym, format_duration_minutes
 
 
@@ -84,7 +84,7 @@ def confirm_approve_order(analyst_id, order_id, comments, *, backlog_bulk_wordin
                 "put",
                 "approve-order",
                 json={
-                    "approved_at": str(datetime.now()),
+                    "approved_at": str(utcnow_naive()),
                     "reviewed_by": analyst_id,
                     "review_comments": comments or "Approved by analyst",
                     "order_id": order_id,
@@ -107,7 +107,7 @@ def confirm_reject_order(analyst_id, order_id, comments, is_fraud=False):
                 "reject-order",
                 json={
                     "is_fraud": is_fraud,
-                    "rejected_at": str(datetime.now()),
+                    "rejected_at": str(utcnow_naive()),
                     "reviewed_by": analyst_id,
                     "review_comments": comments or (
                         "Marked as fraud" if is_fraud else "Rejected by analyst"
@@ -137,7 +137,7 @@ def confirm_batch_approve(analyst_id, order_ids, comments, *, for_backlog=False)
                 "put",
                 "batch-approve",
                 json={
-                    "approved_at": str(datetime.now()),
+                    "approved_at": str(utcnow_naive()),
                     "reviewed_by": analyst_id,
                     "review_comments": comments or "Batch approved by analyst",
                     "order_ids": order_ids,
@@ -167,7 +167,7 @@ def confirm_batch_reject(analyst_id, order_ids, comments, is_fraud=False, *, for
                 "batch-reject",
                 json={
                     "is_fraud": is_fraud,
-                    "rejected_at": str(datetime.now()),
+                    "rejected_at": str(utcnow_naive()),
                     "reviewed_by": analyst_id,
                     "review_comments": comments or (
                         "Batch marked as fraud" if is_fraud else "Batch rejected by analyst"
@@ -476,7 +476,7 @@ def render_queue_and_review(analyst: dict):
             "Overdue": t("col_overdue"),
             "Flag": t("col_flag"),
             "order_timestamp": st.column_config.DatetimeColumn(
-                t("col_placed_at"), format="D MMM YYYY, h:mm a"
+                f"{t('col_placed_at')} (UTC)", format="YYYY-MM-DD HH:mm:ss"
             ),
         },
         disabled=[
@@ -587,7 +587,7 @@ def render_queue_and_review(analyst: dict):
             + (" " + t("blacklisted_suffix") if blacklist_entry else "")
         )
         st.write(f"**{t('label_device')}:** {order['device_id']}")
-        st.write(f"**{t('label_placed_at')}:** {order['order_timestamp']}")
+        st.write(f"**{t('label_placed_at')}:** {format_utc(order['order_timestamp'])}")
 
     st.error(t("flagged_reason", reason=order["flagged_reason"]))
 

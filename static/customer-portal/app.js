@@ -85,6 +85,21 @@ function esc(s) {
     .replaceAll('"', "&quot;");
 }
 
+/** Format timestamps for display as UTC (naive values treated as UTC). */
+function formatUtc(value) {
+  if (value == null || value === "") return "—";
+  const raw = String(value).trim();
+  if (!raw || raw.toLowerCase() === "null" || raw.toLowerCase() === "none") return "—";
+  let iso = raw.replace(" ", "T");
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(iso) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(iso)) {
+    iso = iso.replace(/\.\d+$/, "") + "Z";
+  }
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return raw;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
+}
+
 function money(n) {
   return `${curSym()}${Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
 }
@@ -581,19 +596,23 @@ async function renderOrder() {
 function renderSuccess() {
   if (!lastOrder) return navigate("order");
   const main = `
-    ${pageHead(t("shop_confirmation"), t("shop_success_lede"))}
-    <div class="shop-layout single">
-      <div class="card">
+    <div class="success-page">
+      <div class="section-head success-page-head">
+        <div>
+          <p class="section-kicker" style="margin:0 0 0.35rem">${esc(t("customer_app_title"))}</p>
+          <h1 class="page-title">${esc(t("shop_confirmation"))}</h1>
+        </div>
+      </div>
+      <div class="card success-card">
         <div class="success-stage">
           <div class="success-mark">✓</div>
           <h1>${esc(t("order_success"))}</h1>
-          <p>${esc(lastOrder.product_name)} × ${esc(lastOrder.quantity)} · ${esc(money(lastOrder.amount))}</p>
+          <p class="success-meta">${esc(lastOrder.product_name)} × ${esc(lastOrder.quantity)} · ${esc(money(lastOrder.amount))}</p>
           <div class="success-id">
             <span>${esc(t("your_order_id"))}</span>
             <strong>${esc(lastOrder.order_id)}</strong>
           </div>
-          <div style="margin-bottom:1.25rem">${badge(lastOrder.order_status)}</div>
-          <button type="button" class="btn btn-primary" id="btn-another">${esc(t("place_another_order"))}</button>
+          <button type="button" class="btn btn-primary success-cta" id="btn-another">${esc(t("place_another_order"))}</button>
         </div>
       </div>
     </div>`;

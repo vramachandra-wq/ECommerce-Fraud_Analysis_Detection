@@ -1,46 +1,25 @@
-# Starts PostgreSQL (Podman), FastAPI, and both Streamlit portals.
-# First run: creates .venv, .env, and installs dependencies.
-# If all services are already up: opens Google Chrome immediately.
-# Usage (from project root in PowerShell): .\start.ps1
+# Metro Cart — start PostgreSQL + FastAPI (analyst portal + customer shop).
+# Opens http://127.0.0.1:8000/portal/ and http://127.0.0.1:8000/shop/
+# Usage (from project root): .\start.ps1
 
 $ErrorActionPreference = "Stop"
 
-$ProjectRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Get-Location }
+$ProjectRoot = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 Set-Location $ProjectRoot
 
 $RunDir = Join-Path $ProjectRoot ".run"
 $LogDir = Join-Path $RunDir "logs"
 $StateFile = Join-Path $RunDir "services.json"
 
-$ProjectUrls = @(
-    "http://127.0.0.1:8000/docs",
-    "http://localhost:8501",
-    "http://localhost:8502"
-)
+$ApiHost = "127.0.0.1"
+$ApiPort = 8000
+$ApiBase = "http://${ApiHost}:${ApiPort}"
+$PortalUrl = "$ApiBase/portal/"
+$ShopUrl = "$ApiBase/shop/"
+$HealthUrl = "$ApiBase/"
+$DocsUrl = "$ApiBase/docs"
 
-$AppServices = @(
-    @{
-        name      = "api"
-        port      = 8000
-        healthUrl = "http://127.0.0.1:8000/"
-        logFile   = "api.log"
-        arguments = @("-m", "uvicorn", "api.main:app", "--reload", "--host", "127.0.0.1", "--port", "8000")
-    },
-    @{
-        name      = "customer"
-        port      = 8501
-        healthUrl = "http://127.0.0.1:8501/"
-        logFile   = "customer.log"
-        arguments = @("-m", "streamlit", "run", "customer_app.py", "--server.port", "8501", "--server.headless", "true")
-    },
-    @{
-        name      = "analyst"
-        port      = 8502
-        healthUrl = "http://127.0.0.1:8502/"
-        logFile   = "analyst.log"
-        arguments = @("-m", "streamlit", "run", "analyst_app.py", "--server.port", "8502", "--server.headless", "true")
-    }
-)
+$ProjectUrls = @($PortalUrl, $ShopUrl)
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
@@ -52,7 +31,6 @@ function Test-PodmanComposePlugin {
     if (-not (Get-Command podman -ErrorAction SilentlyContinue)) {
         return $false
     }
-
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = "SilentlyContinue"
     try {
@@ -71,33 +49,23 @@ function Find-PodmanComposeExecutable {
     }
 
     $roots = @()
-    if ($env:APPDATA) {
-        $roots += Join-Path $env:APPDATA "Python"
-    }
-    if ($env:LOCALAPPDATA) {
-        $roots += Join-Path $env:LOCALAPPDATA "Programs\Python"
-    }
+    if ($env:APPDATA) { $roots += Join-Path $env:APPDATA "Python" }
+    if ($env:LOCALAPPDATA) { $roots += Join-Path $env:LOCALAPPDATA "Programs\Python" }
 
     foreach ($root in $roots) {
-        if (-not (Test-Path $root)) {
-            continue
-        }
+        if (-not (Test-Path $root)) { continue }
         $match = Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue |
             ForEach-Object {
                 $candidate = Join-Path $_.FullName "Scripts\podman-compose.exe"
                 if (Test-Path $candidate) { $candidate }
             } |
             Select-Object -First 1
-        if ($match) {
-            return $match
-        }
+        if ($match) { return $match }
     }
-
     return $null
 }
 
 function Get-ComposeCommand {
-    # Prefer podman-compose: Windows Podman often lacks the "podman compose" provider.
     $podmanCompose = Find-PodmanComposeExecutable
     if ($podmanCompose) {
         return @{ Executable = $podmanCompose; Arguments = @() }
@@ -203,13 +171,9 @@ function Test-PortListening([int]$Port) {
 function Test-DatabaseRunning {
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = "SilentlyContinue"
-
     try {
         $status = podman inspect ecommerce_fraud --format "{{.State.Health.Status}}" 2>$null
-        if ($status -eq "healthy") {
-            return $true
-        }
-
+        if ($status -eq "healthy") { return $true }
         $running = podman inspect ecommerce_fraud --format "{{.State.Running}}" 2>$null
         return $running -eq "true"
     }
@@ -218,17 +182,22 @@ function Test-DatabaseRunning {
     }
 }
 
-function Test-AllServicesHealthy {
-    if (-not (Test-DatabaseRunning)) {
+function Test-HttpOk([string]$Url) {
+    try {
+        $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 5
+        return ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500)
+    }
+    catch {
         return $false
     }
+}
 
-    foreach ($svc in $AppServices) {
-        if (-not (Test-PortListening $svc.port)) {
-            return $false
-        }
-    }
-
+function Test-PlatformHealthy {
+    if (-not (Test-DatabaseRunning)) { return $false }
+    if (-not (Test-PortListening $ApiPort)) { return $false }
+    if (-not (Test-HttpOk $HealthUrl)) { return $false }
+    if (-not (Test-HttpOk $PortalUrl)) { return $false }
+    if (-not (Test-HttpOk $ShopUrl)) { return $false }
     return $true
 }
 
@@ -236,20 +205,20 @@ function Test-ServiceRunning([int]$ProcessId) {
     return (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) -ne $null
 }
 
-function Start-AppProcess {
-    param(
-        [string]$Name,
-        [string[]]$Arguments,
-        [string]$LogFile
-    )
-
+function Start-ApiProcess {
     $python = Get-PythonExecutable
-    $stdout = Join-Path $LogDir $LogFile
+    $stdout = Join-Path $LogDir "api.log"
     $stderr = "$stdout.err"
+    $arguments = @(
+        "-m", "uvicorn", "api.main:app",
+        "--reload",
+        "--host", $ApiHost,
+        "--port", "$ApiPort"
+    )
 
     $process = Start-Process `
         -FilePath $python `
-        -ArgumentList $Arguments `
+        -ArgumentList $arguments `
         -WorkingDirectory $ProjectRoot `
         -WindowStyle Hidden `
         -PassThru `
@@ -257,7 +226,7 @@ function Start-AppProcess {
         -RedirectStandardError $stderr
 
     return @{
-        name = $Name
+        name = "api"
         pid  = $process.Id
         log  = $stdout
     }
@@ -266,16 +235,13 @@ function Start-AppProcess {
 function Get-DbPortFromEnv {
     $defaultPort = 5434
     $envPath = Join-Path $ProjectRoot ".env"
-    if (-not (Test-Path $envPath)) {
-        return $defaultPort
-    }
+    if (-not (Test-Path $envPath)) { return $defaultPort }
 
     foreach ($line in Get-Content $envPath) {
         if ($line -match '^\s*DB_PORT=(.+)$') {
             return [int]$Matches[1].Trim().Trim('"').Trim("'")
         }
     }
-
     return $defaultPort
 }
 
@@ -305,7 +271,6 @@ function Wait-ForDatabase {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = "SilentlyContinue"
-
     try {
         while ((Get-Date) -lt $deadline) {
             if (Test-DatabaseRunning) {
@@ -325,35 +290,28 @@ function Wait-ForDatabase {
 function Wait-ForHttp {
     param(
         [string]$Url,
+        [string]$Label,
         [int]$TimeoutSeconds = 90
     )
 
+    Write-Host "  Checking $Label ($Url)..."
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
-        try {
-            $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 5
-            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) {
-                return $true
-            }
-        }
-        catch {
-            # Service still starting
+        if (Test-HttpOk $Url) {
+            Write-Host "  $Label is ready." -ForegroundColor Green
+            return
         }
         Start-Sleep -Seconds 2
     }
 
-    return $false
+    throw "$Label did not become ready within $TimeoutSeconds seconds. See log: $(Join-Path $LogDir 'api.log')"
 }
 
-function Wait-ForAllAppServices {
-    Write-Step "Waiting for application services to respond..."
-    foreach ($svc in $AppServices) {
-        Write-Host "  Checking $($svc.name) on port $($svc.port)..."
-        if (-not (Wait-ForHttp -Url $svc.healthUrl -TimeoutSeconds 90)) {
-            throw "$($svc.name) did not become ready. See log: $(Join-Path $LogDir $svc.logFile)"
-        }
-        Write-Host "  $($svc.name) is ready." -ForegroundColor Green
-    }
+function Wait-ForApiAndPortals {
+    Write-Step "Waiting for FastAPI and portals..."
+    Wait-ForHttp -Url $HealthUrl -Label "API"
+    Wait-ForHttp -Url $PortalUrl -Label "Analyst portal"
+    Wait-ForHttp -Url $ShopUrl -Label "Customer shop"
 }
 
 function Get-ChromeExecutable {
@@ -364,16 +322,11 @@ function Get-ChromeExecutable {
     )
 
     foreach ($path in $candidates) {
-        if ($path -and (Test-Path $path)) {
-            return $path
-        }
+        if ($path -and (Test-Path $path)) { return $path }
     }
 
     $fromPath = Get-Command chrome -ErrorAction SilentlyContinue
-    if ($fromPath) {
-        return $fromPath.Source
-    }
-
+    if ($fromPath) { return $fromPath.Source }
     return $null
 }
 
@@ -382,7 +335,7 @@ function Open-ProjectInBrowser {
 
     $chrome = Get-ChromeExecutable
     if ($chrome) {
-        Write-Step "Opening project in Google Chrome..."
+        Write-Step "Opening portals in Google Chrome..."
         Start-Process -FilePath $chrome -ArgumentList $Urls
         return
     }
@@ -397,35 +350,29 @@ function Show-ProjectInfo {
     Write-Host ""
     Write-Host "Metro Cart platform is running." -ForegroundColor Green
     Write-Host ""
-    Write-Host "  API docs:         http://127.0.0.1:8000/docs"
-    Write-Host "  Customer portal:  http://localhost:8501"
-    Write-Host "  Analyst portal:   http://localhost:8502"
+    Write-Host "  Analyst portal:  $PortalUrl"
+    Write-Host "  Customer shop:   $ShopUrl"
+    Write-Host "  API docs:        $DocsUrl"
     Write-Host ""
     Write-Host "Logs: $LogDir"
     Write-Host "Stop everything with: .\stop.ps1"
 }
 
-function Ensure-ApplicationServices {
-    $started = @()
-
-    foreach ($svc in $AppServices) {
-        if (Test-PortListening $svc.port) {
-            Write-Host "  $($svc.name) already listening on port $($svc.port)." -ForegroundColor Green
-            continue
-        }
-
-        Write-Host "  Starting $($svc.name)..."
-        $processInfo = Start-AppProcess -Name $svc.name -Arguments $svc.arguments -LogFile $svc.logFile
-        Start-Sleep -Seconds 2
-
-        if (-not (Test-ServiceRunning $processInfo.pid)) {
-            throw "Failed to start $($svc.name). See log: $($processInfo.log)"
-        }
-
-        $started += $processInfo
+function Ensure-ApiService {
+    if (Test-PortListening $ApiPort) {
+        Write-Host "  API already listening on port $ApiPort." -ForegroundColor Green
+        return @()
     }
 
-    return $started
+    Write-Host "  Starting FastAPI (uvicorn)..."
+    $processInfo = Start-ApiProcess
+    Start-Sleep -Seconds 2
+
+    if (-not (Test-ServiceRunning $processInfo.pid)) {
+        throw "Failed to start API. See log: $($processInfo.log)"
+    }
+
+    return @($processInfo)
 }
 
 function Save-ServiceState {
@@ -441,21 +388,22 @@ function Save-ServiceState {
     if ($state.Count -gt 0) {
         $state | ConvertTo-Json -Depth 3 | Set-Content -Path $StateFile -Encoding UTF8
     }
+    elseif (Test-Path $StateFile) {
+        # Keep existing state if we reused an already-running API
+    }
 }
 
 Write-Host ""
-Write-Host "Metro Cart - starting platform..." -ForegroundColor White
+Write-Host "Metro Cart - starting platform (API + portal + shop)..." -ForegroundColor White
 Write-Host ""
 
-# Fast path: everything already healthy
-if (Test-AllServicesHealthy) {
+if (Test-PlatformHealthy) {
     Write-Host "All services are already running (database + API + portals)." -ForegroundColor Green
     Show-ProjectInfo
     Open-ProjectInBrowser -Urls $ProjectUrls
     exit 0
 }
 
-# Bootstrap project files on first run
 if (-not (Test-ProjectReady)) {
     Initialize-Project
 }
@@ -465,9 +413,9 @@ Invoke-Compose -ComposeArgs @("-f", "podman-compose.yaml", "up", "-d")
 Wait-ForDatabase
 Wait-ForDatabasePort
 
-Write-Step "Starting application services..."
-$startedServices = Ensure-ApplicationServices
-Wait-ForAllAppServices
+Write-Step "Starting FastAPI..."
+$startedServices = Ensure-ApiService
+Wait-ForApiAndPortals
 Save-ServiceState -StartedServices $startedServices
 
 Show-ProjectInfo

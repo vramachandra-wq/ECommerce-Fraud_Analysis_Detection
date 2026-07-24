@@ -3,7 +3,7 @@ import {
   curSym,
   languageToggleHtml,
   bindLanguageToggle,
-} from "./i18n.js";
+} from "./i18n.js?v=51";
 
 const PAGE_LABEL_KEYS = {
   ADMIN_PANEL: "nav_admin_panel",
@@ -75,6 +75,22 @@ function esc(s) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+/** Format timestamps for display as UTC (naive values treated as UTC). */
+function formatUtc(value) {
+  if (value == null || value === "") return "—";
+  const raw = String(value).trim();
+  if (!raw || raw.toLowerCase() === "null" || raw.toLowerCase() === "none") return "—";
+  let iso = raw.replace(" ", "T");
+  // Treat naive DB timestamps as UTC wall-clock
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(iso) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(iso)) {
+    iso = iso.replace(/\.\d+$/, "") + "Z";
+  }
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return raw;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
 }
 
 /**
@@ -211,7 +227,7 @@ function queueRowHtml(o, { selected, pickable }) {
   const pickCell = pickable
     ? `<td><button type="button" class="btn btn-ghost aq-pick" data-id="${esc(o.order_id)}" style="padding:0;color:var(--accent)">${esc(o.order_id)}</button></td>`
     : `<td>${esc(o.order_id)}</td>`;
-  const placed = o.tagged_timestamp || o.order_timestamp || "";
+  const placed = formatUtc(o.tagged_timestamp || o.order_timestamp);
   return `
     <tr data-id="${esc(o.order_id)}" class="${o.is_overdue ? "row-overdue" : ""}">
       <td><input type="checkbox" class="q-check" data-id="${esc(o.order_id)}" ${selected.has(o.order_id) ? "checked" : ""} /></td>
@@ -271,12 +287,294 @@ function investigationTimingHtml(timing, order) {
   const remaining = tm.is_overdue
     ? `<span class="timing timing-overdue">${t("overdue_with_time", { mins: formatMinutes(tm.minutes_overdue) })}</span>`
     : `<span class="timing timing-ok">${formatMinutes(tm.minutes_remaining_display ?? tm.minutes_remaining)}</span>`;
+  const ruleName = tm.rule_name || order?.flagged_reason || "—";
   return `
     <div class="overview-grid" style="margin:1rem 0;grid-template-columns:repeat(3,minmax(0,1fr))">
       <div class="stat-card"><div><div class="stat-value" style="font-size:1.25rem">${esc(delay ?? "—")}m</div><div class="stat-label">${esc(t("review_delay"))}</div></div></div>
       <div class="stat-card"><div><div class="stat-value" style="font-size:1.25rem">${remaining}</div><div class="stat-label">${esc(t("time_left"))}</div></div></div>
-      <div class="stat-card"><div><div class="stat-value" style="font-size:1.1rem">${esc(tm.rule_name || order?.flagged_reason || "—")}</div><div class="stat-label">${esc(t("triggered_rule"))}</div></div></div>
+      <div class="stat-card"><div><div class="stat-value triggered-rule-value">${esc(ruleName)}</div><div class="stat-label">${esc(t("triggered_rule"))}</div></div></div>
     </div>`;
+}
+
+function investigationStreamlitMetricsHtml(timing, order) {
+  const tm = timing || {};
+  const delay = tm.delay_minutes ?? order?.delay_minutes ?? "—";
+  const remaining = tm.is_overdue
+    ? "0 min"
+    : formatMinutes(tm.minutes_remaining_display ?? tm.minutes_remaining);
+  const overdue = tm.is_overdue ? formatMinutes(tm.minutes_overdue) : "—";
+  return `
+    <div class="overview-grid inv-metrics">
+      <div class="stat-card inv-metric-card">
+        <div class="stat-value">${esc(delay)}</div>
+        <div class="stat-label">${esc(t("delay_minutes"))}</div>
+      </div>
+      <div class="stat-card inv-metric-card">
+        <div class="stat-value">${esc(remaining)}</div>
+        <div class="stat-label">${esc(t("remaining_review"))}</div>
+      </div>
+      <div class="stat-card inv-metric-card">
+        <div class="stat-value ${tm.is_overdue ? "timing-overdue" : ""}">${esc(overdue)}</div>
+        <div class="stat-label">${esc(t("time_overdue"))}</div>
+      </div>
+    </div>`;
+}
+
+function blacklistSecurityHtml(type, value, entry, prefix) {
+  if (!value) return "";
+  const shown = String(value);
+  const titleKey =
+    type === "ip"
+      ? "security_blacklist_ip"
+      : type === "phone"
+        ? "security_blacklist_phone"
+        : "security_blacklist_email";
+  const alreadyKey =
+    type === "ip"
+      ? "already_blacklisted_ip"
+      : type === "phone"
+        ? "already_blacklisted_phone"
+        : "already_blacklisted_email";
+  const lockKey = type === "ip" ? "lock_ip" : type === "phone" ? "lock_phone" : "lock_email";
+
+  if (entry) {
+    return `<div class="alert alert-info">${esc(
+      t(alreadyKey, {
+        value: shown,
+        reason: entry.reason || "—",
+        by: entry.blacklisted_by_name || entry.blacklisted_by || "—",
+        at: formatUtc(entry.blacklisted_at),
+      }),
+    )}</div>`;
+  }
+
+  return `
+    <details class="inv-security">
+      <summary>${esc(t(titleKey, { value: shown }))}</summary>
+      <div class="inv-security-body">
+        <div class="field">
+          <label>${esc(t("blacklist_reason"))}</label>
+          <textarea id="${prefix}-bl-${type}-reason" rows="2" placeholder="${esc(t("blacklist_reason"))}"></textarea>
+        </div>
+        <button type="button" class="btn btn-secondary" data-bl-lock="${type}">${esc(t(lockKey))}</button>
+      </div>
+    </details>`;
+}
+
+function orderInvestigationHtml({
+  order,
+  blacklists = {},
+  timing = {},
+  comments = "",
+  prefix = "inv",
+  orderOptions = null,
+  selectedId = "",
+}) {
+  const bl = blacklists || {};
+  const selectHtml = orderOptions?.length
+    ? `<div class="field">
+        <label>${esc(t("select_order_review"))}</label>
+        <select id="${prefix}-order-select">
+          ${orderOptions
+            .map(
+              (o) =>
+                `<option value="${esc(o.order_id)}" ${o.order_id === selectedId ? "selected" : ""}>${esc(o.order_id)}${o.is_overdue ? " · OVERDUE" : ""}</option>`,
+            )
+            .join("")}
+        </select>
+      </div>`
+    : "";
+
+  return `
+    <div class="card inv-panel">
+      <h2 class="inv-title">${esc(t("single_order_investigation"))}</h2>
+      ${selectHtml}
+      <div class="inv-order-head">
+        <h3 style="margin:0">Order ${esc(order.order_id)} ${badge(order.order_status)}</h3>
+      </div>
+      ${investigationStreamlitMetricsHtml(timing, order)}
+      <div class="inv-details-grid">
+        <div>
+          <h4>${esc(t("customer_details"))}</h4>
+          <p><strong>${esc(t("label_name") || "Name")}:</strong> ${esc(order.customer_name)} (${esc(order.user_id)})</p>
+          <p><strong>${esc(t("email"))}:</strong> ${esc(order.email || "—")}${bl.email ? ` ${esc(t("blacklisted_suffix"))}` : ""}</p>
+          <p><strong>${esc(t("phone"))}:</strong> ${esc(order.phone_number || "—")}${bl.phone ? ` ${esc(t("blacklisted_suffix"))}` : ""}</p>
+          <p><strong>${esc(t("label_address") || "Address")}:</strong> ${esc(order.address || "—")}</p>
+        </div>
+        <div>
+          <h4>${esc(t("order_details"))}</h4>
+          <p><strong>${esc(t("label_product") || "Product")}:</strong> ${esc(order.product_name)} x${esc(order.quantity)}</p>
+          <p><strong>${esc(t("label_amount") || "Amount")}:</strong> ${money(order.amount)}</p>
+          <p><strong>${esc(t("ip_address") || "IP Address")}:</strong> ${esc(order.ip_address || "—")}${bl.ip ? ` ${esc(t("blacklisted_suffix"))}` : ""}</p>
+          <p><strong>${esc(t("label_device") || "Device")}:</strong> ${esc(order.device_id || "—")}</p>
+          <p><strong>${esc(t("label_placed_at") || "Placed At")}:</strong> ${esc(formatUtc(order.order_timestamp))}</p>
+        </div>
+      </div>
+      ${
+        order.flagged_reason
+          ? `<div class="inv-flagged">${esc(t("flagged_reason", { reason: order.flagged_reason }))}</div>`
+          : ""
+      }
+      <div class="inv-security-list">
+        ${blacklistSecurityHtml("ip", order.ip_address, bl.ip, prefix)}
+        ${blacklistSecurityHtml("phone", order.phone_number, bl.phone, prefix)}
+        ${blacklistSecurityHtml("email", order.email, bl.email, prefix)}
+      </div>
+      <h3 class="inv-decision-title">${esc(t("analyst_decision"))}</h3>
+      <div class="inv-decision">
+        <div class="field">
+          <label>${esc(t("review_comments"))}</label>
+          <textarea id="${prefix}-comments" rows="4">${esc(comments)}</textarea>
+        </div>
+        <div class="row-actions inv-decision-actions">
+          <button type="button" class="btn btn-primary" id="${prefix}-approve">${esc(t("approve_order"))}</button>
+          <button type="button" class="btn btn-secondary" id="${prefix}-reject">${esc(t("reject_order"))}</button>
+          <button type="button" class="btn btn-fraud" id="${prefix}-fraud">${esc(t("reject_order_fraud"))}</button>
+        </div>
+        <div id="${prefix}-status"></div>
+      </div>
+    </div>`;
+}
+
+async function bindOrderInvestigation(opts) {
+  const {
+    prefix = "inv",
+    order,
+    onRefresh,
+    onSelectOrder,
+    getComments,
+    setComments,
+    statusFn,
+  } = opts;
+  const report = statusFn || ((msg, kind) => {
+    const el = document.getElementById(`${prefix}-status`);
+    if (!el) return;
+    el.innerHTML = `<div class="alert alert-${kind === "error" ? "error" : "success"}">${esc(msg)}</div>`;
+  });
+
+  document.getElementById(`${prefix}-order-select`)?.addEventListener("change", (e) => {
+    onSelectOrder?.(e.target.value);
+  });
+
+  document.getElementById(`${prefix}-comments`)?.addEventListener("input", (e) => {
+    setComments?.(e.target.value);
+  });
+
+  document.querySelectorAll(".inv-panel [data-bl-lock]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const type = btn.getAttribute("data-bl-lock");
+      const reason = (document.getElementById(`${prefix}-bl-${type}-reason`)?.value || "").trim();
+      if (!reason) return report(t("err_blacklist_reason_required"), "error");
+      const ok = await confirmAction({
+        title: t("dlg_confirm_blacklist_title") || "Confirm blacklist",
+        message:
+          type === "ip"
+            ? `Blacklist IP ${order.ip_address}?`
+            : type === "phone"
+              ? `Blacklist phone ${order.phone_number}?`
+              : `Blacklist email ${order.email}?`,
+        confirmLabel: t("confirm_blacklist_btn") || "Confirm",
+        danger: true,
+      });
+      if (!ok) return;
+      try {
+        const endpoint =
+          type === "ip" ? "/blacklist-ip" : type === "phone" ? "/blacklist-phone" : "/blacklist-email";
+        const body =
+          type === "ip"
+            ? { ip_address: order.ip_address, reason, blacklisted_by: session.analyst.analyst_id }
+            : type === "phone"
+              ? { phone_number: order.phone_number, reason, blacklisted_by: session.analyst.analyst_id }
+              : { email: order.email, reason, blacklisted_by: session.analyst.analyst_id };
+        await api(endpoint, { method: "POST", body: JSON.stringify(body) });
+        report(`${type.toUpperCase()} blacklisted.`, "success");
+        await onRefresh?.();
+      } catch (ex) {
+        report(ex.message, "error");
+      }
+    });
+  });
+
+  document.getElementById(`${prefix}-approve`)?.addEventListener("click", async () => {
+    const comments = (document.getElementById(`${prefix}-comments`)?.value || "").trim();
+    const ok = await confirmAction({
+      title: "Approve order",
+      message: `Approve order ${order.order_id}? This will clear it from the review queue.`,
+      confirmLabel: "Approve",
+    });
+    if (!ok) return;
+    try {
+      await api("/approve-order", {
+        method: "PUT",
+        body: JSON.stringify({
+          order_id: order.order_id,
+          approved_at: new Date().toISOString(),
+          reviewed_by: session.analyst.analyst_id,
+          review_comments: comments,
+        }),
+      });
+      report(`Order ${order.order_id} approved.`, "success");
+      await onRefresh?.();
+    } catch (ex) {
+      report(ex.message, "error");
+    }
+  });
+
+  document.getElementById(`${prefix}-reject`)?.addEventListener("click", async () => {
+    const comments = (document.getElementById(`${prefix}-comments`)?.value || "").trim();
+    if (!comments) return report("Comments required for rejection.", "error");
+    const ok = await confirmAction({
+      title: "Reject order",
+      message: `Reject order ${order.order_id} without marking it as fraud?`,
+      confirmLabel: "Reject",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api("/reject-order", {
+        method: "PUT",
+        body: JSON.stringify({
+          order_id: order.order_id,
+          rejected_at: new Date().toISOString(),
+          reviewed_by: session.analyst.analyst_id,
+          review_comments: comments,
+          is_fraud: false,
+        }),
+      });
+      report(`Order ${order.order_id} rejected.`, "success");
+      await onRefresh?.();
+    } catch (ex) {
+      report(ex.message, "error");
+    }
+  });
+
+  document.getElementById(`${prefix}-fraud`)?.addEventListener("click", async () => {
+    const comments = (document.getElementById(`${prefix}-comments`)?.value || "").trim();
+    if (!comments) return report("Comments required to mark as fraud.", "error");
+    const ok = await confirmAction({
+      title: "Mark as fraud",
+      message: `Mark order ${order.order_id} as fraudulent and reject it?`,
+      confirmLabel: "Reject & Mark as Fraud",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api("/reject-order", {
+        method: "PUT",
+        body: JSON.stringify({
+          order_id: order.order_id,
+          rejected_at: new Date().toISOString(),
+          reviewed_by: session.analyst.analyst_id,
+          review_comments: comments,
+          is_fraud: true,
+        }),
+      });
+      report(`Order ${order.order_id} marked as fraud.`, "success");
+      await onRefresh?.();
+    } catch (ex) {
+      report(ex.message, "error");
+    }
+  });
 }
 
 function currentRoute() {
@@ -409,32 +707,95 @@ function overviewIcon(kind) {
   return icons[kind] || icons.people;
 }
 
-function buildBarChart(m) {
-  const series = [
-    { label: "Queue", value: m.total || 0, color: "#1a237e" },
-    { label: "Pending", value: m.pending_review || 0, color: "#1976d2" },
-    { label: "On Hold", value: m.on_hold || 0, color: "#fb8c00" },
-    { label: "Cleared*", value: Math.max((m.total || 0) - (m.pending_review || 0) - (m.on_hold || 0), 0), color: "#ec407a" },
+function orderBucketKey(ts, granularity) {
+  const s = String(ts || "");
+  const m = s.match(/(\d{4}-\d{2}-\d{2})[ T](\d{2})?/);
+  if (!m) return "";
+  if (granularity === "hour") {
+    const hour = m[2] || "00";
+    return `${m[1]}T${hour}:00:00`;
+  }
+  return m[1];
+}
+
+function periodOptionHtml(selected) {
+  const opts = [
+    { value: "month", label: t("period_this_month") },
+    { value: "week", label: t("period_this_week") },
+    { value: "today", label: t("period_today") },
   ];
-  // Fake multi-group bars like Matx (4 groups × 4 series) using scaled queue metrics
-  const groups = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const max = Math.max(...series.map((s) => s.value), 1);
-  const bars = groups.map((g, gi) => {
-    const factor = 0.55 + ((gi % 5) * 0.12);
-    return `<div class="bar-group" title="${g}">
-      ${series.map((s) => {
-        const h = Math.max(8, Math.round(((s.value * factor) / max) * 180));
-        return `<div class="bar" style="height:${h}px;background:${s.color}"></div>`;
-      }).join("")}
-    </div>`;
-  }).join("");
+  return opts
+    .map(
+      (o) =>
+        `<option value="${o.value}" ${selected === o.value ? "selected" : ""}>${esc(o.label)}</option>`,
+    )
+    .join("");
+}
+
+function buildStatisticsChart(stats, activeKey = "") {
+  const points = stats?.points || [];
+  const totals = stats?.totals || { orders: 0, in_review: 0, approved: 0, rejected: 0 };
+  const granularity = stats?.granularity || "day";
+  const series = [
+    { key: "approved", label: "Approved", color: "#43a047" },
+    { key: "in_review", label: "In review", color: "#fb8c00" },
+    { key: "rejected", label: "Rejected / fraud", color: "#e53935" },
+  ];
+
+  if (!points.length) {
+    return `<div class="alert alert-info" style="margin:0.75rem 0 0">No orders in this period yet.</div>`;
+  }
+
+  const max = Math.max(...points.map((p) => Number(p.orders) || 0), 1);
+  const cols = points
+    .map((p) => {
+      const orders = Number(p.orders) || 0;
+      const approved = Number(p.approved) || 0;
+      const inReview = Number(p.in_review) || 0;
+      const rejected = Number(p.rejected) || 0;
+      const other = Math.max(orders - approved - inReview - rejected, 0);
+      const stack = [
+        { key: "approved", value: approved, color: "#43a047" },
+        { key: "in_review", value: inReview, color: "#fb8c00" },
+        { key: "rejected", value: rejected, color: "#e53935" },
+        { key: "other", value: other, color: "#90a4ae" },
+      ].filter((s) => s.value > 0);
+      const h = orders ? Math.max(10, Math.round((orders / max) * 100)) : 4;
+      const active = activeKey && activeKey === p.key ? "is-active" : "";
+      const title = `${p.label}: ${orders} orders · ${inReview} in review · ${approved} approved · ${rejected} rejected`;
+      const segments = stack
+        .map((s) => {
+          const pct = orders ? (s.value / orders) * 100 : 0;
+          return `<div class="stats-seg" style="height:${pct}%;background:${s.color}" title="${esc(s.key)}: ${s.value}"></div>`;
+        })
+        .join("");
+      return `<button type="button" class="stats-col ${active}" data-bucket="${esc(p.key)}" data-label="${esc(p.label)}" title="${esc(title)}" style="height:${h}%">
+        <div class="stats-stack">${segments || `<div class="stats-seg" style="height:100%;background:#e8eef5"></div>`}</div>
+        <span class="stats-col-label">${esc(p.label)}</span>
+        <span class="stats-col-value">${orders}</span>
+      </button>`;
+    })
+    .join("");
+
+  const periodHint =
+    granularity === "hour"
+      ? "Hourly order outcomes today — click a bar to filter the review queue"
+      : "Daily order outcomes — click a bar to filter the review queue";
+
   return `
+    <div class="stats-totals">
+      <div class="stats-total"><strong>${Number(totals.orders || 0).toLocaleString()}</strong><span>Orders</span></div>
+      <div class="stats-total"><strong>${Number(totals.in_review || 0).toLocaleString()}</strong><span>In review</span></div>
+      <div class="stats-total"><strong>${Number(totals.approved || 0).toLocaleString()}</strong><span>Approved</span></div>
+      <div class="stats-total"><strong>${Number(totals.rejected || 0).toLocaleString()}</strong><span>Rejected / fraud</span></div>
+    </div>
     <div class="chart-legend">
       ${series.map((s) => `<div class="legend-item"><span class="legend-dot" style="background:${s.color}"></span>${esc(s.label)}</div>`).join("")}
     </div>
-    <div class="bar-chart">${bars}</div>
-    <div class="bar-labels">${groups.map((g) => `<span>${g}</span>`).join("")}</div>
-    <p class="subtitle" style="margin:0.75rem 0 0;font-size:0.75rem">* Cleared = total minus pending and on-hold in current queue snapshot</p>
+    <div class="stats-chart-plot">
+      <div class="stats-chart-bars">${cols}</div>
+    </div>
+    <p class="subtitle" style="margin:0.75rem 0 0;font-size:0.75rem">${esc(periodHint)}</p>
   `;
 }
 
@@ -442,7 +803,7 @@ async function renderDashboard() {
   document.getElementById("app").innerHTML = shell(`
     <div class="section-head">
       <h1 class="page-title">${esc(t("overview"))}</h1>
-      <select class="select-pill" id="dash-period"><option>${esc(t("period_this_month"))}</option><option>${esc(t("period_this_week"))}</option><option>${esc(t("period_today"))}</option></select>
+      <select class="select-pill" id="dash-period">${periodOptionHtml("month")}</select>
     </div>
     <p class="subtitle">${esc(t("loading_dashboard"))}</p>
   `, "dashboard");
@@ -457,21 +818,42 @@ async function renderDashboard() {
     let activeId = orders[0]?.order_id || "";
     let detail = activeId ? await api(`/portal/orders/${encodeURIComponent(activeId)}`) : null;
     let queuePage = 1;
+    let dashPeriod = "month";
+    let chartFilterKey = "";
+    let chartFilterLabel = "";
+    let dashReviewComments = "";
+    let stats = await api(`/portal/dashboard/statistics?period=${encodeURIComponent(dashPeriod)}`);
+
+    function visibleOrders() {
+      if (!chartFilterKey) return orders;
+      const gran = stats?.granularity || "day";
+      return orders.filter((o) => {
+        const ts = o.tagged_timestamp || o.order_timestamp;
+        return orderBucketKey(ts, gran) === chartFilterKey;
+      });
+    }
 
     function paint() {
       const order = detail?.order;
       const bl = detail?.blacklists || {};
       const timing = detail?.timing || orders.find((o) => o.order_id === activeId) || {};
-      const pageInfo = queuePageSlice(orders, queuePage);
+      const filteredOrders = visibleOrders();
+      const pageInfo = queuePageSlice(filteredOrders, queuePage);
       queuePage = pageInfo.page;
       const pageRows = pageInfo.rows;
       const pageIds = pageRows.map((o) => o.order_id);
       const pageSelectedCount = pageIds.filter((id) => selectedIds.has(id)).length;
+      const filterBanner = chartFilterKey
+        ? `<div class="alert alert-info" style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap">
+            <span>Queue filtered to <strong>${esc(chartFilterLabel || chartFilterKey)}</strong> (${filteredOrders.length} in queue)</span>
+            <button type="button" class="btn btn-secondary" id="clear-chart-filter">Clear filter</button>
+          </div>`
+        : "";
 
       const content = `
         <div class="section-head">
           <h1 class="page-title">${esc(t("overview"))}</h1>
-          <select class="select-pill" id="dash-period"><option>${esc(t("period_this_month"))}</option><option>${esc(t("period_this_week"))}</option><option>${esc(t("period_today"))}</option></select>
+          <select class="select-pill" id="dash-period">${periodOptionHtml(dashPeriod)}</select>
         </div>
         ${sync.auto_approved ? `<div class="alert alert-info">${esc(t("auto_approved_hold", { n: sync.auto_approved }))}</div>` : ""}
 
@@ -508,20 +890,24 @@ async function renderDashboard() {
 
         <div class="card">
           <div class="stats-card-head">
-            <p class="section-kicker" style="margin:0">${esc(t("statistics"))}</p>
-            <button class="icon-btn" type="button" title="More">⋯</button>
+            <div>
+              <p class="section-kicker" style="margin:0">${esc(t("statistics"))}</p>
+              <p class="subtitle" style="margin:0.2rem 0 0">Orders placed in the selected period by outcome</p>
+            </div>
           </div>
-          ${buildBarChart(m)}
+          ${buildStatisticsChart(stats, chartFilterKey)}
         </div>
 
         ${backlogCardHtml(orders, m)}
 
+        ${filterBanner}
+
         <div class="card">
           <div class="section-head" style="margin-bottom:0.75rem">
             <h3 style="margin:0">${esc(t("review_queue"))}</h3>
-            <p class="subtitle" style="margin:0">${orders.length} total · ${QUEUE_PAGE_SIZE} rows per page · delay from rule_master</p>
+            <p class="subtitle" style="margin:0">${filteredOrders.length}${chartFilterKey ? " filtered" : " total"} · ${QUEUE_PAGE_SIZE} rows per page · delay from rule_master</p>
           </div>
-          ${orders.length ? `
+          ${filteredOrders.length ? `
             <table>
               <thead>
                 <tr>
@@ -534,8 +920,8 @@ async function renderDashboard() {
                 ${pageRows.map((o) => queueRowHtml(o, { selected: selectedIds, pickable: false })).join("")}
               </tbody>
             </table>
-            ${pagerHtml({ ...pageInfo, total: orders.length, prefix: "dq" })}
-          ` : `<div class="alert alert-success">Queue is clear. No orders pending review.</div>`}
+            ${pagerHtml({ ...pageInfo, total: filteredOrders.length, prefix: "dq" })}
+          ` : `<div class="alert alert-success">${chartFilterKey ? "No queue orders in this time bucket. Cleared / approved orders still count in the chart." : "Queue is clear. No orders pending review."}</div>`}
         </div>
 
         <div class="card ${selectedIds.size ? "" : "hidden"}" id="batch-card">
@@ -550,34 +936,76 @@ async function renderDashboard() {
           </div>
         </div>
 
-        ${orders.length ? `
-        <div class="card">
-          <h3>Order Investigation</h3>
-          <div class="field">
-            <label>Order ID</label>
-            <select id="order-select">${orders.map((o) => `<option value="${esc(o.order_id)}" ${o.order_id === activeId ? "selected" : ""}>${esc(o.order_id)}${o.is_overdue ? " · OVERDUE" : ""}</option>`).join("")}</select>
-          </div>
-          ${order ? `
-            <p>${badge(order.order_status)}</p>
-            ${investigationTimingHtml(timing, order)}
-            <div style="display:grid;gap:1rem;grid-template-columns:1fr 1fr">
-              <div><strong>Customer</strong><br>${esc(order.customer_name)} (${esc(order.user_id)})<br>Email: ${esc(order.email)}${bl.email ? " (blacklisted)" : ""}<br>Phone: ${esc(order.phone_number)}${bl.phone ? " (blacklisted)" : ""}<br>Address: ${esc(order.address || "—")}</div>
-              <div><strong>Order</strong><br>${esc(order.product_name)} x${esc(order.quantity)}<br>${money(order.amount)}<br>IP: ${esc(order.ip_address)}${bl.ip ? " (blacklisted)" : ""}<br>Device: ${esc(order.device_id || "—")}</div>
-            </div>
-            <div class="alert alert-warning" style="margin-top:1rem">Flagged: ${esc(order.flagged_reason)}</div>
-            <div class="field"><label>Review comments</label><textarea id="review-comments" rows="3"></textarea></div>
-            <div class="row-actions">
-              <button class="btn btn-primary" id="approve-one">Approve</button>
-              <button class="btn btn-secondary" id="reject-one">Reject</button>
-              <button class="btn btn-fraud" id="fraud-one">Mark as Fraud</button>
-            </div>
-          ` : ""}
-        </div>` : ""}
+        ${orders.length && order ? orderInvestigationHtml({
+          order,
+          blacklists: bl,
+          timing,
+          comments: dashReviewComments,
+          prefix: "dq",
+          orderOptions: orders,
+          selectedId: activeId,
+        }) : ""}
         <div id="dash-error"></div>
       `;
 
       document.getElementById("app").innerHTML = shell(content, "dashboard");
       bindShell();
+
+      if (orders.length && order) {
+        bindOrderInvestigation({
+          prefix: "dq",
+          order,
+          setComments: (v) => { dashReviewComments = v; },
+          onSelectOrder: async (id) => {
+            activeId = id;
+            dashReviewComments = "";
+            detail = await api(`/portal/orders/${encodeURIComponent(activeId)}`);
+            paint();
+          },
+          onRefresh: reload,
+          statusFn: (msg, kind) => {
+            if (kind === "error") showDashError(msg);
+            else {
+              const el = document.getElementById("dq-status");
+              if (el) el.innerHTML = `<div class="alert alert-success">${esc(msg)}</div>`;
+            }
+          },
+        });
+      }
+
+      document.getElementById("dash-period")?.addEventListener("change", async (e) => {
+        dashPeriod = e.target.value || "month";
+        chartFilterKey = "";
+        chartFilterLabel = "";
+        queuePage = 1;
+        try {
+          stats = await api(`/portal/dashboard/statistics?period=${encodeURIComponent(dashPeriod)}`);
+          paint();
+        } catch (ex) {
+          showDashError(ex.message);
+        }
+      });
+
+      document.querySelectorAll(".stats-col").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const key = btn.dataset.bucket || "";
+          if (chartFilterKey === key) {
+            chartFilterKey = "";
+            chartFilterLabel = "";
+          } else {
+            chartFilterKey = key;
+            chartFilterLabel = btn.dataset.label || key;
+          }
+          queuePage = 1;
+          paint();
+        });
+      });
+      document.getElementById("clear-chart-filter")?.addEventListener("click", () => {
+        chartFilterKey = "";
+        chartFilterLabel = "";
+        queuePage = 1;
+        paint();
+      });
 
       function syncChecks() {
         const allOnPage = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
@@ -625,71 +1053,6 @@ async function renderDashboard() {
         });
       });
 
-      document.getElementById("order-select")?.addEventListener("change", async (e) => {
-        activeId = e.target.value;
-        detail = await api(`/portal/orders/${encodeURIComponent(activeId)}`);
-        paint();
-      });
-
-      document.getElementById("approve-one")?.addEventListener("click", async () => {
-        const ok = await confirmAction({
-          title: "Approve order",
-          message: `Approve order ${activeId}? This will clear it from the review queue.`,
-          confirmLabel: "Approve",
-        });
-        if (!ok) return;
-        try {
-          await api("/approve-order", { method: "PUT", body: JSON.stringify({
-            order_id: activeId,
-            approved_at: new Date().toISOString(),
-            reviewed_by: session.analyst.analyst_id,
-            review_comments: document.getElementById("review-comments")?.value || "",
-          })});
-          await reload();
-        } catch (ex) { showDashError(ex.message); }
-      });
-      document.getElementById("reject-one")?.addEventListener("click", async () => {
-        const comments = (document.getElementById("review-comments")?.value || "").trim();
-        if (!comments) return showDashError("Comments required for rejection.");
-        const ok = await confirmAction({
-          title: "Reject order",
-          message: `Reject order ${activeId} without marking it as fraud? Use this for non-fraud reasons (e.g. inventory).`,
-          confirmLabel: "Reject",
-          danger: true,
-        });
-        if (!ok) return;
-        try {
-          await api("/reject-order", { method: "PUT", body: JSON.stringify({
-            order_id: activeId,
-            rejected_at: new Date().toISOString(),
-            reviewed_by: session.analyst.analyst_id,
-            review_comments: comments,
-            is_fraud: false,
-          })});
-          await reload();
-        } catch (ex) { showDashError(ex.message); }
-      });
-      document.getElementById("fraud-one")?.addEventListener("click", async () => {
-        const comments = (document.getElementById("review-comments")?.value || "").trim();
-        if (!comments) return showDashError("Comments required to mark as fraud.");
-        const ok = await confirmAction({
-          title: "Mark as fraud",
-          message: `Mark order ${activeId} as fraudulent and reject it?`,
-          confirmLabel: "Mark as Fraud",
-          danger: true,
-        });
-        if (!ok) return;
-        try {
-          await api("/reject-order", { method: "PUT", body: JSON.stringify({
-            order_id: activeId,
-            rejected_at: new Date().toISOString(),
-            reviewed_by: session.analyst.analyst_id,
-            review_comments: comments,
-            is_fraud: true,
-          })});
-          await reload();
-        } catch (ex) { showDashError(ex.message); }
-      });
       document.getElementById("batch-approve")?.addEventListener("click", async () => {
         if (!selectedIds.size) return showDashError("Select at least one order.");
         const count = selectedIds.size;
@@ -777,8 +1140,11 @@ async function renderDashboard() {
       Object.assign(m, fresh.metrics || {});
       if (!orders.find((o) => o.order_id === activeId)) activeId = orders[0]?.order_id || "";
       // Keep page in range after delete/approve
-      queuePage = Math.min(queuePage, queuePageCount(orders.length));
+      queuePage = Math.min(queuePage, queuePageCount(visibleOrders().length));
       detail = activeId ? await api(`/portal/orders/${encodeURIComponent(activeId)}`) : null;
+      try {
+        stats = await api(`/portal/dashboard/statistics?period=${encodeURIComponent(dashPeriod)}`);
+      } catch {}
       paint();
     }
 
@@ -1157,89 +1523,28 @@ async function renderAdminQueue(body) {
       const detail = await api(`/portal/orders/${encodeURIComponent(activeId)}`);
       const order = detail.order;
       const bl = detail.blacklists || {};
-      detailEl.innerHTML = `
-        <div class="card">
-          <h3>${esc(t("col_order_id"))} ${esc(order.order_id)} ${badge(order.order_status)}</h3>
-          <div style="display:grid;gap:1rem;grid-template-columns:1fr 1fr">
-            <div><strong>${esc(t("label_customer"))}</strong><br>${esc(order.customer_name)} (${esc(order.user_id)})<br>
-              ${esc(t("email"))}: ${esc(order.email)}${bl.email ? ` (${esc(t("blacklisted_suffix"))})` : ""}<br>
-              ${esc(t("phone"))}: ${esc(order.phone_number)}${bl.phone ? ` (${esc(t("blacklisted_suffix"))})` : ""}</div>
-            <div><strong>${esc(t("order_details"))}</strong><br>${esc(order.product_name)} x${esc(order.quantity)}<br>
-              ${money(order.amount)}<br>${esc(t("label_ip"))}: ${esc(order.ip_address)}${bl.ip ? ` (${esc(t("blacklisted_suffix"))})` : ""}</div>
-          </div>
-          <div class="alert alert-warning" style="margin-top:1rem">${esc(t("flagged_reason", { reason: order.flagged_reason }))}</div>
-          <div class="field"><label>${esc(t("review_comments"))}</label><textarea id="aq-comments" rows="3">${esc(reviewComments)}</textarea></div>
-          <div class="row-actions">
-            <button type="button" class="btn btn-primary" id="aq-approve">${esc(t("approve_order"))}</button>
-            <button type="button" class="btn btn-secondary" id="aq-reject">${esc(t("reject_order"))}</button>
-            <button type="button" class="btn btn-fraud" id="aq-fraud">Mark as Fraud</button>
-          </div>
-        </div>`;
-
-      document.getElementById("aq-comments")?.addEventListener("input", (e) => {
-        reviewComments = e.target.value;
+      const timing = detail.timing || orders.find((o) => o.order_id === activeId) || {};
+      detailEl.innerHTML = orderInvestigationHtml({
+        order,
+        blacklists: bl,
+        timing,
+        comments: reviewComments,
+        prefix: "aq",
+        orderOptions: orders,
+        selectedId: activeId,
       });
-      document.getElementById("aq-approve")?.addEventListener("click", async () => {
-        const ok = await confirmAction({
-          title: "Approve order",
-          message: `Approve order ${activeId}? This will clear it from the review queue.`,
-          confirmLabel: "Approve",
-        });
-        if (!ok) return;
-        try {
-          await api("/approve-order", { method: "PUT", body: JSON.stringify({
-            order_id: activeId,
-            approved_at: new Date().toISOString(),
-            reviewed_by: session.analyst.analyst_id,
-            review_comments: document.getElementById("aq-comments")?.value || "",
-          })});
-          adminStatus(`Order ${activeId} approved.`);
-          await refresh();
-        } catch (ex) { adminStatus(ex.message, "error"); }
-      });
-      document.getElementById("aq-reject")?.addEventListener("click", async () => {
-        const comments = (document.getElementById("aq-comments")?.value || "").trim();
-        if (!comments) return adminStatus("Comments required for rejection.", "error");
-        const ok = await confirmAction({
-          title: "Reject order",
-          message: `Reject order ${activeId} without marking it as fraud? Use this for non-fraud reasons (e.g. inventory).`,
-          confirmLabel: "Reject",
-          danger: true,
-        });
-        if (!ok) return;
-        try {
-          await api("/reject-order", { method: "PUT", body: JSON.stringify({
-            order_id: activeId,
-            rejected_at: new Date().toISOString(),
-            reviewed_by: session.analyst.analyst_id,
-            review_comments: comments,
-            is_fraud: false,
-          })});
-          adminStatus(`Order ${activeId} rejected.`);
-          await refresh();
-        } catch (ex) { adminStatus(ex.message, "error"); }
-      });
-      document.getElementById("aq-fraud")?.addEventListener("click", async () => {
-        const comments = (document.getElementById("aq-comments")?.value || "").trim();
-        if (!comments) return adminStatus("Comments required to mark as fraud.", "error");
-        const ok = await confirmAction({
-          title: "Mark as fraud",
-          message: `Mark order ${activeId} as fraudulent and reject it?`,
-          confirmLabel: "Mark as Fraud",
-          danger: true,
-        });
-        if (!ok) return;
-        try {
-          await api("/reject-order", { method: "PUT", body: JSON.stringify({
-            order_id: activeId,
-            rejected_at: new Date().toISOString(),
-            reviewed_by: session.analyst.analyst_id,
-            review_comments: comments,
-            is_fraud: true,
-          })});
-          adminStatus(`Order ${activeId} marked as fraud.`);
-          await refresh();
-        } catch (ex) { adminStatus(ex.message, "error"); }
+      await bindOrderInvestigation({
+        prefix: "aq",
+        order,
+        getComments: () => reviewComments,
+        setComments: (v) => { reviewComments = v; },
+        onSelectOrder: (id) => {
+          activeId = id;
+          reviewComments = "";
+          loadDetail();
+        },
+        onRefresh: refresh,
+        statusFn: (msg, kind) => adminStatus(msg, kind === "error" ? "error" : "success"),
       });
     } catch (ex) {
       detailEl.innerHTML = `<div class="alert alert-error">${esc(ex.message)}</div>`;
@@ -1345,7 +1650,7 @@ function renderAdminBlacklists(body) {
           <div class="bl-status-card danger">
             <div class="bl-status-title">Currently blacklisted</div>
             <div class="bl-status-value">${esc(value)}</div>
-            <p class="subtitle">Reason: ${esc(res.entry.reason)} · By: ${esc(res.entry.blacklisted_by_name || res.entry.blacklisted_by)} · Date: ${esc(String(res.entry.blacklisted_at || "").split("T")[0] || res.entry.blacklisted_at)}</p>
+            <p class="subtitle">Reason: ${esc(res.entry.reason)} · By: ${esc(res.entry.blacklisted_by_name || res.entry.blacklisted_by)} · Date: ${esc(formatUtc(res.entry.blacklisted_at))}</p>
             <button type="button" class="btn btn-primary" id="bl-white">Whitelist this entity</button>
           </div>`;
         document.getElementById("bl-white").addEventListener("click", async () => {
@@ -1633,7 +1938,7 @@ async function renderAdminAnalytics(body) {
     }
     return pageInfo.rows.map((r) => `<tr>
       <td>${esc(r.order_id)}</td><td>${esc(r.customer_name)}</td><td>${esc(r.product_name)}</td>
-      <td>${money(r.amount)}</td><td>${badge(r.order_status)}</td><td>${esc(r.order_timestamp)}</td>
+      <td>${money(r.amount)}</td><td>${badge(r.order_status)}</td><td>${esc(formatUtc(r.order_timestamp))}</td>
     </tr>`).join("");
   }
 
@@ -2431,16 +2736,21 @@ async function renderChatbot() {
           <h1 class="gpt-title">${esc(t("nav_analytics_ai"))}</h1>
           <p class="gpt-subtitle">${esc(t("chatbot_subtitle"))}</p>
         </div>
-        <button type="button" class="btn btn-secondary" id="chat-clear">${esc(t("chat_new"))}</button>
       </header>
       <div class="gpt-messages" id="chat-log"></div>
       <div class="gpt-composer-wrap">
-        <form id="chat-form" class="gpt-composer">
-          <textarea id="chat-input" rows="1" placeholder="${esc(t("chat_placeholder"))}" ></textarea>
-          <button class="gpt-send" type="submit" title="Send" aria-label="Send">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+        <div class="gpt-composer-bar">
+          <button type="button" class="btn btn-secondary gpt-new-chat" id="chat-clear" title="${esc(t("chat_new"))}">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+            <span>${esc(t("chat_new"))}</span>
           </button>
-        </form>
+          <form id="chat-form" class="gpt-composer">
+            <textarea id="chat-input" rows="1" placeholder="${esc(t("chat_placeholder"))}" ></textarea>
+            <button class="gpt-send" type="submit" title="Send" aria-label="Send">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+            </button>
+          </form>
+        </div>
         <p class="gpt-disclaimer">${esc(t("chat_disclaimer"))}</p>
       </div>
     </div>

@@ -95,7 +95,7 @@ else:
 
 empty_old = '''    return `<div class="gpt-empty">
       <div class="gpt-empty-icon">AI</div>
-      <h2>How can I help with fraud analytics?</h2>
+      <h2>How can I help with analytics today?</h2>
       <p>Ask a question, or start with one of these:</p>'''
 
 empty_new = '''    return `<div class="gpt-empty">

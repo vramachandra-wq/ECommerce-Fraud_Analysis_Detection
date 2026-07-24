@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Dict, List, Optional
-from zoneinfo import ZoneInfo
 
 import psycopg2
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -23,6 +21,7 @@ from ui.i18n import TRANSLATIONS
 from fraud_engine.engine import evaluate_order
 from utils.order_utils import calculate_total, generate_order_id
 from utils.queries import list_devices, list_products, list_programs
+from utils.time_utils import utcnow_naive
 
 router = APIRouter()
 
@@ -243,7 +242,7 @@ def shop_place_order(
         raise HTTPException(status_code=400, detail="A valid email is required")
 
     formatted_address = f"{street}, {city}, {state} {zip_code}"
-    order_timestamp = datetime.now(ZoneInfo("Asia/Kolkata")).replace(tzinfo=None)
+    order_timestamp = utcnow_naive()
 
     try:
         with psycopg2.connect(**DB_CONFIG) as conn:
