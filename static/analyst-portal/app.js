@@ -333,7 +333,7 @@ function shell(content, route) {
         <div class="sidebar-section">${esc(t("workspace"))}</div>
         ${nav}
         <div class="sidebar-footer">
-          <button class="btn btn-ghost" style="width:100%" id="logout-btn">${esc(t("log_out"))}</button>
+          <button class="btn btn-logout" id="logout-btn">${esc(t("log_out"))}</button>
         </div>
       </aside>
       <div class="main-wrap">
@@ -2221,12 +2221,16 @@ function buildRuleStatusBars(rows) {
   }).join("");
 
   const cols = items.map((item, i) => {
-    const h = Math.max(8, Math.round((item.count / max) * 160));
+    const hPct = Math.max(8, Math.round((item.count / max) * 100));
     const color = RULE_ACTION_COLORS[item.action] || RULE_STATS_PALETTE[i % RULE_STATS_PALETTE.length];
     const pct = total ? ((item.count / total) * 100).toFixed(1) : "0.0";
     return `<div class="rule-status-col" title="${esc(item.action)}: ${item.count} (${pct}%)">
-      <div class="rule-status-value" style="color:${color}">${item.count.toLocaleString()}</div>
-      <div class="rule-status-bar" style="height:${h}px;${ruleStatusBarStyle(item.action, i)}"></div>
+      <div class="rule-status-plot">
+        <div class="rule-status-value" style="color:${color}">${item.count.toLocaleString()}</div>
+        <div class="rule-status-track">
+          <div class="rule-status-bar" style="height:${hPct}%;${ruleStatusBarStyle(item.action, i)}"></div>
+        </div>
+      </div>
       <div class="rule-status-label">${esc(item.action)}</div>
       <div class="rule-status-pct">${pct}%</div>
     </div>`;
@@ -2234,9 +2238,9 @@ function buildRuleStatusBars(rows) {
 
   return `
     <div class="rule-status-chart">
-      <div class="chart-legend" style="justify-content:flex-start;margin:0 0 0.75rem">${legend}</div>
+      <div class="chart-legend" style="justify-content:flex-start;margin:0 0 0.4rem">${legend}</div>
       <div class="rule-status-bars">${cols}</div>
-      <p class="subtitle" style="margin:0.75rem 0 0">Total triggers across actions: <strong>${total.toLocaleString()}</strong></p>
+      <p class="subtitle" style="margin:0.4rem 0 0">Total triggers across actions: <strong>${total.toLocaleString()}</strong></p>
     </div>`;
 }
 
