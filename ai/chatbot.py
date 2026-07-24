@@ -324,6 +324,7 @@ def _get_followup_context(history: list[dict]) -> str:
         return ""
 
     previous_df = _restore_dataframe_types(previous_df)
+    previous_df = sanitize_dataframe_for_llm(previous_df)
 
     return f"""
 PREVIOUS USER QUESTION:
@@ -672,9 +673,9 @@ def _validate_sql(sql: str) -> tuple[bool, str]:
             return False, f"Query may not select prohibited column: `{col}`."
 
     # NOTE: email/phone_number are intentionally NOT blocked here.
-    # They may be selected, but values are masked before LLM prompts and
-    # before any UI result table/chart display (see sanitize_dataframe_for_llm).
-    # Only truly forbidden columns are blocked below.
+    # PII may be queried; UI masking is role-based (Admin full, others masked)
+    # via mask_sensitive_dataframe. Copies sent to any LLM are always masked
+    # via sanitize_dataframe_for_llm. Only truly forbidden columns are blocked below.
 
     # For the duplicate-join check, only inspect the outer query — strip CTE
     # bodies so joins inside CTEs don't inflate the count for the outer query.
@@ -757,6 +758,9 @@ def _restore_dataframe_types(df: pd.DataFrame) -> pd.DataFrame:
                 pass
     return df
 
+from utils.pii import can_view_full_pii, mask_address, mask_email, mask_ip, mask_phone
+
+
 def _mask_email(value):
     if pd.isna(value):
         return value
@@ -830,19 +834,37 @@ def sanitize_dataframe_for_llm(df: pd.DataFrame) -> pd.DataFrame:
     Returns a dataframe with PII columns masked for LLM prompts and UI display.
     """
 
-    sanitized_df = df.copy()
-
-    for column in sanitized_df.columns:
-        if _sensitive_mask_type(column):
-            sanitized_df[column] = sanitized_df[column].apply(
+def _apply_pii_masks(df: pd.DataFrame) -> pd.DataFrame:
+    """Unconditionally mask known PII columns."""
+    masked_df = df.copy()
+    for column in masked_df.columns:
+        if column.lower() in SENSITIVE_COLUMNS:
+            masked_df[column] = masked_df[column].apply(
                 lambda value, col=column: _mask_value(col, value)
             )
 
     return sanitized_df
 
+def mask_sensitive_dataframe(
+    df: pd.DataFrame,
+    analyst: dict | None = None,
+) -> pd.DataFrame:
+    """Mask PII for UI tables/charts using the same role rules as the analyst portal.
 
-# Alias kept for tests / older call sites.
-mask_sensitive_dataframe = sanitize_dataframe_for_llm
+    Admin sees full values; all other roles (and anonymous) see masked values.
+    """
+    if df is None or df.empty:
+        return df
+    if can_view_full_pii(analyst):
+        return df.copy()
+    return _apply_pii_masks(df)
+
+
+def sanitize_dataframe_for_llm(df: pd.DataFrame) -> pd.DataFrame:
+    """Always mask PII before any LLM prompt — never send raw PII to Groq."""
+    if df is None or df.empty:
+        return df
+    return _apply_pii_masks(df)
 
 
 def dataframe_to_markdown(df: pd.DataFrame, *, max_rows: int | None = None) -> str:
@@ -1551,7 +1573,48 @@ The user's follow-up question is below. Respond with ONLY the SQL query.""",
                 )
                 data_preview = dataframe_to_markdown(sanitized_df, max_rows=MARKDOWN_PREVIEW_ROWS)
 
-                try:
+            result_df = _restore_dataframe_types(result_df)
+            analyst = st.session_state.get("analyst")
+            # Role-based masking for UI; always-masked copy for LLM + logs
+            display_df = mask_sensitive_dataframe(result_df, analyst=analyst)
+            sanitized_df = sanitize_dataframe_for_llm(result_df)
+            strategy_mode = _wants_strategy_answer(user_query)
+            summary_prompt_template = (
+                STRATEGY_SUMMARY_PROMPT_BASE if strategy_mode else SUMMARY_SYSTEM_PROMPT_BASE
+            )
+            status.write(
+                "🚀 Turning results into growth strategies…" if strategy_mode
+                else "📝 Generating executive insight summary…"
+            )
+            data_preview = sanitized_df.head(MARKDOWN_PREVIEW_ROWS).to_markdown(index=False)
+
+            try:
+                summary_completion = create_chat_completion(
+                    client,
+                    model=GROQ_SUMMARY_MODEL,
+                    messages=[{
+                        "role": "system",
+                        "content": summary_prompt_template.format(
+                            user_query=user_query,
+                            data_preview=data_preview,
+                        ),
+                    }],
+                    temperature=0.3,
+                    max_tokens=SUMMARY_MAX_TOKENS,
+                    reasoning_effort=SUMMARY_REASONING_EFFORT,
+                    include_reasoning=False,
+                )
+                assistant_summary = summary_completion.choices[0].message.content or ""
+                in_tok, out_tok = _extract_usage(summary_completion)
+                total_input_tokens += in_tok
+                total_output_tokens += out_tok
+                finish_reason = getattr(
+                    summary_completion.choices[0], "finish_reason", None
+                )
+                if finish_reason == "length" or not assistant_summary.strip():
+                    # Ran out of tokens mid-summary (or reasoning ate the
+                    # whole budget) — retry once with a larger budget
+                    # rather than showing a cut-off/blank answer.
                     summary_completion = create_chat_completion(
                         client,
                         model=GROQ_SUMMARY_MODEL,
@@ -1612,9 +1675,19 @@ The user's follow-up question is below. Respond with ONLY the SQL query.""",
                 st.markdown("### 🚀 Growth Strategies" if strategy_mode else "### 📋 Key Insights")
                 st.markdown(assistant_summary)
 
-                # ============================================================
-                # AI Recommendation Engine
-                # ============================================================
+            assistant_payload = {
+                "role": "assistant",
+                "content": assistant_summary,
+                "sql": sql_query,
+                "df": display_df.to_dict(orient="records"),
+                "followups": recommendations.get("followups") or [],
+                "business_advice": recommendations.get("business_advice") or [],
+                "strategy_mode": strategy_mode,
+            }
+            _render_assistant_panel(
+                assistant_payload,
+                key_prefix=f"live_{len(st.session_state.messages)}",
+            )
 
                 conversation_history = "\n".join(
                     f"{m['role'].upper()}: {m['content']}" for m in recent_messages
@@ -1729,10 +1802,31 @@ Ask questions about:
         st.markdown("---")
         st.markdown("### 🔌 Connection Status")
 
-        if GROQ_API_KEY:
-            st.success("✅ Groq Connected")
-        else:
-            st.error("❌ Groq API Key Missing")
+    Sequence (always the same live and after reload):
+      1. Result table
+      2. Chart / visualization
+      3. Insights / summary text
+      4. Business advice
+      5. Suggested follow-ups
+    """
+    df_restored = None
+    stored_df = msg.get("df")
+    if stored_df is not None:
+        try:
+            df_restored = pd.DataFrame(stored_df)
+            df_restored = _restore_dataframe_types(df_restored)
+            df_restored = mask_sensitive_dataframe(
+                df_restored, analyst=st.session_state.get("analyst")
+            )
+            if df_restored.empty:
+                df_restored = None
+        except Exception:
+            logging.exception(
+                "Failed to reload stored results for message key_prefix=%s",
+                key_prefix,
+            )
+            st.warning("Couldn't reload the saved results for this message.")
+            df_restored = None
 
         if st.button(
             "🗑️ Clear Chat History",
