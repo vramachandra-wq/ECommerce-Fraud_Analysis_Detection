@@ -19,7 +19,7 @@ from utils.queries import (
     get_active_email_blacklist_entry,
     get_order_detail,
 )
-from utils.pii import display_pii
+from utils.pii import display_pii, sanitize_pii_record
 from utils.time_utils import format_utc, utcnow_naive
 from ui.i18n import t, cur_sym, format_duration_minutes
 
@@ -190,67 +190,70 @@ def show_no_backlog_dialog():
 
 
 @st.dialog(t("dlg_confirm_blacklist_title"))
-def confirm_blacklist_ip(analyst_id, ip_address, reason):
-    st.write(t("confirm_blacklist_ip", value=ip_address))
+def confirm_blacklist_ip(analyst_id, order_id, shown_ip, reason):
+    st.write(t("confirm_blacklist_ip", value=shown_ip))
     st.error(t("blacklist_ip_warning"))
     if st.button(t("confirm_blacklist_btn"), type="primary", use_container_width=True):
         with st.spinner(t("spinner_blacklist_ip")):
             response = _send_api_request(
                 "post",
-                "blacklist-ip",
+                "blacklist-from-order",
                 json={
-                    "ip_address": ip_address,
+                    "order_id": order_id,
+                    "entity_type": "ip",
                     "reason": reason,
                     "blacklisted_by": analyst_id,
                 },
             )
         if not response or response.status_code != 200:
             return
-        st.success(t("success_ip_blacklisted", value=ip_address))
+        st.success(t("success_ip_blacklisted", value=shown_ip))
         time.sleep(1)
         st.rerun()
 
 
 @st.dialog(t("dlg_confirm_blacklist_title"))
-def confirm_blacklist_phone(analyst_id, phone_number, reason):
-    st.write(t("confirm_blacklist_phone", value=phone_number))
+def confirm_blacklist_phone(analyst_id, order_id, shown_phone, reason):
+    st.write(t("confirm_blacklist_phone", value=shown_phone))
     st.error(t("blacklist_phone_warning"))
     if st.button(t("confirm_blacklist_btn"), type="primary", use_container_width=True):
         with st.spinner(t("spinner_blacklist_phone")):
             response = _send_api_request(
                 "post",
-                "blacklist-phone",
+                "blacklist-from-order",
                 json={
-                    "phone_number": phone_number,
+                    "order_id": order_id,
+                    "entity_type": "phone",
                     "reason": reason,
                     "blacklisted_by": analyst_id,
                 },
             )
         if not response or response.status_code != 200:
             return
-        st.success(t("success_phone_blacklisted", value=phone_number))
+        st.success(t("success_phone_blacklisted", value=shown_phone))
         time.sleep(1)
         st.rerun()
 
 
 @st.dialog(t("dlg_confirm_blacklist_title"))
-def confirm_blacklist_email(analyst_id, email, reason):
-    st.write(t("confirm_blacklist_email", value=email))
+def confirm_blacklist_email(analyst_id, order_id, shown_email, reason):
+    st.write(t("confirm_blacklist_email", value=shown_email))
     st.error(t("blacklist_email_warning"))
     if st.button(t("confirm_blacklist_btn"), type="primary", use_container_width=True):
         with st.spinner(t("spinner_blacklist_email")):
             response = _send_api_request(
                 "post",
-                "blacklist-email",
+                "blacklist-from-order",
                 json={
-                    "email": email,
+                    "order_id": order_id,
+                    "entity_type": "email",
                     "reason": reason,
                     "blacklisted_by": analyst_id,
                 },
             )
         if not response or response.status_code != 200:
             return
-        st.success(t("success_email_blacklisted", value=email))
+        st.success(t("success_email_blacklisted", value=shown_email))
         time.sleep(1)
         st.rerun()
 
@@ -541,6 +544,9 @@ def render_queue_and_review(analyst: dict):
         st.warning(t("order_not_found"))
         return
 
+    # Mask at fetch boundary so non-admin session never holds raw PII.
+    order = sanitize_pii_record(order, analyst)
+
     status_class = f"status-{order['order_status']}"
     st.markdown(
         f"""
@@ -591,12 +597,14 @@ def render_queue_and_review(analyst: dict):
 
     st.error(t("flagged_reason", reason=order["flagged_reason"]))
 
-    _blacklist_ip_action(analyst, order["ip_address"], blacklist_entry, key_suffix=order_id)
+    _blacklist_ip_action(
+        analyst, order_id, order["ip_address"], blacklist_entry, key_suffix=order_id
+    )
     _blacklist_phone_action(
-        analyst, order["phone_number"], phone_blacklist_entry, key_suffix=order_id
+        analyst, order_id, order["phone_number"], phone_blacklist_entry, key_suffix=order_id
     )
     _blacklist_email_action(
-        analyst, order["email"], email_blacklist_entry, key_suffix=order_id
+        analyst, order_id, order["email"], email_blacklist_entry, key_suffix=order_id
     )
 
     st.markdown(f"#### {t('analyst_decision')}")
@@ -633,8 +641,10 @@ def render_queue_and_review(analyst: dict):
                     )
 
 
-def _blacklist_ip_action(analyst: dict, ip_address: str, blacklist_entry: dict, key_suffix: str):
-    shown_ip = display_pii(ip_address, field="ip", analyst=analyst)
+def _blacklist_ip_action(
+    analyst: dict, order_id: str, shown_ip: str, blacklist_entry: dict, key_suffix: str
+):
+    shown_ip = display_pii(shown_ip, field="ip", analyst=analyst)
     if blacklist_entry:
         st.info(
             t(
@@ -653,10 +663,14 @@ def _blacklist_ip_action(analyst: dict, ip_address: str, blacklist_entry: dict, 
                 if not reason.strip():
                     st.error(t("err_blacklist_reason_required"))
                 else:
-                    confirm_blacklist_ip(analyst["analyst_id"], ip_address, reason.strip())
+                    confirm_blacklist_ip(
+                        analyst["analyst_id"], order_id, shown_ip, reason.strip()
+                    )
 
 
-def _blacklist_phone_action(analyst: dict, phone_number: str, blacklist_entry: dict, key_suffix: str):
+def _blacklist_phone_action(
+    analyst: dict, order_id: str, phone_number: str, blacklist_entry: dict, key_suffix: str
+):
     if not phone_number:
         return
     shown_phone = display_pii(str(phone_number), field="phone", analyst=analyst)
@@ -678,10 +692,14 @@ def _blacklist_phone_action(analyst: dict, phone_number: str, blacklist_entry: d
                 if not reason.strip():
                     st.error(t("err_blacklist_reason_required"))
                 else:
-                    confirm_blacklist_phone(analyst["analyst_id"], phone_number, reason.strip())
+                    confirm_blacklist_phone(
+                        analyst["analyst_id"], order_id, shown_phone, reason.strip()
+                    )
 
 
-def _blacklist_email_action(analyst: dict, email: str, blacklist_entry: dict, key_suffix: str):
+def _blacklist_email_action(
+    analyst: dict, order_id: str, email: str, blacklist_entry: dict, key_suffix: str
+):
     if not email:
         return
     shown_email = display_pii(email, field="email", analyst=analyst)
@@ -703,7 +721,9 @@ def _blacklist_email_action(analyst: dict, email: str, blacklist_entry: dict, ke
                 if not reason.strip():
                     st.error(t("err_blacklist_reason_required"))
                 else:
-                    confirm_blacklist_email(analyst["analyst_id"], email, reason.strip())
+                    confirm_blacklist_email(
+                        analyst["analyst_id"], order_id, shown_email, reason.strip()
+                    )
 
 
 def render():

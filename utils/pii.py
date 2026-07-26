@@ -1,5 +1,19 @@
-"""PII display masking for UI surfaces (analyst, customer, chatbot)."""
-from typing import Any, Dict, Optional
+"""PII masking for analyst surfaces (API responses and UI display).
+
+Only Admin may see full customer PII. All other roles receive masked values.
+"""
+from typing import Any, Dict, Mapping, Optional
+
+# Map record keys → display_pii field names
+PII_FIELD_MAP: Mapping[str, str] = {
+    "email": "email",
+    "phone_number": "phone",
+    "phone": "phone",
+    "address": "address",
+    "street": "street",
+    "ip_address": "ip",
+    "ip": "ip",
+}
 
 
 def can_view_full_pii(analyst: Optional[Dict[str, Any]]) -> bool:
@@ -84,3 +98,22 @@ def display_pii(
     }
     mask_fn = maskers.get(field)
     return mask_fn(value) if mask_fn else value
+
+
+def sanitize_pii_record(
+    record: Optional[Dict[str, Any]],
+    analyst: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Return a copy of *record* with PII fields masked unless analyst is Admin.
+
+    Use at the API / fetch boundary so non-admin sessions never hold raw PII.
+    """
+    if record is None:
+        return None
+    out = dict(record)
+    if can_view_full_pii(analyst):
+        return out
+    for key, field in PII_FIELD_MAP.items():
+        if key in out and out[key] is not None and out[key] != "":
+            out[key] = display_pii(str(out[key]), field=field, analyst=analyst)
+    return out

@@ -100,6 +100,11 @@ export const api = {
     apiRequest("/blacklist-phone", { method: "POST", body: JSON.stringify(payload) }),
   blacklistEmail: (payload: Record<string, unknown>) =>
     apiRequest("/blacklist-email", { method: "POST", body: JSON.stringify(payload) }),
+  blacklistFromOrder: (orderId: string, entityType: "ip" | "phone" | "email", reason: string) =>
+    apiRequest(`/portal/orders/${encodeURIComponent(orderId)}/blacklist`, {
+      method: "POST",
+      body: JSON.stringify({ entity_type: entityType, reason }),
+    }),
   whitelistIp: (payload: Record<string, unknown>) =>
     apiRequest("/whitelist-ip", { method: "PUT", body: JSON.stringify(payload) }),
   whitelistPhone: (payload: Record<string, unknown>) =>

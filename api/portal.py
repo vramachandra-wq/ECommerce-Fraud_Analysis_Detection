@@ -41,6 +41,8 @@ from utils.queries import (
     get_recent_orders,
     get_rule_stats,
 )
+from utils.pii import sanitize_pii_record
+from utils.blacklist_actions import blacklist_entity_from_order
 from utils.time_utils import utcnow_naive
 
 router = APIRouter()
@@ -130,6 +132,11 @@ class ChatRequest(BaseModel):
     history: List[ChatMessage] = Field(default_factory=list)
 
 
+class OrderBlacklistRequest(BaseModel):
+    entity_type: str  # ip | phone | email
+    reason: str
+
+
 @router.post("/auth/login")
 def login(payload: LoginRequest):
     session = authenticate_credentials(payload.username.strip(), payload.password)
@@ -208,32 +215,69 @@ def backlog(_: Dict[str, Any] = Depends(require_page(PAGE_FRAUD_DASHBOARD))):
 
 
 @router.get("/portal/orders/{order_id}")
-def order_detail(order_id: str, _: Dict[str, Any] = Depends(require_page(PAGE_FRAUD_DASHBOARD))):
+def order_detail(
+    order_id: str,
+    session: Dict[str, Any] = Depends(require_page(PAGE_FRAUD_DASHBOARD)),
+):
+    analyst = session.get("analyst") or {}
     with get_cursor() as (_, cur):
         order = get_order_detail(cur, order_id)
         if not order:
             raise HTTPException(status_code=404, detail="Order not found")
+        # Lookups must use raw PII from DB before any masking for the client.
         ip_bl = get_active_blacklist_entry(cur, order["ip_address"])
         phone_bl = get_active_phone_blacklist_entry(cur, order.get("phone_number") or "")
         email_bl = get_active_email_blacklist_entry(cur, order.get("email") or "")
         timing = _order_timing(cur, order)
+
+    safe_order = sanitize_pii_record(order, analyst)
     return {
-        "order": _jsonable_dict(order),
+        "order": _jsonable_dict(safe_order or {}),
         "timing": _jsonable_dict(timing),
         "blacklists": {
-            "ip": _jsonable_dict(ip_bl) if ip_bl else None,
-            "phone": _jsonable_dict(phone_bl) if phone_bl else None,
-            "email": _jsonable_dict(email_bl) if email_bl else None,
+            "ip": _jsonable_dict(sanitize_pii_record(ip_bl, analyst) or {}) if ip_bl else None,
+            "phone": (
+                _jsonable_dict(sanitize_pii_record(phone_bl, analyst) or {}) if phone_bl else None
+            ),
+            "email": (
+                _jsonable_dict(sanitize_pii_record(email_bl, analyst) or {}) if email_bl else None
+            ),
         },
     }
+
+
+@router.post("/portal/orders/{order_id}/blacklist")
+def blacklist_order_entity(
+    order_id: str,
+    payload: OrderBlacklistRequest,
+    session: Dict[str, Any] = Depends(require_page(PAGE_FRAUD_DASHBOARD)),
+):
+    """Blacklist IP/phone/email for an order without accepting raw PII from the client."""
+    analyst = session.get("analyst") or {}
+    analyst_id = analyst.get("analyst_id")
+    if not analyst_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        with get_cursor(commit=True) as (_, cur):
+            entity, _value = blacklist_entity_from_order(
+                cur,
+                order_id=order_id,
+                entity_type=payload.entity_type,
+                reason=payload.reason,
+                blacklisted_by=analyst_id,
+            )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"message": f"{entity.upper()} blacklisted from order {order_id}"}
 
 
 @router.get("/portal/blacklist/{entity_type}/{value}")
 def blacklist_lookup(
     entity_type: str,
     value: str,
-    _: Dict[str, Any] = Depends(require_page(PAGE_ADMIN_PANEL)),
+    session: Dict[str, Any] = Depends(require_page(PAGE_ADMIN_PANEL)),
 ):
+    analyst = session.get("analyst") or {}
     with get_cursor() as (_, cur):
         if entity_type == "ip":
             entry = get_active_blacklist_entry(cur, value)
@@ -243,7 +287,8 @@ def blacklist_lookup(
             entry = get_active_email_blacklist_entry(cur, value)
         else:
             raise HTTPException(status_code=400, detail="Invalid entity type")
-    return {"entry": _jsonable_dict(entry) if entry else None}
+    safe = sanitize_pii_record(entry, analyst) if entry else None
+    return {"entry": _jsonable_dict(safe) if safe else None}
 
 
 @router.get("/portal/analytics/summary")

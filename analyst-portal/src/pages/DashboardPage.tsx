@@ -3,6 +3,7 @@ import { api } from "../api";
 import { useAuth } from "../context/AuthContext";
 import type { OrderDetail, QueueOrder } from "../types";
 import { Alert, Button, Card, DataTable, MetricCard, StatusBadge } from "../components/ui";
+import { displayPii } from "../pii";
 
 function formatMinutes(value?: number | null) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
@@ -139,27 +140,13 @@ export function DashboardPage() {
 
   async function blacklist(entity: "ip" | "phone" | "email") {
     if (!detail) return;
-    const order = detail.order;
-    const analystId = session!.analyst.analyst_id;
-    if (entity === "ip") {
-      await api.blacklistIp({
-        ip_address: order.ip_address,
-        reason: blacklistReason.ip,
-        blacklisted_by: analystId,
-      });
-    } else if (entity === "phone") {
-      await api.blacklistPhone({
-        phone_number: order.phone_number,
-        reason: blacklistReason.phone,
-        blacklisted_by: analystId,
-      });
-    } else {
-      await api.blacklistEmail({
-        email: order.email,
-        reason: blacklistReason.email,
-        blacklisted_by: analystId,
-      });
-    }
+    const reason =
+      entity === "ip"
+        ? blacklistReason.ip
+        : entity === "phone"
+          ? blacklistReason.phone
+          : blacklistReason.email;
+    await api.blacklistFromOrder(String(detail.order.order_id), entity, reason);
     const refreshed = await api.orderDetail(activeOrderId);
     setDetail(refreshed);
   }
@@ -355,14 +342,14 @@ export function DashboardPage() {
                     {String(detail.order.customer_name)} ({String(detail.order.user_id)})
                   </p>
                   <p>
-                    Email: {String(detail.order.email)}
+                    Email: {displayPii(detail.order.email, "email", session?.analyst)}
                     {detail.blacklists.email ? " (blacklisted)" : ""}
                   </p>
                   <p>
-                    Phone: {String(detail.order.phone_number)}
+                    Phone: {displayPii(detail.order.phone_number, "phone", session?.analyst)}
                     {detail.blacklists.phone ? " (blacklisted)" : ""}
                   </p>
-                  <p>Address: {String(detail.order.address)}</p>
+                  <p>Address: {displayPii(detail.order.address, "address", session?.analyst)}</p>
                 </div>
                 <div className="rounded-lg bg-slate-50 p-4 text-sm">
                   <p className="mb-2 font-semibold">Order Details</p>
@@ -371,7 +358,7 @@ export function DashboardPage() {
                   </p>
                   <p>Amount: ₹ {Number(detail.order.amount).toLocaleString("en-IN")}</p>
                   <p>
-                    IP: {String(detail.order.ip_address)}
+                    IP: {displayPii(detail.order.ip_address, "ip", session?.analyst)}
                     {detail.blacklists.ip ? " (blacklisted)" : ""}
                   </p>
                   <p>Device: {String(detail.order.device_id)}</p>
@@ -383,7 +370,9 @@ export function DashboardPage() {
 
               {!detail.blacklists.ip ? (
                 <div className="rounded-lg border border-border p-4">
-                  <p className="mb-2 text-sm font-medium">Blacklist IP {String(detail.order.ip_address)}</p>
+                  <p className="mb-2 text-sm font-medium">
+                    Blacklist IP {displayPii(detail.order.ip_address, "ip", session?.analyst)}
+                  </p>
                   <textarea
                     className="mb-2 w-full rounded-lg border border-border px-3 py-2 text-sm"
                     value={blacklistReason.ip}
@@ -404,7 +393,7 @@ export function DashboardPage() {
               {!detail.blacklists.phone ? (
                 <div className="rounded-lg border border-border p-4">
                   <p className="mb-2 text-sm font-medium">
-                    Blacklist Phone {String(detail.order.phone_number)}
+                    Blacklist Phone {displayPii(detail.order.phone_number, "phone", session?.analyst)}
                   </p>
                   <textarea
                     className="mb-2 w-full rounded-lg border border-border px-3 py-2 text-sm"
@@ -425,7 +414,9 @@ export function DashboardPage() {
 
               {!detail.blacklists.email ? (
                 <div className="rounded-lg border border-border p-4">
-                  <p className="mb-2 text-sm font-medium">Blacklist Email {String(detail.order.email)}</p>
+                  <p className="mb-2 text-sm font-medium">
+                    Blacklist Email {displayPii(detail.order.email, "email", session?.analyst)}
+                  </p>
                   <textarea
                     className="mb-2 w-full rounded-lg border border-border px-3 py-2 text-sm"
                     value={blacklistReason.email}

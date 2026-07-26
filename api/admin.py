@@ -7,6 +7,7 @@ from config import DB_CONFIG
 from auth.analyst_auth import ROLE_ADMIN
 from auth.passwords import hash_password
 from utils.time_utils import utcnow_naive
+from utils.blacklist_actions import blacklist_entity_from_order
 
 # Note: Adjust these import paths as needed
 from fraud_engine.rules import clear_interval_cache
@@ -37,6 +38,14 @@ class PhoneBlacklist(BlacklistRequest):
 
 class EmailBlacklist(BlacklistRequest):
     email: str
+
+
+class BlacklistFromOrder(BaseModel):
+    """Resolve raw PII from the order server-side (no client-supplied secrets)."""
+    order_id: str
+    entity_type: str  # ip | phone | email
+    reason: str
+    blacklisted_by: str
 
 class WhitelistRequest(BaseModel):
     blacklist_id: int
@@ -85,6 +94,28 @@ def create_analyst(data: AnalystCreate):
                     ),
                 )
         return {"message": f"Analyst {data.employee_name} Created"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- BLACKLIST FROM ORDER (no raw PII in request body) ---
+
+@router.post("/blacklist-from-order")
+def blacklist_from_order(data: BlacklistFromOrder):
+    try:
+        with psycopg2.connect(**DB_CONFIG) as conn:
+            with conn.cursor() as cur:
+                entity, _value = blacklist_entity_from_order(
+                    cur,
+                    order_id=data.order_id,
+                    entity_type=data.entity_type,
+                    reason=data.reason,
+                    blacklisted_by=data.blacklisted_by,
+                )
+                conn.commit()
+        return {"message": f"{entity.upper()} blacklisted from order {data.order_id}"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

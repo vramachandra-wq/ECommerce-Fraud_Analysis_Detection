@@ -3,7 +3,7 @@ import {
   curSym,
   languageToggleHtml,
   bindLanguageToggle,
-} from "./i18n.js?v=51";
+} from "./i18n.js?v=52";
 
 const PAGE_LABEL_KEYS = {
   ADMIN_PANEL: "nav_admin_panel",
@@ -32,6 +32,61 @@ const ROUTE_PAGES = Object.fromEntries(
 
 let session = loadSession();
 let chatMessages = [];
+
+/** Role-based PII display (Admin = full; others masked). Mirrors utils/pii.py */
+function canViewFullPii(analyst) {
+  return (analyst || session?.analyst)?.role === "Admin";
+}
+
+function maskEmail(email) {
+  if (!email || !String(email).includes("@")) return email || "";
+  const [local, domain] = String(email).split("@");
+  if (!local) return `***@${domain}`;
+  let masked;
+  if (local.length === 1) masked = "*";
+  else if (local.length === 2) masked = local[0] + "*";
+  else masked = local.slice(0, 2) + "*".repeat(local.length - 2);
+  return `${masked}@${domain}`;
+}
+
+function maskPhone(phone) {
+  if (!phone) return "";
+  const digits = String(phone).trim();
+  if (digits.length <= 4) return "***";
+  return digits.slice(0, 2) + "*".repeat(digits.length - 4) + digits.slice(-2);
+}
+
+function maskStreet(street) {
+  if (!street) return "";
+  const value = String(street).trim();
+  if (value.length <= 2) return "*".repeat(value.length);
+  return value.slice(0, 2) + "*".repeat(value.length - 2);
+}
+
+function maskAddress(address) {
+  if (!address) return "";
+  const value = String(address).trim();
+  const idx = value.indexOf(",");
+  if (idx >= 0) return maskStreet(value.slice(0, idx)) + value.slice(idx);
+  return maskStreet(value);
+}
+
+function maskIp(ip) {
+  if (!ip) return "";
+  const parts = String(ip).split(".");
+  if (parts.length === 4) return `${parts[0]}.${parts[1]}.***.***`;
+  return "***";
+}
+
+function displayPii(value, field, analyst) {
+  if (!value) return "";
+  if (canViewFullPii(analyst)) return String(value);
+  if (field === "email") return maskEmail(value);
+  if (field === "phone") return maskPhone(value);
+  if (field === "address") return maskAddress(value);
+  if (field === "ip") return maskIp(value);
+  return String(value);
+}
 
 function loadSession() {
   try {
@@ -322,7 +377,8 @@ function investigationStreamlitMetricsHtml(timing, order) {
 
 function blacklistSecurityHtml(type, value, entry, prefix) {
   if (!value) return "";
-  const shown = String(value);
+  const field = type === "ip" ? "ip" : type === "phone" ? "phone" : "email";
+  const shown = displayPii(value, field);
   const titleKey =
     type === "ip"
       ? "security_blacklist_ip"
@@ -397,15 +453,15 @@ function orderInvestigationHtml({
         <div>
           <h4>${esc(t("customer_details"))}</h4>
           <p><strong>${esc(t("label_name") || "Name")}:</strong> ${esc(order.customer_name)} (${esc(order.user_id)})</p>
-          <p><strong>${esc(t("email"))}:</strong> ${esc(order.email || "—")}${bl.email ? ` ${esc(t("blacklisted_suffix"))}` : ""}</p>
-          <p><strong>${esc(t("phone"))}:</strong> ${esc(order.phone_number || "—")}${bl.phone ? ` ${esc(t("blacklisted_suffix"))}` : ""}</p>
-          <p><strong>${esc(t("label_address") || "Address")}:</strong> ${esc(order.address || "—")}</p>
+          <p><strong>${esc(t("email"))}:</strong> ${esc(displayPii(order.email, "email") || "—")}${bl.email ? ` ${esc(t("blacklisted_suffix"))}` : ""}</p>
+          <p><strong>${esc(t("phone"))}:</strong> ${esc(displayPii(order.phone_number, "phone") || "—")}${bl.phone ? ` ${esc(t("blacklisted_suffix"))}` : ""}</p>
+          <p><strong>${esc(t("label_address") || "Address")}:</strong> ${esc(displayPii(order.address, "address") || "—")}</p>
         </div>
         <div>
           <h4>${esc(t("order_details"))}</h4>
           <p><strong>${esc(t("label_product") || "Product")}:</strong> ${esc(order.product_name)} x${esc(order.quantity)}</p>
           <p><strong>${esc(t("label_amount") || "Amount")}:</strong> ${money(order.amount)}</p>
-          <p><strong>${esc(t("ip_address") || "IP Address")}:</strong> ${esc(order.ip_address || "—")}${bl.ip ? ` ${esc(t("blacklisted_suffix"))}` : ""}</p>
+          <p><strong>${esc(t("ip_address") || "IP Address")}:</strong> ${esc(displayPii(order.ip_address, "ip") || "—")}${bl.ip ? ` ${esc(t("blacklisted_suffix"))}` : ""}</p>
           <p><strong>${esc(t("label_device") || "Device")}:</strong> ${esc(order.device_id || "—")}</p>
           <p><strong>${esc(t("label_placed_at") || "Placed At")}:</strong> ${esc(formatUtc(order.order_timestamp))}</p>
         </div>
@@ -469,24 +525,19 @@ async function bindOrderInvestigation(opts) {
         title: t("dlg_confirm_blacklist_title") || "Confirm blacklist",
         message:
           type === "ip"
-            ? `Blacklist IP ${order.ip_address}?`
+            ? `Blacklist IP ${displayPii(order.ip_address, "ip")}?`
             : type === "phone"
-              ? `Blacklist phone ${order.phone_number}?`
-              : `Blacklist email ${order.email}?`,
+              ? `Blacklist phone ${displayPii(order.phone_number, "phone")}?`
+              : `Blacklist email ${displayPii(order.email, "email")}?`,
         confirmLabel: t("confirm_blacklist_btn") || "Confirm",
         danger: true,
       });
       if (!ok) return;
       try {
-        const endpoint =
-          type === "ip" ? "/blacklist-ip" : type === "phone" ? "/blacklist-phone" : "/blacklist-email";
-        const body =
-          type === "ip"
-            ? { ip_address: order.ip_address, reason, blacklisted_by: session.analyst.analyst_id }
-            : type === "phone"
-              ? { phone_number: order.phone_number, reason, blacklisted_by: session.analyst.analyst_id }
-              : { email: order.email, reason, blacklisted_by: session.analyst.analyst_id };
-        await api(endpoint, { method: "POST", body: JSON.stringify(body) });
+        await api(`/portal/orders/${encodeURIComponent(order.order_id)}/blacklist`, {
+          method: "POST",
+          body: JSON.stringify({ entity_type: type, reason }),
+        });
         report(`${type.toUpperCase()} blacklisted.`, "success");
         await onRefresh?.();
       } catch (ex) {
