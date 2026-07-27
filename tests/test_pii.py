@@ -6,6 +6,7 @@ from utils.pii import (
     mask_street,
     mask_ip,
     display_pii,
+    sanitize_pii_record,
 )
 
 
@@ -101,3 +102,37 @@ def test_display_pii_unknown_field_passthrough():
 def test_display_pii_empty_value():
     assert display_pii("", field="email", analyst={"role": "Fraud Analyst"}) == ""
     assert display_pii(None, field="email", analyst={"role": "Fraud Analyst"}) == ""
+
+
+def test_sanitize_pii_record_masks_for_non_admin():
+    raw = {
+        "order_id": "ORD1",
+        "email": "rahul.mehta@example.com",
+        "phone_number": "9876543210",
+        "address": "21 MG Road, Bengaluru, Karnataka 560001",
+        "ip_address": "192.168.1.100",
+        "customer_name": "Rahul",
+    }
+    out = sanitize_pii_record(raw, {"role": "Fraud Analyst"})
+    assert out["email"] == "ra*********@example.com"
+    assert out["phone_number"] == "98******10"
+    assert out["address"] == "21********, Bengaluru, Karnataka 560001"
+    assert out["ip_address"] == "192.168.***.***"
+    assert out["customer_name"] == "Rahul"
+    # Original dict must not be mutated
+    assert raw["email"] == "rahul.mehta@example.com"
+
+
+def test_sanitize_pii_record_full_for_admin():
+    raw = {
+        "email": "rahul.mehta@example.com",
+        "phone_number": "9876543210",
+        "ip_address": "192.168.1.100",
+    }
+    out = sanitize_pii_record(raw, {"role": "Admin"})
+    assert out == raw
+    assert out is not raw
+
+
+def test_sanitize_pii_record_none():
+    assert sanitize_pii_record(None, {"role": "Fraud Analyst"}) is None
