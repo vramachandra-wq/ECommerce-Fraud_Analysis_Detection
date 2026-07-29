@@ -2,13 +2,30 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from api.auth import authenticate_credentials, get_current_session, require_page
+from api.auth import (
+    authenticate_credentials,
+    get_analyst_by_id,
+    get_current_session,
+    get_session_by_username,
+    PORTAL_SESSION_COOKIE,
+    require_page,
+    verify_session_token,
+)
+from config import (
+    DB_CONFIG,
+    PORTAL_TOKEN_TTL,
+    POWER_BI_EMBED_URL,
+    SSO_DEFAULT_RETURN_TO,
+    is_groq_api_key_configured,
+)
+from database.connection import get_cursor
 from auth.analyst_auth import (
     ALL_PAGES,
     PAGE_ADMIN_PANEL,
@@ -16,9 +33,27 @@ from auth.analyst_auth import (
     PAGE_FRAUD_DASHBOARD,
     PAGE_LABELS,
     PAGE_POWER_BI,
+    change_analyst_password,
 )
-from config import DB_CONFIG, POWER_BI_EMBED_URL
-from database.connection import get_cursor
+from auth.sso import (
+    append_query_param,
+    build_authorize_url,
+    build_logout_url,
+    complete_sso_login,
+    create_oauth_state,
+    create_pkce_pair,
+    normalize_return_to,
+    parse_oauth_state,
+    sso_is_configured,
+    sync_keycloak_password,
+)
+from ui.i18n import TRANSLATIONS
+import psycopg2
+
+KC_ID_COOKIE = "metro_cart_kc_id"
+SSO_HANDOFF_COOKIE = "metro_cart_sso_handoff"
+SSO_HANDOFF_TTL_SECONDS = 120
+from api.scheduler import get_auto_approval_status
 from fraud_engine.auto_approval import sync_expired_holds
 from fraud_engine.backlog import (
     compute_deadline,
@@ -44,6 +79,7 @@ from utils.queries import (
 from utils.pii import sanitize_pii_record
 from utils.blacklist_actions import blacklist_entity_from_order
 from utils.time_utils import utcnow_naive
+from utils.system_audit import actor_from_session, log_system_event, read_audit_logs
 
 router = APIRouter()
 
@@ -119,6 +155,13 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ChangePasswordRequest(BaseModel):
+    username: str = ""
+    current_password: str
+    new_password: str
+    confirm_password: str
+
+
 class ChatMessage(BaseModel):
     role: str
     content: str
@@ -137,12 +180,284 @@ class OrderBlacklistRequest(BaseModel):
     reason: str
 
 
+def _message_for_key(key: str) -> str:
+    entry = TRANSLATIONS.get(key) or {}
+    return entry.get("en") or key
+
+
 @router.post("/auth/login")
 def login(payload: LoginRequest):
     session = authenticate_credentials(payload.username.strip(), payload.password)
     if not session:
+        log_system_event(
+            action="AUTH_LOGIN",
+            actor_type="analyst",
+            actor_id=payload.username.strip(),
+            outcome="failure",
+            details={"reason": "invalid_credentials"},
+            request_path="/auth/login",
+        )
         raise HTTPException(status_code=401, detail="Invalid username or password")
-    return session
+    log_system_event(
+        action="AUTH_LOGIN",
+        **actor_from_session(session),
+        outcome="success",
+        request_path="/auth/login",
+    )
+    response = JSONResponse(content=session)
+    response.set_cookie(
+        key=PORTAL_SESSION_COOKIE,
+        value=session["token"],
+        httponly=True,
+        samesite="lax",
+        max_age=PORTAL_TOKEN_TTL,
+        path="/",
+    )
+    # Password login must not keep a prior SSO id_token around; otherwise logout
+    # would incorrectly redirect into Keycloak for a local session.
+    response.delete_cookie(KC_ID_COOKIE, path="/")
+    response.delete_cookie(SSO_HANDOFF_COOKIE, path="/")
+    return response
+
+
+@router.post("/auth/change-password")
+def change_password(
+    payload: ChangePasswordRequest,
+    authorization: Optional[str] = Header(None),
+    portal_session: Optional[str] = Cookie(None, alias=PORTAL_SESSION_COOKIE),
+):
+    """Change password from login screen (username) or while logged in (Bearer)."""
+    analyst_id = ""
+    username = (payload.username or "").strip()
+
+    token = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.removeprefix("Bearer ").strip()
+    elif portal_session:
+        token = portal_session.strip()
+    if token:
+        subject = verify_session_token(token)
+        if subject and not str(subject).startswith("customer:"):
+            analyst_id = str(subject)
+            username = ""
+
+    if not analyst_id and not username:
+        raise HTTPException(
+            status_code=400,
+            detail=_message_for_key("password_change_missing_fields"),
+        )
+
+    with psycopg2.connect(**DB_CONFIG) as conn:
+        with conn.cursor() as cur:
+            ok, message_key = change_analyst_password(
+                cur,
+                conn,
+                analyst_id=analyst_id,
+                username=username,
+                current_password=payload.current_password,
+                new_password=payload.new_password,
+                confirm_password=payload.confirm_password,
+            )
+            if ok:
+                resolved_username = username
+                if analyst_id and not resolved_username:
+                    cur.execute(
+                        """
+                        SELECT username
+                        FROM master.analyst_users
+                        WHERE analyst_id = %s
+                        """,
+                        (analyst_id,),
+                    )
+                    row = cur.fetchone()
+                    resolved_username = str((row or [""])[0] or "").strip()
+                synced, sync_error = sync_keycloak_password(
+                    resolved_username,
+                    payload.new_password,
+                )
+                if not synced:
+                    conn.rollback()
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"Password change was rolled back because SSO password sync failed: {sync_error}",
+                    )
+                conn.commit()
+
+    if not ok:
+        status = 404 if message_key == "password_change_user_not_found" else 400
+        raise HTTPException(status_code=status, detail=_message_for_key(message_key))
+
+    log_system_event(
+        action="AUTH_PASSWORD_CHANGE",
+        actor_type="analyst",
+        actor_id=analyst_id or username,
+        outcome="success",
+        request_path="/auth/change-password",
+    )
+    return {
+        "message": _message_for_key("password_change_success"),
+        "message_key": "password_change_success",
+    }
+
+@router.get("/auth/sso/config")
+def sso_config():
+    """Public flag so the login UI can show/hide the SSO button."""
+    return {"enabled": sso_is_configured()}
+
+
+@router.get("/auth/sso/login")
+def sso_login(return_to: Optional[str] = Query(None)):
+    if not sso_is_configured():
+        raise HTTPException(status_code=503, detail="SSO is not configured")
+    destination = normalize_return_to(return_to)
+    code_verifier, code_challenge = create_pkce_pair()
+    state = create_oauth_state(destination, code_verifier=code_verifier)
+    return RedirectResponse(
+        url=build_authorize_url(state=state, code_challenge=code_challenge),
+        status_code=302,
+    )
+
+
+@router.get("/auth/sso/callback")
+def sso_callback(
+    code: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    error: Optional[str] = Query(None),
+    error_description: Optional[str] = Query(None),
+):
+    """OIDC callback: map Keycloak user → local analyst session, then redirect."""
+    parsed_state = parse_oauth_state(state or "")
+    return_to = normalize_return_to((parsed_state or {}).get("return_to"))
+
+    def _fail(reason: str, actor_id: str = "") -> RedirectResponse:
+        log_system_event(
+            action="AUTH_LOGIN",
+            actor_type="analyst",
+            actor_id=actor_id or "sso",
+            outcome="failure",
+            details={"reason": reason, "method": "sso"},
+            request_path="/auth/sso/callback",
+        )
+        return RedirectResponse(
+            url=append_query_param(return_to, "sso_error", reason),
+            status_code=302,
+        )
+
+    if not sso_is_configured():
+        return _fail("sso_not_configured")
+    if error:
+        return _fail(error_description or error)
+    if not code or not parsed_state:
+        return _fail("invalid_sso_callback")
+
+    code_verifier = str(parsed_state.get("code_verifier") or "")
+    username, id_token, exchange_error = complete_sso_login(
+        code, code_verifier=code_verifier
+    )
+    if exchange_error or not username:
+        return _fail(exchange_error or "sso_exchange_failed")
+
+    session = get_session_by_username(username)
+    if not session:
+        return _fail("no_local_analyst", actor_id=username)
+
+    log_system_event(
+        action="AUTH_LOGIN",
+        **actor_from_session(session),
+        outcome="success",
+        details={"method": "sso"},
+        request_path="/auth/sso/callback",
+    )
+    response = RedirectResponse(
+        url=append_query_param(return_to, "sso", "1"),
+        status_code=302,
+    )
+    response.set_cookie(
+        key=SSO_HANDOFF_COOKIE,
+        value=session["token"],
+        httponly=True,
+        samesite="lax",
+        max_age=SSO_HANDOFF_TTL_SECONDS,
+        path="/",
+    )
+    if id_token:
+        response.set_cookie(
+            key=KC_ID_COOKIE,
+            value=id_token,
+            httponly=True,
+            samesite="lax",
+            max_age=PORTAL_TOKEN_TTL,
+            path="/",
+        )
+    return response
+
+
+@router.get("/auth/sso/complete")
+def sso_complete(
+    metro_cart_sso_handoff: Optional[str] = Cookie(None, alias=SSO_HANDOFF_COOKIE),
+):
+    """
+    One-time SSO handoff: exchange the short-lived HttpOnly cookie for a
+    normal portal session payload (same shape as /auth/login).
+    """
+    token = (metro_cart_sso_handoff or "").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="SSO session handoff missing or expired")
+
+    analyst_id = verify_session_token(token)
+    if not analyst_id or str(analyst_id).startswith("customer:"):
+        raise HTTPException(status_code=401, detail="Invalid SSO session handoff")
+
+    profile = get_analyst_by_id(str(analyst_id))
+    if not profile:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    payload = {
+        "analyst": profile["analyst"],
+        "granted_pages": profile["granted_pages"],
+        "is_admin": profile["is_admin"],
+        "token": token,
+    }
+    response = JSONResponse(content=payload)
+    response.set_cookie(
+        key=PORTAL_SESSION_COOKIE,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        max_age=PORTAL_TOKEN_TTL,
+        path="/",
+    )
+    response.delete_cookie(SSO_HANDOFF_COOKIE, path="/")
+    return response
+
+
+@router.get("/auth/sso/logout")
+def sso_logout(
+    return_to: Optional[str] = Query(None),
+    metro_cart_kc_id: Optional[str] = Cookie(None, alias=KC_ID_COOKIE),
+):
+    """
+    End the Keycloak SSO session (if any), then return to the portal login page.
+    Local app session must be cleared by the browser before calling this.
+    """
+    destination = normalize_return_to(return_to or SSO_DEFAULT_RETURN_TO)
+
+    if not sso_is_configured() or not metro_cart_kc_id:
+        response = RedirectResponse(url=destination, status_code=302)
+        response.delete_cookie(KC_ID_COOKIE, path="/")
+        response.delete_cookie(PORTAL_SESSION_COOKIE, path="/")
+        response.delete_cookie(SSO_HANDOFF_COOKIE, path="/")
+        return response
+
+    logout_url = build_logout_url(
+        post_logout_redirect_uri=destination,
+        id_token_hint=metro_cart_kc_id,
+    )
+    response = RedirectResponse(url=logout_url, status_code=302)
+    response.delete_cookie(KC_ID_COOKIE, path="/")
+    response.delete_cookie(PORTAL_SESSION_COOKIE, path="/")
+    response.delete_cookie(SSO_HANDOFF_COOKIE, path="/")
+    return response
 
 
 @router.get("/auth/me")
@@ -157,6 +472,7 @@ def portal_config(session: Dict[str, Any] = Depends(get_current_session)):
         "all_pages": ALL_PAGES,
         "power_bi_embed_url": POWER_BI_EMBED_URL,
         "granted_pages": session["granted_pages"],
+        "groq_configured": is_groq_api_key_configured(),
     }
 
 
@@ -165,6 +481,12 @@ def sync_holds(_: Dict[str, Any] = Depends(require_page(PAGE_FRAUD_DASHBOARD))):
     with get_cursor(commit=True) as (conn, cur):
         count = sync_expired_holds(conn, cur)
     return {"auto_approved": count}
+
+
+@router.get("/portal/scheduler-status")
+def scheduler_status(_: Dict[str, Any] = Depends(require_page(PAGE_ADMIN_PANEL))):
+    """Expose auto-approval scheduler heartbeat for Admin visibility."""
+    return {"scheduler": get_auto_approval_status()}
 
 
 @router.get("/portal/queue")
@@ -266,6 +588,15 @@ def blacklist_order_entity(
                 reason=payload.reason,
                 blacklisted_by=analyst_id,
             )
+            log_system_event(
+                cur,
+                action="BLACKLIST_ADD",
+                **actor_from_session(session),
+                resource_type=entity,
+                resource_id=order_id,
+                details={"entity_type": entity, "reason": payload.reason, "via": "portal_order"},
+                request_path=f"/portal/orders/{order_id}/blacklist",
+            )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"message": f"{entity.upper()} blacklisted from order {order_id}"}
@@ -344,6 +675,17 @@ def rules(_: Dict[str, Any] = Depends(require_page(PAGE_ADMIN_PANEL))):
     with get_cursor() as (_, cur):
         rules_data = get_all_rules(cur)
     return {"rules": [_jsonable_dict(r) for r in rules_data]}
+
+
+@router.get("/portal/audit-logs")
+def audit_logs(
+    limit: int = 100,
+    action: str | None = None,
+    _: Dict[str, Any] = Depends(require_page(PAGE_ADMIN_PANEL)),
+):
+    """Recent system audit events from the audit log file (admin only)."""
+    rows = read_audit_logs(limit=limit, action=action)
+    return {"logs": [_jsonable_dict(r) for r in rows]}
 
 
 @router.get("/portal/power-bi")

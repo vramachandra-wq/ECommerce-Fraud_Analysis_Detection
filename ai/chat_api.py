@@ -38,7 +38,7 @@ from ai.chatbot import (
     sanitize_dataframe_for_llm,
 )
 from ai.groq_client import create_chat_completion, get_groq_client
-from config import GROQ_API_KEY, GROQ_SQL_MODEL, GROQ_SUMMARY_MODEL
+from config import GROQ_SQL_MODEL, GROQ_SUMMARY_MODEL, is_groq_api_key_configured
 from database.connection import get_pooled_connection, release_pooled_connection
 from database.transaction_repository import log_chatbot_interaction
 
@@ -261,7 +261,7 @@ def process_chat_message(user_query: str, history: List[Dict[str, Any]]) -> Dict
     if not user_query:
         return _empty_response("Please enter a question.", status="error")
 
-    if not GROQ_API_KEY:
+    if not is_groq_api_key_configured():
         return _empty_response(
             "Groq API key is missing. Add GROQ_API_KEY to your .env file.", status="error"
         )

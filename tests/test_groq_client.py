@@ -15,8 +15,8 @@ def _reset_groq_client_singleton():
     groq_client._client = None
 
 
-@patch("ai.groq_client.GROQ_API_KEY", "")
-def test_get_groq_client_returns_none_without_api_key():
+@patch("ai.groq_client.is_groq_api_key_configured", return_value=False)
+def test_get_groq_client_returns_none_without_api_key(_mock_configured):
     from ai.groq_client import get_groq_client
 
     assert get_groq_client() is None
@@ -24,8 +24,11 @@ def test_get_groq_client_returns_none_without_api_key():
 
 @patch("ai.groq_client.Groq")
 @patch("ai.groq_client.httpx.Client")
+@patch("ai.groq_client.is_groq_api_key_configured", return_value=True)
 @patch("ai.groq_client.GROQ_API_KEY", "test-key")
-def test_get_groq_client_creates_singleton(mock_httpx_client, mock_groq):
+def test_get_groq_client_creates_singleton(
+    _mock_configured, mock_httpx_client, mock_groq
+):
     from ai.groq_client import get_groq_client
 
     mock_instance = MagicMock()

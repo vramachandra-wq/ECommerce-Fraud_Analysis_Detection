@@ -50,3 +50,25 @@ if _cors_origins == "":
     CORS_ALLOW_ORIGINS = ["*"]
 else:
     CORS_ALLOW_ORIGINS = [origin.strip() for origin in _cors_origins.split(",") if origin.strip()]
+
+# Analyst portal session tokens (also signs OIDC state for SSO).
+PORTAL_SECRET = _get_env_str("PORTAL_SECRET", "metro-cart-dev-portal-secret")
+PORTAL_TOKEN_TTL = int(os.environ.get("PORTAL_TOKEN_TTL", "86400"))
+
+# Optional Keycloak OIDC SSO for the analyst portal (local password login remains).
+_keycloak_flag = os.environ.get("KEYCLOAK_ENABLED", "true").strip().lower()
+KEYCLOAK_ENABLED = _keycloak_flag in {"1", "true", "yes", "on"}
+KEYCLOAK_URL = _get_env_str("KEYCLOAK_URL", "http://127.0.0.1:8080")
+KEYCLOAK_REALM = _get_env_str("KEYCLOAK_REALM", "metro-cart")
+KEYCLOAK_CLIENT_ID = _get_env_str("KEYCLOAK_CLIENT_ID", "analyst-portal")
+KEYCLOAK_CLIENT_SECRET = _get_env_str("KEYCLOAK_CLIENT_SECRET", "metro-cart-sso-secret")
+KEYCLOAK_ADMIN = _get_env_str("KEYCLOAK_ADMIN", "")
+KEYCLOAK_ADMIN_PASSWORD = _get_env_str("KEYCLOAK_ADMIN_PASSWORD", "")
+KEYCLOAK_REDIRECT_URI = _get_env_str(
+    "KEYCLOAK_REDIRECT_URI",
+    "http://127.0.0.1:8000/auth/sso/callback",
+)
+SSO_DEFAULT_RETURN_TO = _get_env_str(
+    "SSO_DEFAULT_RETURN_TO",
+    f"{API_BASE_URL.rstrip('/')}/portal/",
+)

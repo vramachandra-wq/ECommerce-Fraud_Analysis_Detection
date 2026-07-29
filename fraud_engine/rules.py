@@ -114,7 +114,7 @@ def check_r005(cursor: Any, ctx: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     prior_spend = float(cursor.fetchone()[0])
     total = prior_spend + float(ctx["amount"])
     if total > threshold:
-        return True, f"R005: User spend velocity — ₹{total:,.2f} cumulative in last {interval} exceeds ₹{threshold:,.2f}"
+        return True, f"R005: User spend velocity — ฿{total:,.2f} cumulative in last {interval} exceeds ฿{threshold:,.2f}"
     return False, None
 
 

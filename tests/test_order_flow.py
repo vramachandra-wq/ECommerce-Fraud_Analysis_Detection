@@ -3,14 +3,27 @@ from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
+from api.auth import get_current_session
 from api.main import app
+from auth.analyst_auth import ALL_PAGES
 from fraud_engine.engine import clear_metadata_cache, evaluate_order
+from tests.conftest import make_analyst_session
 
 client = TestClient(app)
 
 
 def setup_function():
     clear_metadata_cache()
+    session = make_analyst_session(pages=list(ALL_PAGES))
+
+    def _dep():
+        return session
+
+    app.dependency_overrides[get_current_session] = _dep
+
+
+def teardown_function():
+    app.dependency_overrides.pop(get_current_session, None)
 
 
 def _base_order_fields():
@@ -38,8 +51,9 @@ def _base_order_fields():
     }
 
 
+@patch("api.orders.log_system_event")
 @patch("api.orders.psycopg2.connect")
-def test_approved_disposition_posts_create_order(mock_connect):
+def test_approved_disposition_posts_create_order(mock_connect, mock_log):
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
     mock_connect.return_value.__enter__.return_value = mock_conn
@@ -68,9 +82,10 @@ def test_approved_disposition_posts_create_order(mock_connect):
     assert response.json()["message"] == "Order Created successfully"
 
 
+@patch("api.orders.log_system_event")
 @patch("api.orders.execute_batch")
 @patch("api.orders.psycopg2.connect")
-def test_review_disposition_posts_triggered_rules(mock_connect, mock_execute_batch):
+def test_review_disposition_posts_triggered_rules(mock_connect, mock_execute_batch, mock_log):
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
     mock_connect.return_value.__enter__.return_value = mock_conn
@@ -106,9 +121,10 @@ def test_review_disposition_posts_triggered_rules(mock_connect, mock_execute_bat
     mock_execute_batch.assert_called_once()
 
 
+@patch("api.orders.log_system_event")
 @patch("api.orders.execute_batch")
 @patch("api.orders.psycopg2.connect")
-def test_rejected_disposition_posts_fraud_flag(mock_connect, mock_execute_batch):
+def test_rejected_disposition_posts_fraud_flag(mock_connect, mock_execute_batch, mock_log):
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
     mock_connect.return_value.__enter__.return_value = mock_conn

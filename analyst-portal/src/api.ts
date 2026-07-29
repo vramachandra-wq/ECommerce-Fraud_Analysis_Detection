@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.DEV ? "/api" : "");
 
 export class ApiError extends Error {
   status: number;
@@ -30,6 +30,7 @@ export async function apiRequest<T>(
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers,
+    credentials: "same-origin",
   });
 
   if (!response.ok) {
@@ -54,8 +55,28 @@ export const api = {
       { method: "POST", body: JSON.stringify({ username, password }) },
       false,
     ),
+  ssoConfig: () =>
+    apiRequest<{ enabled: boolean }>("/auth/sso/config", {}, false),
+  ssoComplete: () =>
+    apiRequest<import("./types").AuthSession>(
+      "/auth/sso/complete",
+      { credentials: "same-origin" },
+      false,
+    ),
+  changePassword: (body: {
+    username?: string;
+    current_password: string;
+    new_password: string;
+    confirm_password: string;
+  }) =>
+    apiRequest<{ message: string; message_key: string }>(
+      "/auth/change-password",
+      { method: "POST", body: JSON.stringify(body) },
+      !body.username,
+    ),
   me: () => apiRequest<Omit<import("./types").AuthSession, "token">>("/auth/me"),
-  config: () => apiRequest<{ power_bi_embed_url: string }>("/portal/config"),
+  config: () =>
+    apiRequest<{ power_bi_embed_url: string; groq_configured?: boolean }>("/portal/config"),
   syncHolds: () => apiRequest<{ auto_approved: number }>("/portal/sync-holds", { method: "POST" }),
   queue: () =>
     apiRequest<{
@@ -116,6 +137,23 @@ export const api = {
       `/portal/blacklist/${entityType}/${encodeURIComponent(value)}`,
     ),
   analyticsSummary: () => apiRequest("/portal/analytics/summary"),
+  schedulerStatus: () =>
+    apiRequest<{
+      scheduler: {
+        running: boolean;
+        interval_seconds: number;
+        last_started_at?: string | null;
+        last_finished_at?: string | null;
+        last_success_at?: string | null;
+        last_failure_at?: string | null;
+        last_error?: string | null;
+        last_processed_count: number;
+        total_processed_count: number;
+        run_count: number;
+        success_count: number;
+        failure_count: number;
+      };
+    }>("/portal/scheduler-status"),
   ruleStats: () => apiRequest<{ rules: import("./types").FraudRule[] }>("/portal/analytics/rule-stats"),
   analystPerformance: () => apiRequest("/portal/analytics/analyst-performance"),
   permissions: () =>
@@ -146,3 +184,12 @@ export const api = {
       { method: "POST", body: JSON.stringify({ message, history }) },
     ),
 };
+
+/** Full browser URL that starts the SSO OIDC redirect (bypasses Vite /api rewrite). */
+export function ssoLoginHref(
+  returnTo: string = new URL(import.meta.env.BASE_URL, window.location.origin).toString(),
+): string {
+  const apiOrigin =
+    import.meta.env.VITE_API_ORIGIN ?? "http://127.0.0.1:8000";
+  return `${apiOrigin}/auth/sso/login?return_to=${encodeURIComponent(returnTo)}`;
+}

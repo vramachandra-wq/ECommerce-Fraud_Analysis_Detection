@@ -24,3 +24,26 @@ def pytest_configure(config):
 def pytest_collection_modifyitems(config, items):
     """Allow `pytest -m integration` / `pytest -m \"not integration\"`."""
     return
+
+
+def make_analyst_session(
+    *,
+    role: str = "Admin",
+    pages: list[str] | None = None,
+    analyst_id: str = "A001",
+):
+    from auth.analyst_auth import ALL_PAGES, PAGE_FRAUD_DASHBOARD
+
+    if pages is None:
+        pages = list(ALL_PAGES) if role == "Admin" else [PAGE_FRAUD_DASHBOARD]
+
+    return {
+        "analyst": {
+            "analyst_id": analyst_id,
+            "employee_name": "Test Analyst",
+            "username": "tester",
+            "role": role,
+        },
+        "granted_pages": pages,
+        "is_admin": role == "Admin",
+    }

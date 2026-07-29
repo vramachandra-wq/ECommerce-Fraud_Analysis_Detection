@@ -1,19 +1,11 @@
-"""Shared UI helpers for Streamlit.
+"""Shared UI helpers — translation catalog for API / static portals."""
 
-Expose styling helpers used across portal pages to keep a consistent look.
-"""
-
-from .style import apply_theme, render_app_shell
-from .customer_login import (
-    apply_customer_theme,
-    apply_customer_login_theme,
-    render_customer_shell,
-)
+from .i18n import TRANSLATIONS, cur_sym, format_duration_minutes, set_lang, t
 
 __all__ = [
-    "apply_theme",
-    "render_app_shell",
-    "apply_customer_theme",
-    "apply_customer_login_theme",
-    "render_customer_shell",
+    "TRANSLATIONS",
+    "t",
+    "cur_sym",
+    "format_duration_minutes",
+    "set_lang",
 ]

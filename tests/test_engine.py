@@ -144,7 +144,7 @@ def test_hold_reads_delay_minutes_from_rule_master():
 
 
 def test_max_delay_across_triggered_rules():
-    """When multiple rules fire, order delay is the max of their delay_minutes."""
+    """When multiple HOLD/REVIEW rules fire, order delay is the max of their delays."""
 
     def r001(cursor, ctx):
         return True, "R001: Hold"
@@ -167,3 +167,43 @@ def test_max_delay_across_triggered_rules():
 
     assert result["order_status"] == "ON_HOLD"
     assert result["delay_minutes"] == 180
+
+
+def test_pass_rule_delay_does_not_inflate_hold_timeout():
+    """PASS rules keep stored delay_minutes but must not affect review timeout."""
+
+    def r002(cursor, ctx):
+        return True, "R002: Pass"
+
+    def r001(cursor, ctx):
+        return True, "R001: Hold"
+
+    cursor = MagicMock()
+    # R001 is tier 1 so it alone decides status; R002 (PASS) is only read in the delay loop.
+    cursor.fetchone.side_effect = [
+        ("HOLD", 60),   # R001 status/delay metadata
+        ("PASS", 999),  # R002 delay metadata
+    ]
+
+    with patch(
+        "fraud_engine.engine.RULE_CHECKS",
+        [("R002", r002), ("R001", r001)],
+    ):
+        result = evaluate_order(cursor, {})
+
+    assert result["order_status"] == "ON_HOLD"
+    assert result["delay_minutes"] == 60
+
+
+def test_pass_only_has_zero_delay():
+    def r002(cursor, ctx):
+        return True, "R002: Pass"
+
+    cursor = _cursor_with_rule_meta("PASS", 120)
+
+    with patch("fraud_engine.engine.RULE_CHECKS", [("R002", r002)]):
+        result = evaluate_order(cursor, {})
+
+    assert result["order_status"] == "APPROVED"
+    assert result["delay_minutes"] == 0
+    assert result["is_fraud"] is False

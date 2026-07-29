@@ -1,0 +1,77 @@
+{
+  "realm": "metro-cart",
+  "enabled": true,
+  "displayName": "Metro Cart",
+  "loginTheme": "metro-cart",
+  "accountTheme": "keycloak.v2",
+  "emailTheme": "keycloak",
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": false,
+  "clients": [
+    {
+      "clientId": "analyst-portal",
+      "name": "Metro Cart Analyst Portal",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "metro-cart-sso-secret",
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": true,
+      "redirectUris": [
+        "http://127.0.0.1:8000/auth/sso/callback",
+        "http://localhost:8000/auth/sso/callback"
+      ],
+      "webOrigins": [
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+        "+"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://127.0.0.1:8000/portal/##http://127.0.0.1:8000/portal/*##http://localhost:8000/portal/##http://localhost:8000/portal/*##http://127.0.0.1:5173/##http://127.0.0.1:5173/*##http://localhost:5173/##http://localhost:5173/*"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "admin",
+      "enabled": true,
+      "email": "admin@metro-cart.local",
+      "emailVerified": true,
+      "firstName": "Vinay",
+      "lastName": "Ramachandra",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin123",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "analyst",
+      "enabled": true,
+      "email": "analyst@metro-cart.local",
+      "emailVerified": true,
+      "firstName": "Jane",
+      "lastName": "Doe",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "secure123",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

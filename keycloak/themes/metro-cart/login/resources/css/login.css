@@ -1,0 +1,353 @@
+/* Metro Cart SSO login — matches analyst portal login-wrap / login-card */
+
+:root {
+  --mc-sidebar: #1a2038;
+  --mc-accent: #1976d2;
+  --mc-text: #2c3345;
+  --mc-text-strong: #1a2038;
+  --mc-muted: #8b95a8;
+  --mc-border: #e6e9f0;
+  --mc-danger: #e53935;
+  --mc-success: #43a047;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+/* Full-bleed portal background (same as analyst login) */
+.login-pf body,
+body.login-pf,
+body {
+  background:
+    linear-gradient(135deg, rgba(26, 32, 56, 0.55), rgba(25, 118, 210, 0.35)),
+    url("../img/portal-bg.png") center / cover no-repeat fixed !important;
+  background-color: #f5f6fa !important;
+  color: var(--mc-text) !important;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif !important;
+}
+
+.login-pf body::before,
+.login-pf #kc-header::before,
+#kc-header::before {
+  display: none !important;
+  content: none !important;
+  background: none !important;
+}
+
+/* Center the page like .login-wrap */
+.login-pf-page {
+  min-height: 100vh !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: clamp(1rem, 3vw, 2rem) !important;
+  background: transparent !important;
+}
+
+/* Hide outer realm branding (avoids vertical/side "Metro Cart") */
+#kc-header,
+.login-pf-page-header,
+#kc-header-wrapper {
+  display: none !important;
+}
+
+/* Card container */
+#kc-content,
+#kc-content-wrapper {
+  width: 100% !important;
+  max-width: 420px !important;
+  margin: 0 auto !important;
+  float: none !important;
+  padding: 0 !important;
+}
+
+.login-pf-page .card-pf,
+div.card-pf {
+  width: 100% !important;
+  max-width: 420px !important;
+  margin: 0 auto !important;
+  background: rgba(255, 255, 255, 0.96) !important;
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.55) !important;
+  border-radius: 16px !important;
+  padding: 2rem !important;
+  box-shadow: 0 16px 40px rgba(26, 32, 56, 0.22) !important;
+}
+
+/* Brand row inside card (matches portal .login-logo-row) */
+.login-pf-header,
+#kc-page-title {
+  margin: 0 0 1.25rem !important;
+  border: none !important;
+  text-align: left !important;
+}
+
+.mc-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.mc-logo {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #42a5f5, #1976d2);
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-weight: 700;
+  font-size: 1rem;
+  box-shadow: 0 4px 12px rgba(25, 118, 210, 0.35);
+  flex-shrink: 0;
+}
+
+.mc-brand-text {
+  min-width: 0;
+}
+
+.mc-title,
+#kc-page-title .mc-title,
+h1#kc-page-title,
+#kc-page-title {
+  margin: 0 !important;
+  font-size: 1.4rem !important;
+  font-weight: 700 !important;
+  color: var(--mc-text-strong) !important;
+  line-height: 1.25 !important;
+}
+
+.mc-subtitle {
+  margin: 0.2rem 0 0 !important;
+  font-size: 0.9rem !important;
+  color: var(--mc-muted) !important;
+  font-weight: 400 !important;
+  line-height: 1.35 !important;
+}
+
+/* Form layout — stacked fields like portal */
+#kc-form,
+#kc-form-wrapper,
+#kc-form-login {
+  width: 100%;
+}
+
+.form-group,
+.pf-c-form__group,
+div[class*="form-group"] {
+  margin-bottom: 1rem !important;
+  float: none !important;
+  width: 100% !important;
+}
+
+.control-label,
+label,
+.pf-c-form__label,
+.pf-c-form__label-text {
+  display: block !important;
+  float: none !important;
+  width: 100% !important;
+  text-align: left !important;
+  margin: 0 0 0.35rem !important;
+  padding: 0 !important;
+  color: var(--mc-text-strong) !important;
+  font-weight: 600 !important;
+  font-size: 0.875rem !important;
+}
+
+/* Inputs */
+.form-control,
+.pf-c-form-control,
+input.pf-c-form-control,
+input[type="text"],
+input[type="password"],
+input[type="email"] {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  border: 1px solid var(--mc-border) !important;
+  border-radius: 10px !important;
+  background: #fff !important;
+  color: var(--mc-text) !important;
+  min-height: 2.5rem !important;
+  height: 2.5rem !important;
+  padding: 0.5rem 0.75rem !important;
+  box-shadow: none !important;
+  font-size: 0.95rem !important;
+}
+
+.pf-c-form-control:focus,
+input:focus {
+  border-color: var(--mc-accent) !important;
+  outline: none !important;
+  box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.2) !important;
+}
+
+/* Password row with eye toggle */
+.pf-c-input-group {
+  display: flex !important;
+  width: 100% !important;
+  align-items: stretch !important;
+  gap: 0 !important;
+}
+
+.pf-c-input-group > input {
+  border-top-right-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+  flex: 1 1 auto !important;
+}
+
+.pf-c-input-group > button,
+.pf-c-button.pf-m-control {
+  border: 1px solid var(--mc-border) !important;
+  border-left: none !important;
+  border-radius: 0 10px 10px 0 !important;
+  background: #f8f9fc !important;
+  color: var(--mc-text) !important;
+  min-width: 2.5rem !important;
+  box-shadow: none !important;
+}
+
+.pf-c-input-group > button:hover {
+  background: #eef1f7 !important;
+  color: var(--mc-accent) !important;
+}
+
+/* Settings row */
+.login-pf-settings {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  margin-bottom: 0.75rem !important;
+  color: var(--mc-muted);
+  font-size: 0.85rem;
+}
+
+.login-pf-settings a {
+  color: var(--mc-accent) !important;
+  text-decoration: none !important;
+  font-weight: 600;
+}
+
+.login-pf-settings a:hover {
+  text-decoration: underline !important;
+}
+
+/* Primary Sign in button */
+#kc-form-buttons,
+#kc-login {
+  width: 100% !important;
+}
+
+#kc-login,
+input[type="submit"].pf-c-button,
+.pf-c-button.pf-m-primary,
+input[type="submit"] {
+  width: 100% !important;
+  background: var(--mc-accent) !important;
+  border: 1px solid var(--mc-accent) !important;
+  color: #fff !important;
+  border-radius: 10px !important;
+  font-weight: 600 !important;
+  min-height: 2.6rem !important;
+  font-size: 0.95rem !important;
+  box-shadow: 0 4px 12px rgba(25, 118, 210, 0.3) !important;
+  cursor: pointer;
+}
+
+#kc-login:hover,
+input[type="submit"]:hover {
+  background: #1565c0 !important;
+  border-color: #1565c0 !important;
+}
+
+/* Alerts */
+.alert,
+.pf-c-alert,
+#input-error,
+.kc-feedback-text {
+  border-radius: 10px !important;
+  font-size: 0.875rem !important;
+}
+
+.alert-error,
+.pf-c-alert.pf-m-danger,
+#input-error {
+  color: var(--mc-danger) !important;
+}
+
+.pf-c-alert.pf-m-success {
+  color: var(--mc-success) !important;
+}
+
+/* Info / footer under card */
+#kc-info,
+#kc-info-wrapper {
+  background: transparent !important;
+  color: rgba(255, 255, 255, 0.92) !important;
+  text-align: center !important;
+  margin-top: 1rem !important;
+  max-width: 420px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+#kc-info a {
+  color: #fff !important;
+  font-weight: 600;
+}
+
+/* Locale dropdown if enabled */
+#kc-locale {
+  position: absolute;
+  top: 1.25rem;
+  right: 1.25rem;
+}
+
+#kc-locale a,
+#kc-current-locale-link {
+  color: #fff !important;
+}
+
+/* Social providers */
+#kc-social-providers h2 {
+  color: var(--mc-muted) !important;
+  font-size: 0.85rem !important;
+  font-weight: 600 !important;
+}
+
+/* Kill Bootstrap float columns that break card layout */
+.col-xs-12,
+.col-sm-12,
+.col-md-12,
+.col-lg-12,
+.col-sm-10,
+.col-md-8,
+.col-lg-8,
+.col-sm-offset-1,
+.col-md-offset-2,
+.col-lg-offset-2,
+.col-sm-8,
+.col-sm-offset-2,
+.col-md-6,
+.col-md-offset-3,
+.col-lg-6,
+.col-lg-offset-3 {
+  width: 100% !important;
+  margin-left: 0 !important;
+  float: none !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+.container-fluid {
+  width: 100% !important;
+  max-width: 420px !important;
+  margin: 0 auto !important;
+  padding: 0 !important;
+}

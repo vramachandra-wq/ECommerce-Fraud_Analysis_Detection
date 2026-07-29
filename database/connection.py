@@ -1,21 +1,41 @@
 """Connection pooling for PostgreSQL via psycopg2."""
 from contextlib import contextmanager
+from threading import Lock
+from typing import Optional
 
 import psycopg2
 import psycopg2.pool
-import streamlit as st
 
 from config import DB_CONFIG
 
+_pool: Optional[psycopg2.pool.ThreadedConnectionPool] = None
+_pool_lock = Lock()
 
-@st.cache_resource
+
 def get_pool():
-    """Singleton threaded connection pool, cached across Streamlit reruns."""
-    return psycopg2.pool.ThreadedConnectionPool(
-        minconn=1,
-        maxconn=10,
-        **DB_CONFIG,
-    )
+    """Singleton threaded connection pool shared across the process."""
+    global _pool
+    if _pool is None:
+        with _pool_lock:
+            if _pool is None:
+                _pool = psycopg2.pool.ThreadedConnectionPool(
+                    minconn=1,
+                    maxconn=10,
+                    **DB_CONFIG,
+                )
+    return _pool
+
+
+def reset_pool_for_tests() -> None:
+    """Drop the cached pool (unit tests only)."""
+    global _pool
+    with _pool_lock:
+        if _pool is not None:
+            try:
+                _pool.closeall()
+            except Exception:
+                pass
+            _pool = None
 
 
 @contextmanager

@@ -3,7 +3,7 @@ import {
   curSym,
   languageToggleHtml,
   bindLanguageToggle,
-} from "./i18n.js?v=52";
+} from "./i18n.js?v=56";
 
 const PAGE_LABEL_KEYS = {
   ADMIN_PANEL: "nav_admin_panel",
@@ -97,21 +97,81 @@ function loadSession() {
 }
 
 function saveSession(data) {
-  session = data;
-  localStorage.setItem("metro_cart_session", JSON.stringify(data));
-  localStorage.setItem("metro_cart_token", data.token);
+  const safe = { ...data, token: "" };
+  session = safe;
+  localStorage.setItem("metro_cart_session", JSON.stringify(safe));
 }
 
 function clearSession() {
   session = null;
   localStorage.removeItem("metro_cart_session");
-  localStorage.removeItem("metro_cart_token");
+  localStorage.removeItem("metro_cart_auth_method");
+}
+
+/** Restore / validate session from the HttpOnly portal cookie via /auth/me. */
+async function restoreSessionFromCookie() {
+  try {
+    const res = await fetch("/auth/me", { credentials: "same-origin" });
+    if (!res.ok) {
+      clearSession();
+      return;
+    }
+    const data = await res.json();
+    saveSession({ ...data, token: data.token || "" });
+  } catch {
+    // Keep any local snapshot if the network check fails.
+  }
+}
+
+async function logoutFully() {
+  clearSession();
+  const returnTo = `${window.location.origin}/portal/#/login`;
+  window.location.href = `/auth/sso/logout?return_to=${encodeURIComponent(returnTo)}`;
+}
+
+let pendingSsoError = "";
+
+async function consumeSsoParamsFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const ssoHandoff = params.get("sso") === "1";
+  const ssoError = params.get("sso_error");
+  if (!ssoHandoff && !ssoError) return;
+
+  params.delete("sso");
+  params.delete("sso_token");
+  params.delete("sso_error");
+  const qs = params.toString();
+  const clean = `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash || ""}`;
+  history.replaceState(null, "", clean);
+
+  if (ssoError) {
+    pendingSsoError = ssoError;
+    return;
+  }
+
+  try {
+    const res = await fetch("/auth/sso/complete", { credentials: "same-origin" });
+    if (!res.ok) throw new Error("Invalid SSO session");
+    const data = await res.json();
+    saveSession(data);
+    localStorage.setItem("metro_cart_auth_method", "sso");
+    if (!window.location.hash || window.location.hash === "#/login") {
+      const first = PAGE_ROUTES[data.granted_pages?.[0]] || "dashboard";
+      window.location.hash = `#/${first}`;
+    }
+  } catch {
+    pendingSsoError = "sso_session_failed";
+  }
+}
+
+function ssoLoginUrl() {
+  const returnTo = `${window.location.origin}/portal/`;
+  return `/auth/sso/login?return_to=${encodeURIComponent(returnTo)}`;
 }
 
 async function api(path, options = {}, auth = true) {
   const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
-  if (auth && session?.token) headers.Authorization = `Bearer ${session.token}`;
-  const res = await fetch(path, { ...options, headers });
+  const res = await fetch(path, { ...options, headers, credentials: "same-origin" });
   if (!res.ok) {
     let detail = res.statusText;
     try {
@@ -146,6 +206,31 @@ function formatUtc(value) {
   if (Number.isNaN(d.getTime())) return raw;
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
+}
+
+/** Format timestamps for display as IST (UI-only; backend stays UTC). */
+function formatIst(value) {
+  if (value == null || value === "") return "—";
+  const raw = String(value).trim();
+  if (!raw || raw.toLowerCase() === "null" || raw.toLowerCase() === "none") return "—";
+  let iso = raw.replace(" ", "T");
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(iso) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(iso)) {
+    iso = iso.replace(/\.\d+$/, "") + "Z";
+  }
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return raw;
+  return (
+    new Intl.DateTimeFormat("en-IN", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).format(d) + " IST"
+  );
 }
 
 /**
@@ -682,6 +767,7 @@ function shell(content, route) {
         <div class="sidebar-section">${esc(t("workspace"))}</div>
         ${nav}
         <div class="sidebar-footer">
+          <button class="btn btn-secondary" style="width:100%;margin-bottom:0.5rem" id="change-password-btn" type="button">${esc(t("change_password"))}</button>
           <button class="btn btn-logout" id="logout-btn">${esc(t("log_out"))}</button>
         </div>
       </aside>
@@ -704,31 +790,106 @@ function shell(content, route) {
   `;
 }
 
-async function renderLogin() {
+async function renderLogin(mode = "login") {
   const app = document.getElementById("app");
+  const isChange = mode === "change_password";
+
+  let ssoEnabled = false;
+  if (!isChange) {
+    try {
+      const cfg = await api("/auth/sso/config", {}, false);
+      ssoEnabled = !!cfg?.enabled;
+    } catch {
+      ssoEnabled = false;
+    }
+  }
+
+  const ssoErrorHtml = !isChange && pendingSsoError
+    ? `<div class="alert alert-error">${esc(t("sso_login_failed"))}: ${esc(pendingSsoError)}</div>`
+    : "";
+  if (!isChange) pendingSsoError = "";
+
+  const ssoBlock = ssoEnabled
+    ? `
+        <button class="btn btn-secondary" style="width:100%;margin-top:0.75rem" type="button" id="sso-btn">${esc(t("sign_in_sso"))}</button>
+        <p class="subtitle" style="text-align:center;margin:0.85rem 0 0.25rem">${esc(t("or_continue_with_password"))}</p>
+      `
+    : "";
+
+  let fields;
+  let actions;
+  let subtitle;
+
+  if (isChange) {
+    subtitle = t("password_change_login_hint");
+    fields = `
+      <div class="field"><label>${esc(t("username"))}</label><input name="username" required autocomplete="username" /></div>
+      <div class="field"><label>${esc(t("current_password"))}</label><input name="current_password" type="password" required autocomplete="current-password" /></div>
+      <div class="field"><label>${esc(t("new_password"))}</label><input name="new_password" type="password" required autocomplete="new-password" /></div>
+      <div class="field"><label>${esc(t("confirm_new_password"))}</label><input name="confirm_password" type="password" required autocomplete="new-password" /></div>`;
+    actions = `
+      <button class="btn btn-primary" style="width:100%" type="submit">${esc(t("update_password"))}</button>
+      <button type="button" class="btn btn-secondary" style="width:100%;margin-top:0.65rem" id="back-login">${esc(t("back_to_login"))}</button>`;
+  } else {
+    subtitle = t("analyst_login_subtitle");
+    fields = `
+      ${ssoBlock}
+      <div class="field"><label>${esc(t("username"))}</label><input name="username" required autocomplete="username" /></div>
+      <div class="field"><label>${esc(t("password"))}</label><input name="password" type="password" required autocomplete="current-password" /></div>`;
+    actions = `
+      <button class="btn btn-primary" style="width:100%" type="submit">${esc(t("sign_in"))}</button>
+      <button type="button" class="btn btn-secondary" style="width:100%;margin-top:0.65rem" id="goto-change-password">${esc(t("change_password"))}</button>`;
+  }
+
   app.innerHTML = `
     <div class="login-wrap">
       <div class="login-lang">${languageToggleHtml({ id: "lang-select-login" })}</div>
       <form class="login-card" id="login-form">
         <div class="login-logo-row">
           <div class="sidebar-logo">M</div>
-          <h1>${esc(t("internal_brand"))}</h1>
+          <h1>${esc(isChange ? t("change_password") : t("internal_brand"))}</h1>
         </div>
-        <p class="subtitle" style="margin-top:0">${esc(t("analyst_login_subtitle"))}</p>
-        <div id="login-error"></div>
-        <div class="field"><label>${esc(t("username"))}</label><input name="username" required autocomplete="username" /></div>
-        <div class="field"><label>${esc(t("password"))}</label><input name="password" type="password" required autocomplete="current-password" /></div>
-        <button class="btn btn-primary" style="width:100%" type="submit">${esc(t("sign_in"))}</button>
+        <p class="subtitle" style="margin-top:0">${esc(subtitle)}</p>
+        <div id="login-error">${ssoErrorHtml}</div>
+        ${fields}
+        ${actions}
       </form>
     </div>
   `;
-  bindLanguageToggle("lang-select-login", () => renderLogin());
+  bindLanguageToggle("lang-select-login", () => renderLogin(mode));
+  document.getElementById("sso-btn")?.addEventListener("click", () => {
+    window.location.href = ssoLoginUrl();
+  });
+  document.getElementById("goto-change-password")?.addEventListener("click", () => {
+    renderLogin("change_password");
+  });
+  document.getElementById("back-login")?.addEventListener("click", () => {
+    renderLogin("login");
+  });
   document.getElementById("login-form").onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
     const err = document.getElementById("login-error");
     err.innerHTML = "";
     try {
+      if (isChange) {
+        await api(
+          "/auth/change-password",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              username: fd.get("username"),
+              current_password: fd.get("current_password"),
+              new_password: fd.get("new_password"),
+              confirm_password: fd.get("confirm_password"),
+            }),
+          },
+          false,
+        );
+        err.innerHTML = `<div class="alert alert-success">${esc(t("password_change_then_login"))}</div>`;
+        setTimeout(() => renderLogin("login"), 1200);
+        return;
+      }
       const data = await api("/auth/login", {
         method: "POST",
         body: JSON.stringify({
@@ -737,10 +898,53 @@ async function renderLogin() {
         }),
       }, false);
       saveSession(data);
+      localStorage.setItem("metro_cart_auth_method", "password");
       const first = PAGE_ROUTES[data.granted_pages[0]] || "dashboard";
       navigate(first);
     } catch (ex) {
-      err.innerHTML = `<div class="alert alert-error">${esc(ex.message || t("invalid_login_analyst"))}</div>`;
+      err.innerHTML = `<div class="alert alert-error">${esc(ex.message || (isChange ? t("password_change_failed") : t("invalid_login_analyst")))}</div>`;
+    }
+  };
+}
+
+async function renderChangePassword() {
+  const ssoNote = localStorage.getItem("metro_cart_auth_method") === "sso"
+    ? `<div class="alert alert-info" style="margin-bottom:0.75rem">You are signed in with SSO. This change updates both the local Metro Cart analyst password and the matching SSO account password.</div>`
+    : "";
+  const main = `
+    <div class="card" style="max-width:520px">
+      <h2 style="margin-top:0">${esc(t("change_password"))}</h2>
+      <p class="subtitle">${esc(t("password_change_login_hint"))}</p>
+      ${ssoNote}
+      <div id="pw-status"></div>
+      <form id="account-password-form">
+        <div class="field"><label>${esc(t("current_password"))}</label><input name="current_password" type="password" required autocomplete="current-password" /></div>
+        <div class="field"><label>${esc(t("new_password"))}</label><input name="new_password" type="password" required autocomplete="new-password" /></div>
+        <div class="field"><label>${esc(t("confirm_new_password"))}</label><input name="confirm_password" type="password" required autocomplete="new-password" /></div>
+        <button type="submit" class="btn btn-primary">${esc(t("update_password"))}</button>
+      </form>
+    </div>
+  `;
+  document.getElementById("app").innerHTML = shell(main, "password");
+  bindShell();
+  document.getElementById("account-password-form").onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const status = document.getElementById("pw-status");
+    status.innerHTML = "";
+    try {
+      await api("/auth/change-password", {
+        method: "POST",
+        body: JSON.stringify({
+          current_password: fd.get("current_password"),
+          new_password: fd.get("new_password"),
+          confirm_password: fd.get("confirm_password"),
+        }),
+      });
+      status.innerHTML = `<div class="alert alert-success">${esc(t("password_change_success"))}</div>`;
+      e.target.reset();
+    } catch (ex) {
+      status.innerHTML = `<div class="alert alert-error">${esc(ex.message || t("password_change_failed"))}</div>`;
     }
   };
 }
@@ -1269,6 +1473,7 @@ function adminTabIcon(kind) {
     users: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>`,
     chart: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 4-6"/></svg>`,
     rules: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V7l8-4z"/><path d="M9 12l2 2 4-4"/></svg>`,
+    audit: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>`,
   };
   return icons[kind] || icons.queue;
 }
@@ -1895,7 +2100,7 @@ async function renderAdminUsers(body) {
             <select name="role">
               <option>Fraud Analyst</option>
               <option>Senior Fraud Analyst</option>
-              <option>Admin</option>
+              ${session.analyst.role === "Admin" ? "<option>Admin</option>" : ""}
             </select>
           </div>
           <label class="form-confirm" for="create-confirm">
@@ -1954,6 +2159,7 @@ async function renderAdminUsers(body) {
     if (!proceed) return;
 
     try {
+      payload.actor_role = session.analyst.role;
       await api("/create-analyst", { method: "POST", body: JSON.stringify(payload) });
       adminStatus(`Analyst ${payload.employee_name} created.`);
       e.target.reset();
@@ -1978,9 +2184,11 @@ async function renderAdminUsers(body) {
 
 async function renderAdminAnalytics(body) {
   const summary = await api("/portal/analytics/summary");
+  const schedulerRes = await api("/portal/scheduler-status");
   const k = summary.kpis;
   const recent = summary.recent_orders || [];
   const trend = summary.orders_over_time || [];
+  const scheduler = schedulerRes.scheduler || null;
   let recentPage = 1;
 
   function recentRowsHtml(pageInfo) {
@@ -2042,6 +2250,54 @@ async function renderAdminAnalytics(body) {
         </div>
       </div>
     </div>
+    ${scheduler ? `
+    <div class="card admin-feature-card" style="margin-bottom:1.25rem">
+      <div class="admin-card-head">
+        <div>
+          <h3 style="margin:0">Auto-Approval Scheduler</h3>
+          <p class="subtitle" style="margin:0.25rem 0 0">Background scheduler health and most recent run details</p>
+        </div>
+      </div>
+      <div class="overview-grid overview-grid-4">
+        <div class="stat-card admin-stat-lift">
+          <div>
+            <div class="stat-value">${esc(scheduler.running ? "Running" : "Stopped")}</div>
+            <div class="stat-label">Status</div>
+          </div>
+        </div>
+        <div class="stat-card admin-stat-lift">
+          <div>
+            <div class="stat-value">${Number(scheduler.run_count || 0).toLocaleString()}</div>
+            <div class="stat-label">Runs</div>
+          </div>
+        </div>
+        <div class="stat-card admin-stat-lift">
+          <div>
+            <div class="stat-value">${Number(scheduler.last_processed_count || 0).toLocaleString()}</div>
+            <div class="stat-label">Last Processed</div>
+          </div>
+        </div>
+        <div class="stat-card admin-stat-lift">
+          <div>
+            <div class="stat-value">${Number(scheduler.total_processed_count || 0).toLocaleString()}</div>
+            <div class="stat-label">Total Auto-Approved</div>
+          </div>
+        </div>
+      </div>
+      <div class="analytics-grid" style="margin-top:1rem">
+        <div class="card" style="padding:1rem">
+          <div><strong>Last finished:</strong> ${esc(formatIst(scheduler.last_finished_at))}</div>
+          <div style="margin-top:0.5rem"><strong>Last success:</strong> ${esc(formatIst(scheduler.last_success_at))}</div>
+          <div style="margin-top:0.5rem"><strong>Last failure:</strong> ${esc(formatIst(scheduler.last_failure_at))}</div>
+        </div>
+        <div class="card" style="padding:1rem">
+          <div><strong>Interval:</strong> every ${esc(String(scheduler.interval_seconds ?? "—"))}s</div>
+          <div style="margin-top:0.5rem"><strong>Failures:</strong> ${Number(scheduler.failure_count || 0).toLocaleString()}</div>
+          <div style="margin-top:0.5rem"><strong>Successes:</strong> ${Number(scheduler.success_count || 0).toLocaleString()}</div>
+        </div>
+      </div>
+      ${scheduler.last_error ? `<div class="alert alert-error" style="margin-top:1rem">${esc(scheduler.last_error)}</div>` : ""}
+    </div>` : ""}
     <div class="analytics-grid">
       <div class="card admin-feature-card">
         <div class="admin-card-head">
@@ -2289,6 +2545,32 @@ function describeRuleConfig(rule) {
   return `Triggers ${action} based on the ${type} detection logic configured for this rule.`;
 }
 
+/** UI-only editability matrix for Rule Configuration fields. */
+function ruleFieldEditability(rule, selectedAction) {
+  const isR001 = rule.rule_id === "R001";
+  const isBlacklist = String(rule.rule_name || "").toLowerCase().includes("blacklist");
+  const action = String(
+    isR001 ? "HOLD" : isBlacklist ? "REJECTED" : selectedAction || rule.action || "REVIEW",
+  ).toUpperCase();
+  const supportsThreshold =
+    ["VELOCITY", "BEHAVIORAL", "LINKAGE"].includes(rule.rule_type) && !isBlacklist && !isR001;
+  const supportsInterval =
+    ["VELOCITY", "BEHAVIORAL"].includes(rule.rule_type) && !isBlacklist && !isR001;
+  const actionUsesDelay = action === "HOLD" || action === "REVIEW";
+
+  return {
+    isR001,
+    isBlacklist,
+    action,
+    canEditAction: !isR001 && !isBlacklist,
+    canEditThreshold: supportsThreshold && action !== "PASS",
+    canEditInterval: supportsInterval && action !== "PASS",
+    canEditDelay: isR001 ? true : !isBlacklist && actionUsesDelay,
+    supportsThreshold,
+    supportsInterval,
+  };
+}
+
 async function renderAdminRules(body) {
   const data = await api("/portal/rules");
   const rules = data.rules || [];
@@ -2352,13 +2634,23 @@ async function renderAdminRules(body) {
     const r = rules.find((x) => x.rule_id === id);
     if (!r) return;
 
-    const isR001 = r.rule_id === "R001";
-    const isBlacklist = String(r.rule_name || "").toLowerCase().includes("blacklist");
-    const locked = isR001 || isBlacklist;
     const currentAction = String(r.action || "REVIEW").toUpperCase();
-    const lockedAction = isR001 ? "HOLD" : isBlacklist ? "REJECTED" : currentAction;
-    const requiresInterval = (["VELOCITY", "BEHAVIORAL"].includes(r.rule_type) || isR001) && !isBlacklist;
-    const requiresThreshold = ["VELOCITY", "BEHAVIORAL", "LINKAGE"].includes(r.rule_type) && !isBlacklist;
+    const flags = ruleFieldEditability(r, currentAction);
+    const {
+      isR001,
+      action: lockedAction,
+      canEditAction,
+      canEditThreshold,
+      canEditInterval,
+      canEditDelay,
+      supportsThreshold: requiresThreshold,
+      supportsInterval: requiresInterval,
+    } = flags;
+    const locked = !canEditAction;
+    const delayMinutes = Number(r.delay_minutes ?? (isR001 ? 180 : 60));
+    const delayHelp = canEditDelay
+      ? (t("delay_minutes_help") || "Review timeout before automatic approval (read by fraud engine from rule_master).")
+      : "Delay applies only to HOLD/REVIEW actions.";
 
     document.getElementById("rule-form").innerHTML = `
       <p id="rule-live-desc"><strong>Description:</strong> ${esc(describeRuleConfig({
@@ -2367,6 +2659,7 @@ async function renderAdminRules(body) {
       }))}</p>
       <p><strong>Detection Type:</strong> <code>${esc(r.rule_type)}</code></p>
       ${locked ? `<div class="alert alert-info">Action is locked to <strong>${esc(lockedAction)}</strong> for this rule.</div>` : ""}
+      ${isR001 ? `<div class="alert alert-info">${esc(t("delay_minutes_help") || "R001 uses Delay Minutes as the hold window (interval fields do not apply).")}</div>` : ""}
       <div class="field">
         <label>Rule Action</label>
         <select id="rule-action" ${locked ? "disabled" : ""}>
@@ -2380,22 +2673,27 @@ async function renderAdminRules(body) {
         <div class="field">
           <label>Threshold</label>
           ${requiresThreshold
-            ? `<input id="rule-threshold" type="number" min="0" step="1" value="${r.threshold_value ?? 0}" />`
+            ? `<input id="rule-threshold" type="number" min="0" step="1" value="${r.threshold_value ?? 0}" ${canEditThreshold ? "" : "disabled"} />`
             : `<p class="subtitle">N/A</p>`}
         </div>
         <div class="field">
           <label>Time Interval</label>
           ${requiresInterval
-            ? `<input id="rule-interval" type="number" min="1" step="1" value="${r.time_interval_value ?? 1}" />`
+            ? `<input id="rule-interval" type="number" min="1" step="1" value="${r.time_interval_value ?? 1}" ${canEditInterval ? "" : "disabled"} />`
             : `<p class="subtitle">N/A</p>`}
         </div>
         <div class="field">
           <label>Unit</label>
           ${requiresInterval
-            ? `<select id="rule-unit">${["MINUTE", "HOUR", "DAY", "WEEK"].map((u) =>
+            ? `<select id="rule-unit" ${canEditInterval ? "" : "disabled"}>${["MINUTE", "HOUR", "DAY", "WEEK"].map((u) =>
                 `<option value="${u}" ${(r.time_interval_unit || "MINUTE") === u ? "selected" : ""}>${u}</option>`).join("")}</select>`
             : `<p class="subtitle">N/A</p>`}
         </div>
+      </div>
+      <div class="field">
+        <label>${esc(t("delay_minutes"))}</label>
+        <input id="rule-delay" type="number" min="1" step="1" value="${delayMinutes}" ${canEditDelay ? "" : "disabled"} />
+        <p class="subtitle" id="rule-delay-help">${esc(delayHelp)}</p>
       </div>
       <button type="button" class="btn btn-primary" id="rule-save">Save Rule Changes</button>`;
 
@@ -2403,32 +2701,62 @@ async function renderAdminRules(body) {
       const action = locked
         ? lockedAction
         : (document.getElementById("rule-action")?.value || lockedAction);
+      const thresholdEl = document.getElementById("rule-threshold");
+      const intervalEl = document.getElementById("rule-interval");
+      const unitEl = document.getElementById("rule-unit");
+      const delayEl = document.getElementById("rule-delay");
       return {
         ...r,
         action,
-        threshold_value: requiresThreshold
-          ? Number(document.getElementById("rule-threshold").value)
+        threshold_value: requiresThreshold && thresholdEl
+          ? Number(thresholdEl.value)
           : r.threshold_value,
-        time_interval_value: requiresInterval
-          ? Number(document.getElementById("rule-interval").value)
+        time_interval_value: requiresInterval && intervalEl
+          ? Number(intervalEl.value)
           : r.time_interval_value,
-        time_interval_unit: requiresInterval
-          ? document.getElementById("rule-unit").value
+        time_interval_unit: requiresInterval && unitEl
+          ? unitEl.value
           : r.time_interval_unit,
+        delay_minutes: delayEl ? Number(delayEl.value) : delayMinutes,
       };
+    }
+
+    function applyFieldEditability(actionValue) {
+      const next = ruleFieldEditability(r, actionValue);
+      const thresholdEl = document.getElementById("rule-threshold");
+      const intervalEl = document.getElementById("rule-interval");
+      const unitEl = document.getElementById("rule-unit");
+      const delayEl = document.getElementById("rule-delay");
+      const delayHelpEl = document.getElementById("rule-delay-help");
+      if (thresholdEl) thresholdEl.disabled = !next.canEditThreshold;
+      if (intervalEl) intervalEl.disabled = !next.canEditInterval;
+      if (unitEl) unitEl.disabled = !next.canEditInterval;
+      if (delayEl) delayEl.disabled = !next.canEditDelay;
+      if (delayHelpEl) {
+        delayHelpEl.textContent = next.canEditDelay
+          ? (t("delay_minutes_help") || "Review timeout before automatic approval (read by fraud engine from rule_master).")
+          : "Delay applies only to HOLD/REVIEW actions.";
+      }
+      return next;
     }
 
     function syncActionUi() {
       const state = readFormState();
+      const next = applyFieldEditability(state.action);
       const help = document.getElementById("rule-action-help");
       const desc = document.getElementById("rule-live-desc");
-      if (help) help.textContent = RULE_ACTION_HELP[state.action] || "";
-      if (desc) desc.innerHTML = `<strong>Description:</strong> ${esc(describeRuleConfig(state))}`;
+      if (help) help.textContent = RULE_ACTION_HELP[next.action] || "";
+      if (desc) {
+        desc.innerHTML = `<strong>Description:</strong> ${esc(describeRuleConfig({
+          ...state,
+          action: next.action,
+        }))}`;
+      }
     }
 
     const actionEl = document.getElementById("rule-action");
     if (actionEl && !locked) actionEl.addEventListener("change", syncActionUi);
-    ["rule-threshold", "rule-interval", "rule-unit"].forEach((fid) => {
+    ["rule-threshold", "rule-interval", "rule-unit", "rule-delay"].forEach((fid) => {
       const el = document.getElementById(fid);
       if (el) el.addEventListener("input", syncActionUi);
       if (el) el.addEventListener("change", syncActionUi);
@@ -2436,19 +2764,24 @@ async function renderAdminRules(body) {
 
     document.getElementById("rule-save").addEventListener("click", async () => {
       const state = readFormState();
-      if (requiresThreshold && !(state.threshold_value >= 0)) {
+      const edit = ruleFieldEditability(r, state.action);
+      if (edit.canEditThreshold && !(state.threshold_value >= 0)) {
         return adminStatus("Threshold must be 0 or greater.", "error");
       }
-      if (requiresInterval && !(state.time_interval_value >= 1)) {
+      if (edit.canEditInterval && !(state.time_interval_value >= 1)) {
         return adminStatus("Time interval must be at least 1.", "error");
+      }
+      if (edit.canEditDelay && !(state.delay_minutes >= 1)) {
+        return adminStatus("Delay minutes must be at least 1.", "error");
       }
 
       const payload = {
         rule_id: r.rule_id,
-        action: state.action,
+        action: edit.action,
         threshold_value: requiresThreshold ? state.threshold_value : null,
         time_interval_value: requiresInterval ? state.time_interval_value : null,
         time_interval_unit: requiresInterval ? state.time_interval_unit : null,
+        delay_minutes: state.delay_minutes,
       };
 
       const confirmed = await confirmAction({
@@ -2456,7 +2789,8 @@ async function renderAdminRules(body) {
         message:
           `Apply action ${payload.action} to ${r.rule_name}.\n\n` +
           `${RULE_ACTION_HELP[payload.action]}\n\n` +
-          describeRuleConfig(state),
+          describeRuleConfig({ ...state, action: edit.action }) +
+          `\n\nDelay minutes: ${payload.delay_minutes}`,
         confirmLabel: "Yes, update rule",
       });
       if (!confirmed) return;
@@ -2972,8 +3306,10 @@ async function renderChatbot() {
 function bindShell() {
   bindLanguageToggle("lang-select", () => render());
   document.getElementById("logout-btn")?.addEventListener("click", () => {
-    clearSession();
-    navigate("login");
+    logoutFully();
+  });
+  document.getElementById("change-password-btn")?.addEventListener("click", () => {
+    navigate("password");
   });
 }
 
@@ -2985,13 +3321,15 @@ async function render() {
     return renderLogin();
   }
 
+  if (route === "password") return renderChangePassword();
+
   const page = ROUTE_PAGES[route];
   if (!page || !hasPage(page)) {
     const first = PAGE_ROUTES[session.granted_pages[0]];
     if (first) return navigate(first);
     document.getElementById("app").innerHTML = `<div class="login-wrap"><div class="login-card"><h2>${esc(t("no_page_access"))}</h2><p>${esc(t("contact_admin_access"))}</p>${languageToggleHtml({ id: "lang-select" })}<button class="btn btn-secondary" id="logout-btn" style="margin-top:1rem">${esc(t("log_out"))}</button></div></div>`;
     bindLanguageToggle("lang-select", () => render());
-    document.getElementById("logout-btn").onclick = () => { clearSession(); navigate("login"); };
+    document.getElementById("logout-btn").onclick = () => { logoutFully(); };
     return;
   }
 
@@ -3002,5 +3340,9 @@ async function render() {
 }
 
 window.addEventListener("hashchange", render);
-if (!location.hash) location.hash = session ? "#/dashboard" : "#/login";
-render();
+(async () => {
+  await consumeSsoParamsFromUrl();
+  await restoreSessionFromCookie();
+  if (!location.hash) location.hash = session ? "#/dashboard" : "#/login";
+  render();
+})();

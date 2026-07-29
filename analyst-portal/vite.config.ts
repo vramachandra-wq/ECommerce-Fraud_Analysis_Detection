@@ -4,6 +4,13 @@ import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  base: "/portal/",
+  build: {
+    // Opt-in publish target (.\start.ps1 -BuildPortal or npm run build).
+    // emptyOutDir false avoids wiping hand-maintained static assets by accident.
+    outDir: "../static/analyst-portal",
+    emptyOutDir: false,
+  },
   server: {
     port: 5173,
     proxy: {

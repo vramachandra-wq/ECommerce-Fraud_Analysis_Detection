@@ -3,7 +3,7 @@ import time
 import logging
 import httpx
 from groq import Groq, APIConnectionError, APITimeoutError, RateLimitError
-from config import GROQ_API_KEY
+from config import GROQ_API_KEY, is_groq_api_key_configured
 
 _client = None
 
@@ -11,7 +11,7 @@ def get_groq_client():
     global _client
 
     if _client is None:
-        if not GROQ_API_KEY:
+        if not is_groq_api_key_configured():
             return None
 
         # Create a custom HTTP client tailored for corporate networks/VPNs

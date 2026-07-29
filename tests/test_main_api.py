@@ -9,6 +9,7 @@ def test_root():
     response = client.get("/")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "message": "✅ Metro Cart FastAPI is running securely."
-    }
+    body = response.json()
+    assert "message" in body
+    assert body["analyst_portal"] == "/portal/"
+    assert body["customer_portal"] == "/shop/"

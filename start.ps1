@@ -1,6 +1,11 @@
-# Metro Cart — start PostgreSQL + FastAPI (analyst portal + customer shop).
+# Metro Cart — start PostgreSQL + Keycloak + FastAPI (analyst portal + customer shop).
 # Opens http://127.0.0.1:8000/portal/ and http://127.0.0.1:8000/shop/
 # Usage (from project root): .\start.ps1
+# Optional: .\start.ps1 -BuildPortal   # rebuild React into static/analyst-portal (destructive)
+
+param(
+    [switch]$BuildPortal
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -18,7 +23,6 @@ $PortalUrl = "$ApiBase/portal/"
 $ShopUrl = "$ApiBase/shop/"
 $HealthUrl = "$ApiBase/"
 $DocsUrl = "$ApiBase/docs"
-
 $ProjectUrls = @($PortalUrl, $ShopUrl)
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
@@ -163,6 +167,37 @@ function Initialize-Project {
     Write-Host "First-time project setup complete." -ForegroundColor Green
 }
 
+function Build-AnalystPortal {
+    if (-not $BuildPortal) {
+        Write-Host "Serving static analyst portal from static/analyst-portal/ (pass -BuildPortal to rebuild from React)." -ForegroundColor DarkGray
+        return
+    }
+
+    $portalDir = Join-Path $ProjectRoot "analyst-portal"
+    $packageJson = Join-Path $portalDir "package.json"
+    if (-not (Test-Path $packageJson)) { return }
+
+    $npm = Get-Command npm -ErrorAction SilentlyContinue
+    if (-not $npm) {
+        Write-Host "npm not found. Reusing previously built analyst portal assets." -ForegroundColor Yellow
+        return
+    }
+
+    Write-Step "Building analyst portal from React source into static/analyst-portal/..."
+    $nodeModules = Join-Path $portalDir "node_modules"
+    if (-not (Test-Path $nodeModules)) {
+        & $npm.Source install --prefix $portalDir
+        if ($LASTEXITCODE -ne 0) {
+            throw "npm install failed for analyst-portal."
+        }
+    }
+
+    & $npm.Source run build --prefix $portalDir
+    if ($LASTEXITCODE -ne 0) {
+        throw "npm run build failed for analyst-portal."
+    }
+}
+
 function Test-PortListening([int]$Port) {
     $match = netstat -ano | Select-String ":$Port\s" | Select-String "LISTENING"
     return $null -ne $match
@@ -245,6 +280,26 @@ function Get-DbPortFromEnv {
     return $defaultPort
 }
 
+function Get-EnvValue {
+    param(
+        [string]$Key,
+        [string]$Default = ""
+    )
+    $envPath = Join-Path $ProjectRoot ".env"
+    if (-not (Test-Path $envPath)) { return $Default }
+    foreach ($line in Get-Content $envPath) {
+        if ($line -match "^\s*$Key=(.+)$") {
+            return $Matches[1].Trim().Trim('"').Trim("'")
+        }
+    }
+    return $Default
+}
+
+$KeycloakPort = [int](Get-EnvValue -Key "KEYCLOAK_PORT" -Default "8080")
+$KeycloakRealm = Get-EnvValue -Key "KEYCLOAK_REALM" -Default "metro-cart"
+$KeycloakUrl = "http://127.0.0.1:$KeycloakPort"
+$KeycloakRealmUrl = "$KeycloakUrl/realms/$KeycloakRealm"
+
 function Wait-ForDatabasePort {
     param([int]$TimeoutSeconds = 60)
 
@@ -285,6 +340,28 @@ function Wait-ForDatabase {
     }
 
     throw "PostgreSQL did not become ready within $TimeoutSeconds seconds. Check: podman logs ecommerce_fraud"
+}
+
+function Wait-ForKeycloak {
+    param([int]$TimeoutSeconds = 120)
+
+    Write-Step "Waiting for Keycloak (SSO)..."
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        $status = podman inspect metro_cart_keycloak --format "{{.State.Health.Status}}" 2>$null
+        if ($status -eq "healthy") {
+            Write-Host "Keycloak container healthcheck is healthy." -ForegroundColor Green
+            return
+        }
+        if (Test-HttpOk $KeycloakRealmUrl) {
+            Write-Host "Keycloak realm is ready ($KeycloakRealmUrl)." -ForegroundColor Green
+            return
+        }
+        Start-Sleep -Seconds 3
+    }
+
+    Write-Host "Keycloak did not become ready within $TimeoutSeconds seconds." -ForegroundColor Yellow
+    Write-Host "Password login still works. Check: podman logs metro_cart_keycloak" -ForegroundColor Yellow
 }
 
 function Wait-ForHttp {
@@ -353,7 +430,9 @@ function Show-ProjectInfo {
     Write-Host "  Analyst portal:  $PortalUrl"
     Write-Host "  Customer shop:   $ShopUrl"
     Write-Host "  API docs:        $DocsUrl"
+    Write-Host "  Keycloak SSO:    $KeycloakUrl (realm metro-cart)"
     Write-Host ""
+    Write-Host "Analyst login (password or SSO): admin / admin123  |  analyst / secure123"
     Write-Host "Logs: $LogDir"
     Write-Host "Stop everything with: .\stop.ps1"
 }
@@ -408,10 +487,13 @@ if (-not (Test-ProjectReady)) {
     Initialize-Project
 }
 
-Write-Step "Ensuring PostgreSQL container is up..."
+Build-AnalystPortal
+
+Write-Step "Ensuring PostgreSQL + Keycloak containers are up..."
 Invoke-Compose -ComposeArgs @("-f", "podman-compose.yaml", "up", "-d")
 Wait-ForDatabase
 Wait-ForDatabasePort
+Wait-ForKeycloak
 
 Write-Step "Starting FastAPI..."
 $startedServices = Ensure-ApiService
