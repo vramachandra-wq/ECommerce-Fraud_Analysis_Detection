@@ -372,6 +372,18 @@ export const TRANSLATIONS = {
     "en": "Product",
     "th": "สินค้า"
   },
+  "order_items": {
+    "en": "Order items",
+    "th": "รายการในคำสั่งซื้อ"
+  },
+  "unit_price": {
+    "en": "Unit",
+    "th": "ต่อหน่วย"
+  },
+  "line_total": {
+    "en": "Line",
+    "th": "ยอดรายการ"
+  },
   "label_amount": {
     "en": "Amount",
     "th": "จำนวนเงิน"
@@ -1477,8 +1489,24 @@ export const TRANSLATIONS = {
     "th": "จัดการคิว สิทธิ์ กฎ และเอนทิตีความเสี่ยง"
   },
   "admin_tab_blurb_queue": {
-    "en": "Triage held and pending orders",
-    "th": "คัดกรองคำสั่งซื้อที่ระงับและรอตรวจสอบ"
+    "en": "Latest shop orders plus held/pending review triage",
+    "th": "คำสั่งซื้อล่าสุดจากการร้านค้า และคิวรอตรวจสอบ"
+  },
+  "latest_orders": {
+    "en": "Latest orders",
+    "th": "คำสั่งซื้อล่าสุด"
+  },
+  "latest_orders_hint": {
+    "en": "All shop checkouts (including APPROVED). Click an order ID to view line items.",
+    "th": "คำสั่งซื้อจากร้านค้าทั้งหมด (รวม APPROVED) คลิกรหัสคำสั่งเพื่อดูรายการสินค้า"
+  },
+  "queue_clear_approved_hint": {
+    "en": "Review queue is clear. Approved shop orders are listed under Latest orders above.",
+    "th": "คิวตรวจสอบว่าง คำสั่งที่อนุมัติแล้วอยู่ที่ Latest orders ด้านบน"
+  },
+  "order_not_in_review": {
+    "en": "This order is not in the review queue (already approved/rejected). Line items are shown above.",
+    "th": "คำสั่งนี้ไม่อยู่ในคิวตรวจสอบ (อนุมัติ/ปฏิเสธแล้ว) รายการสินค้าแสดงด้านบน"
   },
   "admin_tab_blurb_blacklists": {
     "en": "Block or clear IP, phone, email",

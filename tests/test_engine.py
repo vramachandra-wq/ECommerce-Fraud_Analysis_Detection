@@ -180,8 +180,9 @@ def test_pass_rule_delay_does_not_inflate_hold_timeout():
 
     cursor = MagicMock()
     # R001 is tier 1 so it alone decides status; R002 (PASS) is only read in the delay loop.
+    # R001 hold window is fixed at 180 minutes regardless of the DB row value.
     cursor.fetchone.side_effect = [
-        ("HOLD", 60),   # R001 status/delay metadata
+        ("HOLD", 60),   # R001 status/delay metadata (forced to 180)
         ("PASS", 999),  # R002 delay metadata
     ]
 
@@ -192,7 +193,7 @@ def test_pass_rule_delay_does_not_inflate_hold_timeout():
         result = evaluate_order(cursor, {})
 
     assert result["order_status"] == "ON_HOLD"
-    assert result["delay_minutes"] == 60
+    assert result["delay_minutes"] == 180
 
 
 def test_pass_only_has_zero_delay():
@@ -207,3 +208,96 @@ def test_pass_only_has_zero_delay():
     assert result["order_status"] == "APPROVED"
     assert result["delay_minutes"] == 0
     assert result["is_fraud"] is False
+
+
+def test_multi_item_product_rule_only_on_matching_line():
+    """R001 runs per line; non-iPhone lines do not contribute an R001 hit."""
+    from fraud_engine.engine import evaluate_order_with_items
+
+    def r001(cursor, ctx):
+        name = (ctx.get("product_name") or "").lower()
+        if "iphone 16" in name:
+            return True, "R001: iPhone 16 order — held"
+        return False, None
+
+    def r007(cursor, ctx):
+        return False, None
+
+    cursor = _cursor_with_rule_meta("HOLD", 180)
+
+    with patch(
+        "fraud_engine.engine.RULE_CHECKS",
+        [("R001", r001), ("R007", r007)],
+    ), patch(
+        "fraud_engine.engine.PRODUCT_SCOPED_RULE_IDS",
+        frozenset({"R001"}),
+    ):
+        result = evaluate_order_with_items(
+            cursor,
+            {"program_id": "P2", "user_id": "U1", "email": "a@b.c",
+             "phone_number": "1", "ip_address": "1.1.1.1", "device_id": "D1",
+             "address": "x", "order_timestamp": None},
+            [
+                {
+                    "product_id": "P-IPHONE",
+                    "product_name": "iPhone 16 Pro",
+                    "category": "Electronics",
+                    "quantity": 1,
+                    "line_amount": 1000,
+                },
+                {
+                    "product_id": "P-SAMSUNG",
+                    "product_name": "Samsung Galaxy S24",
+                    "category": "Electronics",
+                    "quantity": 1,
+                    "line_amount": 800,
+                },
+            ],
+        )
+
+    assert result["order_status"] == "ON_HOLD"
+    assert result["delay_minutes"] == 180
+    assert len(result["triggered_rules"]) == 1
+    assert "iPhone 16 Pro" in result["flagged_reason"]
+    assert "Samsung" not in (result["flagged_reason"] or "")
+    assert len(result["item_results"]) == 2
+    assert result["item_results"][0]["order_status"] == "ON_HOLD"
+    assert result["item_results"][1]["order_status"] == "APPROVED"
+
+
+def test_multi_item_order_level_rule_runs_once():
+    """Velocity/blacklist-style rules fire once for the basket, not per line."""
+    from fraud_engine.engine import evaluate_order_with_items
+
+    calls = {"r003": 0}
+
+    def r003(cursor, ctx):
+        calls["r003"] += 1
+        return True, "R003: IP Velocity"
+
+    def r001(cursor, ctx):
+        return False, None
+
+    cursor = _cursor_with_rule_meta("REVIEW", 60)
+
+    with patch(
+        "fraud_engine.engine.RULE_CHECKS",
+        [("R001", r001), ("R003", r003)],
+    ), patch(
+        "fraud_engine.engine.PRODUCT_SCOPED_RULE_IDS",
+        frozenset({"R001"}),
+    ):
+        result = evaluate_order_with_items(
+            cursor,
+            {"program_id": "P1", "user_id": "U1", "email": "a@b.c",
+             "phone_number": "1", "ip_address": "9.9.9.9", "device_id": "D1",
+             "address": "x", "order_timestamp": None},
+            [
+                {"product_id": "A", "product_name": "A", "quantity": 1, "line_amount": 10},
+                {"product_id": "B", "product_name": "B", "quantity": 1, "line_amount": 20},
+            ],
+        )
+
+    assert calls["r003"] == 1
+    assert result["order_status"] == "PENDING_REVIEW"
+    assert len(result["triggered_rules"]) == 1

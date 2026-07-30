@@ -48,22 +48,34 @@ def get_queue_orders(cursor: Any) -> pd.DataFrame:
 
 
 def get_order_detail(cursor: Any, order_id: str) -> Optional[Dict[str, Any]]:
-    """Fetches details for a specific order."""
+    """Fetches details for a specific order, including line items when present."""
+    from database.order_items import enrich_order_with_items
+
     cursor.execute("SELECT * FROM master.orders WHERE order_id = %s", (order_id,))
     row = cursor.fetchone()
-    return _row_to_dict(cursor, row) if row else None
+    if not row:
+        return None
+    return enrich_order_with_items(cursor, _row_to_dict(cursor, row))
 
 
 def get_recent_orders(cursor: Any, limit: int = 100) -> pd.DataFrame:
-    """Fetches recent orders for the analytics dashboard."""
+    """Fetches recent orders for admin analytics / latest-orders panels."""
     cursor.execute(
         """
         SELECT
-            order_id, user_id, customer_name, product_name, quantity,
-            amount, order_status, delay_minutes, is_fraud,
-            order_timestamp, order_approved_at, order_rejected_at
-        FROM master.orders
-        ORDER BY order_timestamp DESC
+            o.order_id, o.user_id, o.customer_name, o.product_name, o.quantity,
+            o.amount, o.order_status, o.delay_minutes, o.is_fraud,
+            o.order_timestamp, o.order_approved_at, o.order_rejected_at,
+            COALESCE(
+                (
+                    SELECT COUNT(*)::int
+                    FROM master.order_items oi
+                    WHERE oi.order_id = o.order_id
+                ),
+                0
+            ) AS item_count
+        FROM master.orders o
+        ORDER BY o.order_timestamp DESC
         LIMIT %s
         """,
         (limit,),

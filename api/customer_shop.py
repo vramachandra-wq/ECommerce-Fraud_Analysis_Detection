@@ -17,8 +17,14 @@ from auth.customer_auth import (
     reset_customer_password,
 )
 from config import DB_CONFIG
+from database.order_items import (
+    ensure_order_items_table,
+    fetch_order_items,
+    header_summary,
+    insert_order_items,
+)
 from ui.i18n import TRANSLATIONS
-from fraud_engine.engine import evaluate_order
+from fraud_engine.engine import evaluate_order_with_items
 from utils.order_utils import calculate_total, generate_order_id
 from utils.queries import list_devices, list_products, list_programs
 from utils.time_utils import utcnow_naive
@@ -46,9 +52,21 @@ class ResetPasswordRequest(BaseModel):
     confirm_password: str
 
 
-class PlaceOrderRequest(BaseModel):
+class CartItemIn(BaseModel):
     product_id: str
     quantity: int = Field(ge=1)
+
+
+class PlaceOrderRequest(BaseModel):
+    """Place one customer order.
+
+    Preferred: ``items`` with one or more products.
+    Legacy (still supported): single ``product_id`` + ``quantity``.
+    """
+
+    items: Optional[List[CartItemIn]] = None
+    product_id: Optional[str] = None
+    quantity: Optional[int] = Field(default=None, ge=1)
     program_id: str
     device_id: str
     ip_address: str
@@ -231,6 +249,28 @@ def shop_catalog(_customer: Dict[str, Any] = Depends(get_current_customer)):
     return {"products": products, "programs": programs, "devices": devices}
 
 
+def _resolve_cart_items(body: PlaceOrderRequest) -> List[CartItemIn]:
+    """Prefer items[]; fall back to legacy product_id + quantity. Merge duplicate SKUs."""
+    raw: List[CartItemIn] = list(body.items or [])
+    if not raw:
+        if body.product_id and body.quantity:
+            raw = [CartItemIn(product_id=body.product_id, quantity=body.quantity)]
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Provide items[{product_id, quantity}, ...] or product_id + quantity",
+            )
+
+    merged: Dict[str, int] = {}
+    for item in raw:
+        pid = (item.product_id or "").strip()
+        if not pid:
+            raise HTTPException(status_code=400, detail="Each item needs a product_id")
+        merged[pid] = merged.get(pid, 0) + int(item.quantity)
+
+    return [CartItemIn(product_id=pid, quantity=qty) for pid, qty in merged.items()]
+
+
 @router.post("/shop/orders")
 def shop_place_order(
     body: PlaceOrderRequest,
@@ -242,6 +282,7 @@ def shop_place_order(
     zip_code = body.zip_code.strip()
     country = (body.country or "India").strip() or "India"
     ip_address = body.ip_address.strip()
+    cart_items = _resolve_cart_items(body)
 
     if not street or not city or not state or not zip_code:
         raise HTTPException(status_code=400, detail="Complete delivery address is required")
@@ -262,29 +303,54 @@ def shop_place_order(
     try:
         with psycopg2.connect(**DB_CONFIG) as conn:
             with conn.cursor() as cur:
-                # Resolve product
-                cur.execute(
-                    """
-                    SELECT product_id, product_name, category, price
-                    FROM master.products
-                    WHERE product_id = %s
-                    """,
-                    (body.product_id,),
-                )
-                prow = cur.fetchone()
-                if not prow:
-                    raise HTTPException(status_code=400, detail="Invalid product")
-                product_id, product_name, category, price = prow
-                amount = calculate_total(price, body.quantity)
+                ensure_order_items_table(cur)
+
+                # Resolve every cart line against master.products
+                lines: List[Dict[str, Any]] = []
+                for item in cart_items:
+                    cur.execute(
+                        """
+                        SELECT product_id, product_name, category, price
+                        FROM master.products
+                        WHERE product_id = %s
+                        """,
+                        (item.product_id,),
+                    )
+                    prow = cur.fetchone()
+                    if not prow:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Invalid product: {item.product_id}",
+                        )
+                    product_id, product_name, category, price = prow
+                    qty = int(item.quantity)
+                    lines.append(
+                        {
+                            "product_id": product_id,
+                            "product_name": product_name,
+                            "category": category,
+                            "quantity": qty,
+                            "unit_price": float(price),
+                            "line_amount": calculate_total(price, qty),
+                        }
+                    )
+
+                summary = header_summary(lines)
+                product_id = summary["product_id"]
+                product_name = summary["product_name"]
+                category = summary["category"]
+                quantity = summary["quantity"]
+                amount = summary["amount"]
 
                 order_id = generate_order_id(cur)
-                ctx = {
+                # Per-item product rules + once-per-order velocity/blacklist, then roll up.
+                base_ctx = {
                     "user_id": customer["user_id"],
                     "program_id": body.program_id,
                     "product_id": product_id,
                     "product_name": product_name,
                     "category": category,
-                    "quantity": int(body.quantity),
+                    "quantity": int(quantity),
                     "amount": amount,
                     "ip_address": ip_address,
                     "device_id": body.device_id,
@@ -293,10 +359,20 @@ def shop_place_order(
                     "address": formatted_address,
                     "order_timestamp": order_timestamp,
                 }
-                disposition = evaluate_order(cur, ctx)
+                disposition = evaluate_order_with_items(cur, base_ctx, lines)
                 status = disposition["order_status"]
                 order_approved_at = order_timestamp if status == "APPROVED" else None
                 order_rejected_at = order_timestamp if status == "REJECTED" else None
+
+                # Persist per-line rule outcomes onto order_items rows.
+                by_product = {
+                    str(ir.get("product_id")): ir
+                    for ir in (disposition.get("item_results") or [])
+                }
+                for line in lines:
+                    ir = by_product.get(str(line.get("product_id"))) or {}
+                    line["line_status"] = ir.get("order_status") or status
+                    line["flagged_reason"] = ir.get("flagged_reason")
 
                 cur.execute(
                     """
@@ -322,7 +398,7 @@ def shop_place_order(
                         product_id,
                         category,
                         product_name,
-                        int(body.quantity),
+                        int(quantity),
                         amount,
                         ip_address,
                         body.device_id,
@@ -344,6 +420,8 @@ def shop_place_order(
                         order_rejected_at,
                     ),
                 )
+
+                insert_order_items(cur, order_id, lines)
 
                 rules: List[Dict[str, str]] = disposition.get("triggered_rules") or []
                 if rules:
@@ -374,11 +452,21 @@ def shop_place_order(
                     details={
                         "status": status,
                         "amount": amount,
+                        "item_count": len(lines),
                         "via": "shop",
                         "rules": [r.get("rule_id") for r in rules],
+                        "item_rule_status": [
+                            {
+                                "product_id": ir.get("product_id"),
+                                "order_status": ir.get("order_status"),
+                                "rules": [r.get("rule_id") for r in (ir.get("triggered_rules") or [])],
+                            }
+                            for ir in (disposition.get("item_results") or [])
+                        ],
                     },
                     request_path="/shop/orders",
                 )
+                saved_items = fetch_order_items(cur, order_id)
     except HTTPException:
         raise
     except Exception as exc:
@@ -390,6 +478,82 @@ def shop_place_order(
         "order_status": status,
         "amount": amount,
         "product_name": product_name,
-        "quantity": int(body.quantity),
+        "quantity": int(quantity),
+        "item_count": len(saved_items),
+        "items": saved_items,
         "flagged_reason": disposition.get("flagged_reason"),
+        "item_results": disposition.get("item_results") or [],
     }
+
+
+@router.get("/shop/orders/{order_id}")
+def shop_get_order(
+    order_id: str,
+    customer: Dict[str, Any] = Depends(get_current_customer),
+):
+    """Fetch one of the current customer's orders including line items (Step A verify)."""
+    oid = (order_id or "").strip()
+    if not oid:
+        raise HTTPException(status_code=400, detail="order_id required")
+
+    try:
+        with psycopg2.connect(**DB_CONFIG) as conn:
+            with conn.cursor() as cur:
+                ensure_order_items_table(cur)
+                cur.execute(
+                    """
+                    SELECT order_id, user_id, product_id, product_name, category,
+                           quantity, amount, order_status, flagged_reason, order_timestamp
+                    FROM master.orders
+                    WHERE order_id = %s
+                    """,
+                    (oid,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    raise HTTPException(status_code=404, detail="Order not found")
+                cols = [
+                    "order_id",
+                    "user_id",
+                    "product_id",
+                    "product_name",
+                    "category",
+                    "quantity",
+                    "amount",
+                    "order_status",
+                    "flagged_reason",
+                    "order_timestamp",
+                ]
+                order = dict(zip(cols, row))
+                if order["user_id"] != customer["user_id"]:
+                    raise HTTPException(status_code=404, detail="Order not found")
+                order["amount"] = float(order["amount"]) if order["amount"] is not None else 0.0
+                order["quantity"] = int(order["quantity"] or 0)
+                if order.get("order_timestamp") is not None:
+                    order["order_timestamp"] = order["order_timestamp"].isoformat()
+                items = fetch_order_items(cur, oid)
+                # Backfill: older single-product orders may have no order_items rows yet.
+                if not items and order.get("product_id"):
+                    items = [
+                        {
+                            "order_item_id": None,
+                            "line_no": 1,
+                            "product_id": order["product_id"],
+                            "product_name": order["product_name"],
+                            "category": order["category"],
+                            "quantity": order["quantity"],
+                            "unit_price": (
+                                round(order["amount"] / order["quantity"], 2)
+                                if order["quantity"]
+                                else order["amount"]
+                            ),
+                            "line_amount": order["amount"],
+                        }
+                    ]
+                order["items"] = items
+                order["item_count"] = len(items)
+                return order
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to load order: {exc}") from exc

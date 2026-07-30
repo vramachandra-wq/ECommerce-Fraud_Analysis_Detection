@@ -3,7 +3,7 @@ import {
   curSym,
   languageToggleHtml,
   bindLanguageToggle,
-} from "./i18n.js?v=56";
+} from "./i18n.js?v=59";
 
 const PAGE_LABEL_KEYS = {
   ADMIN_PANEL: "nav_admin_panel",
@@ -368,12 +368,17 @@ function queueRowHtml(o, { selected, pickable }) {
     ? `<td><button type="button" class="btn btn-ghost aq-pick" data-id="${esc(o.order_id)}" style="padding:0;color:var(--accent)">${esc(o.order_id)}</button></td>`
     : `<td>${esc(o.order_id)}</td>`;
   const placed = formatUtc(o.tagged_timestamp || o.order_timestamp);
+  const itemCount = Number(o.item_count || 0);
+  const productCell =
+    itemCount > 1
+      ? `<td><span class="item-count-pill">${esc(itemCount)} items</span> ${esc(o.product_name)}</td>`
+      : `<td>${esc(o.product_name)}</td>`;
   return `
     <tr data-id="${esc(o.order_id)}" class="${o.is_overdue ? "row-overdue" : ""}">
       <td><input type="checkbox" class="q-check" data-id="${esc(o.order_id)}" ${selected.has(o.order_id) ? "checked" : ""} /></td>
       ${pickCell}
       <td>${esc(o.customer_name)}</td>
-      <td>${esc(o.product_name)}</td>
+      ${productCell}
       <td>${money(o.amount)}</td>
       <td>${badge(o.order_status)}</td>
       <td>${esc(o.delay_minutes ?? "—")}m</td>
@@ -502,6 +507,55 @@ function blacklistSecurityHtml(type, value, entry, prefix) {
     </details>`;
 }
 
+function orderItemsHtml(order) {
+  const items = Array.isArray(order?.items) ? order.items : [];
+  if (!items.length) {
+    return `<p><strong>${esc(t("label_product") || "Product")}:</strong> ${esc(order.product_name)} x${esc(order.quantity)}</p>`;
+  }
+  const rows = items
+    .map(
+      (item) => `
+      <tr>
+        <td>${esc(item.line_no ?? "")}</td>
+        <td>
+          <div class="inv-item-name">${esc(item.product_name)}</div>
+          <div class="inv-item-meta">${esc(item.category || "—")} · ${esc(item.product_id)}</div>
+          ${item.flagged_reason ? `<div class="inv-item-reason">${esc(item.flagged_reason)}</div>` : ""}
+        </td>
+        <td>${esc(item.quantity)}</td>
+        <td>${money(item.unit_price)}</td>
+        <td>${money(item.line_amount)}</td>
+        <td>${item.line_status ? badge(item.line_status) : "—"}</td>
+      </tr>`,
+    )
+    .join("");
+  const rules = Array.isArray(order?.triggered_rules) ? order.triggered_rules : [];
+  const rulesHtml = rules.length
+    ? `<div class="inv-rule-hits">
+        <p><strong>${esc(t("triggered_rules") || "Triggered rules")}:</strong></p>
+        <ul>${rules.map((r) => `<li><code>${esc(r.rule_id)}</code> — ${esc(r.rule_description || r.rule_name || "")}</li>`).join("")}</ul>
+      </div>`
+    : "";
+  return `
+    <p><strong>${esc(t("order_items") || "Items")}:</strong> ${esc(items.length)}</p>
+    <div class="table-scroll inv-items-wrap">
+      <table class="inv-items-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>${esc(t("label_product") || "Product")}</th>
+            <th>${esc(t("quantity") || "Qty")}</th>
+            <th>${esc(t("unit_price") || "Unit")}</th>
+            <th>${esc(t("line_total") || "Line")}</th>
+            <th>${esc(t("col_status") || "Status")}</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    ${rulesHtml}`;
+}
+
 function orderInvestigationHtml({
   order,
   blacklists = {},
@@ -544,7 +598,7 @@ function orderInvestigationHtml({
         </div>
         <div>
           <h4>${esc(t("order_details"))}</h4>
-          <p><strong>${esc(t("label_product") || "Product")}:</strong> ${esc(order.product_name)} x${esc(order.quantity)}</p>
+          ${orderItemsHtml(order)}
           <p><strong>${esc(t("label_amount") || "Amount")}:</strong> ${money(order.amount)}</p>
           <p><strong>${esc(t("ip_address") || "IP Address")}:</strong> ${esc(displayPii(order.ip_address, "ip") || "—")}${bl.ip ? ` ${esc(t("blacklisted_suffix"))}` : ""}</p>
           <p><strong>${esc(t("label_device") || "Device")}:</strong> ${esc(order.device_id || "—")}</p>
@@ -561,7 +615,9 @@ function orderInvestigationHtml({
         ${blacklistSecurityHtml("phone", order.phone_number, bl.phone, prefix)}
         ${blacklistSecurityHtml("email", order.email, bl.email, prefix)}
       </div>
-      <h3 class="inv-decision-title">${esc(t("analyst_decision"))}</h3>
+      ${
+        ["ON_HOLD", "PENDING_REVIEW"].includes(String(order.order_status || ""))
+          ? `<h3 class="inv-decision-title">${esc(t("analyst_decision"))}</h3>
       <div class="inv-decision">
         <div class="field">
           <label>${esc(t("review_comments"))}</label>
@@ -573,7 +629,9 @@ function orderInvestigationHtml({
           <button type="button" class="btn btn-fraud" id="${prefix}-fraud">${esc(t("reject_order_fraud"))}</button>
         </div>
         <div id="${prefix}-status"></div>
-      </div>
+      </div>`
+          : `<div class="alert alert-info">${esc(t("order_not_in_review") || "This order is not in the review queue (already approved/rejected). Line items are shown above.")}</div>`
+      }
     </div>`;
 }
 
@@ -1576,16 +1634,26 @@ async function renderAdminQueue(body) {
   const data = await api("/portal/queue");
   let orders = data.orders || [];
   const m = data.metrics || {};
+  let recent = [];
+  try {
+    const recentRes = await api("/portal/orders/recent?limit=50");
+    recent = recentRes.orders || [];
+  } catch {
+    recent = [];
+  }
   let selected = new Set();
-  let activeId = orders[0]?.order_id || "";
+  let activeId = orders[0]?.order_id || recent[0]?.order_id || "";
   let reviewComments = "";
   let queuePage = 1;
+  let recentPage = 1;
 
   async function paintQueue() {
     const pageInfo = queuePageSlice(orders, queuePage);
     queuePage = pageInfo.page;
     const pageRows = pageInfo.rows;
     const pageIds = pageRows.map((o) => o.order_id);
+    const recentPageInfo = queuePageSlice(recent, recentPage);
+    recentPage = recentPageInfo.page;
 
     body.innerHTML = `
       ${sync.auto_approved ? `<div class="alert alert-info">${esc(t("auto_approved_hold", { n: sync.auto_approved }))}</div>` : ""}
@@ -1595,11 +1663,51 @@ async function renderAdminQueue(body) {
         <div class="stat-card admin-stat-lift"><div class="stat-icon navy">${overviewIcon("mic")}</div><div><div class="stat-value">${m.on_hold || 0}</div><div class="stat-label">${esc(t("on_hold"))}</div></div></div>
         <div class="stat-card admin-stat-lift"><div class="stat-icon pink">${overviewIcon("bag")}</div><div><div class="stat-value">${m.backlog || 0}</div><div class="stat-label">${esc(t("backlog_overdue_label"))}</div></div></div>
       </div>
+
+      <div class="card" style="margin-bottom:1.25rem">
+        <div class="section-head" style="margin-bottom:0.75rem">
+          <h3 style="margin:0">${esc(t("latest_orders") || "Latest orders")}</h3>
+          <p class="subtitle" style="margin:0">${esc(t("latest_orders_hint") || "All shop checkouts (including APPROVED). Click an order ID to view line items.")}</p>
+        </div>
+        ${
+          recent.length
+            ? `<div class="table-scroll"><table>
+            <thead>
+              <tr>
+                <th>Order</th><th>Customer</th><th>Product</th><th>Items</th><th>Amount</th><th>Status</th><th>Placed</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${recentPageInfo.rows
+                .map((r) => {
+                  const itemCount = Number(r.item_count || 0);
+                  const productCell =
+                    itemCount > 1
+                      ? `<span class="item-count-pill">${esc(itemCount)} items</span> ${esc(r.product_name)}`
+                      : esc(r.product_name);
+                  return `<tr class="${r.order_id === activeId ? "row-active" : ""}">
+                  <td><button type="button" class="btn btn-ghost ao-pick" data-id="${esc(r.order_id)}" style="padding:0;color:var(--accent)">${esc(r.order_id)}</button></td>
+                  <td>${esc(r.customer_name)}</td>
+                  <td>${productCell}</td>
+                  <td>${esc(itemCount || r.quantity || "—")}</td>
+                  <td>${money(r.amount)}</td>
+                  <td>${badge(r.order_status)}</td>
+                  <td>${esc(formatUtc(r.order_timestamp))}</td>
+                </tr>`;
+                })
+                .join("")}
+            </tbody>
+          </table></div>
+          ${pagerHtml({ ...recentPageInfo, total: recent.length, prefix: "ao-latest" })}`
+            : `<div class="alert alert-warning">${esc(t("no_recent_orders") || "No recent orders found.")}</div>`
+        }
+      </div>
+
       ${backlogCardHtml(orders, m)}
       <div class="card">
         <div class="section-head" style="margin-bottom:0.75rem">
           <h3 style="margin:0">${esc(t("review_queue"))}</h3>
-          <p class="subtitle" style="margin:0">${orders.length} total · ${QUEUE_PAGE_SIZE} rows per page · delay from rule_master</p>
+          <p class="subtitle" style="margin:0">${orders.length} total · ${QUEUE_PAGE_SIZE} rows per page · ON_HOLD / PENDING_REVIEW only</p>
         </div>
         ${orders.length ? `
           <table>
@@ -1615,7 +1723,7 @@ async function renderAdminQueue(body) {
             </tbody>
           </table>
           ${pagerHtml({ ...pageInfo, total: orders.length, prefix: "aq" })}
-        ` : `<div class="alert alert-success">Queue is clear.</div>`}
+        ` : `<div class="alert alert-success">${esc(t("queue_clear_approved_hint") || "Review queue is clear. Approved shop orders are listed under Latest orders above.")}</div>`}
       </div>
       <div class="card ${selected.size ? "" : "hidden"}" id="aq-batch">
         <h3 id="aq-batch-title">${esc(t("batch_actions", { n: selected.size }))}</h3>
@@ -1669,11 +1777,20 @@ async function renderAdminQueue(body) {
       });
     });
 
-    body.querySelectorAll(".aq-pick").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        activeId = btn.dataset.id;
-        loadDetail();
+    const pickOrder = (id) => {
+      activeId = id;
+      reviewComments = "";
+      loadDetail();
+      body.querySelectorAll(".ao-pick").forEach((b) => {
+        b.closest("tr")?.classList.toggle("row-active", b.dataset.id === activeId);
       });
+    };
+
+    body.querySelectorAll(".aq-pick").forEach((btn) => {
+      btn.addEventListener("click", () => pickOrder(btn.dataset.id));
+    });
+    body.querySelectorAll(".ao-pick").forEach((btn) => {
+      btn.addEventListener("click", () => pickOrder(btn.dataset.id));
     });
 
     document.querySelectorAll("#aq-pager .pager-btn").forEach((btn) => {
@@ -1681,6 +1798,15 @@ async function renderAdminQueue(body) {
         const next = Number(btn.dataset.page);
         if (!next || next < 1 || next > pageInfo.totalPages || next === queuePage) return;
         queuePage = next;
+        paintQueue();
+      });
+    });
+
+    document.querySelectorAll("#ao-latest-pager .pager-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const next = Number(btn.dataset.page);
+        if (!next || next < 1 || next > recentPageInfo.totalPages || next === recentPage) return;
+        recentPage = next;
         paintQueue();
       });
     });
@@ -1780,13 +1906,16 @@ async function renderAdminQueue(body) {
       const order = detail.order;
       const bl = detail.blacklists || {};
       const timing = detail.timing || orders.find((o) => o.order_id === activeId) || {};
+      const optionSource = orders.length
+        ? orders
+        : recent.map((r) => ({ order_id: r.order_id, is_overdue: false }));
       detailEl.innerHTML = orderInvestigationHtml({
         order,
         blacklists: bl,
         timing,
         comments: reviewComments,
         prefix: "aq",
-        orderOptions: orders,
+        orderOptions: optionSource,
         selectedId: activeId,
       });
       await bindOrderInvestigation({
@@ -1811,9 +1940,17 @@ async function renderAdminQueue(body) {
     const fresh = await api("/portal/queue");
     orders = fresh.orders || [];
     Object.assign(m, fresh.metrics || {});
-    if (!orders.find((o) => o.order_id === activeId)) activeId = orders[0]?.order_id || "";
+    try {
+      const recentRes = await api("/portal/orders/recent?limit=50");
+      recent = recentRes.orders || [];
+    } catch {
+      recent = [];
+    }
+    if (!orders.find((o) => o.order_id === activeId) && !recent.find((o) => o.order_id === activeId)) {
+      activeId = orders[0]?.order_id || recent[0]?.order_id || "";
+    }
     queuePage = Math.min(queuePage, queuePageCount(orders.length));
-    // Drop selected IDs that no longer exist
+    recentPage = Math.min(recentPage, queuePageCount(recent.length));
     selected = new Set([...selected].filter((id) => orders.some((o) => o.order_id === id)));
     await paintQueue();
   }
@@ -2196,7 +2333,8 @@ async function renderAdminAnalytics(body) {
       return `<tr><td colspan="6">No recent orders</td></tr>`;
     }
     return pageInfo.rows.map((r) => `<tr>
-      <td>${esc(r.order_id)}</td><td>${esc(r.customer_name)}</td><td>${esc(r.product_name)}</td>
+      <td>${esc(r.order_id)}</td><td>${esc(r.customer_name)}</td>
+      <td>${Number(r.item_count) > 1 ? `<span class="item-count-pill">${esc(r.item_count)} items</span> ` : ""}${esc(r.product_name)}</td>
       <td>${money(r.amount)}</td><td>${badge(r.order_status)}</td><td>${esc(formatUtc(r.order_timestamp))}</td>
     </tr>`).join("");
   }

@@ -1,21 +1,23 @@
 /**
- * Metro Cart Customer Portal — same Matx shell platform as analyst portal.
- * Features: place order, confirmation, account, forgot/change password.
+ * Metro Cart Customer Portal — Matx shell + multi-item cart checkout.
+ * Flow: Shop (add to cart) → Cart (uncheck / qty) → Place selected → Confirmation.
  */
 import {
   t,
   curSym,
   languageToggleHtml,
   bindLanguageToggle,
-} from "./i18n.js";
+} from "./i18n.js?v=28";
 
 const NAV = [
-  { route: "order", labelKey: "shop_place_order", icon: "order" },
+  { route: "order", labelKey: "shop_browse", icon: "order" },
+  { route: "cart", labelKey: "shop_cart", icon: "cart" },
   { route: "account", labelKey: "shop_account", icon: "account" },
 ];
 
 const NAV_ICONS = {
   order: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6h15l-1.5 9h-12z"/><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M6 6L5 3H2"/></svg>`,
+  cart: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M3 3h2l2.4 12.3a2 2 0 002 1.7h7.4a2 2 0 001.9-1.5L21 8H7"/></svg>`,
   success: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>`,
   account: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`,
 };
@@ -59,6 +61,98 @@ function saveLastOrder(order) {
   lastOrder = order;
   if (order) localStorage.setItem("metro_cart_last_order", JSON.stringify(order));
   else localStorage.removeItem("metro_cart_last_order");
+}
+
+/* ── Cart (per customer, localStorage) ─────────────────────────────── */
+
+function cartStorageKey() {
+  const uid = session?.customer?.user_id || "guest";
+  return `metro_cart_shop_cart_${uid}`;
+}
+
+function loadCart() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(cartStorageKey()) || "[]");
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter((x) => x && x.product_id)
+      .map((x) => ({
+        product_id: String(x.product_id),
+        product_name: String(x.product_name || x.product_id),
+        category: String(x.category || ""),
+        price: Number(x.price) || 0,
+        quantity: Math.max(1, Number(x.quantity) || 1),
+        selected: x.selected !== false,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function saveCart(items) {
+  localStorage.setItem(cartStorageKey(), JSON.stringify(items || []));
+}
+
+function cartCount() {
+  return loadCart().reduce((n, i) => n + Number(i.quantity || 0), 0);
+}
+
+function addToCart(product, qty = 1) {
+  const items = loadCart();
+  const q = Math.max(1, Number(qty) || 1);
+  const existing = items.find((i) => i.product_id === product.product_id);
+  if (existing) {
+    existing.quantity += q;
+    existing.selected = true;
+    existing.price = Number(product.price) || existing.price;
+    existing.product_name = product.product_name || existing.product_name;
+    existing.category = product.category || existing.category;
+  } else {
+    items.push({
+      product_id: product.product_id,
+      product_name: product.product_name,
+      category: product.category || "",
+      price: Number(product.price) || 0,
+      quantity: q,
+      selected: true,
+    });
+  }
+  saveCart(items);
+}
+
+function setCartItemQty(productId, qty) {
+  const items = loadCart();
+  const row = items.find((i) => i.product_id === productId);
+  if (!row) return;
+  row.quantity = Math.max(1, Number(qty) || 1);
+  saveCart(items);
+}
+
+function setCartItemSelected(productId, selected) {
+  const items = loadCart();
+  const row = items.find((i) => i.product_id === productId);
+  if (!row) return;
+  row.selected = !!selected;
+  saveCart(items);
+}
+
+function removeFromCart(productId) {
+  saveCart(loadCart().filter((i) => i.product_id !== productId));
+}
+
+function removeSelectedFromCart() {
+  saveCart(loadCart().filter((i) => !i.selected));
+}
+
+function selectedCartItems() {
+  return loadCart().filter((i) => i.selected);
+}
+
+function selectedCartTotal() {
+  return selectedCartItems().reduce(
+    (sum, i) => sum + Number(i.price) * Number(i.quantity),
+    0,
+  );
 }
 
 async function api(path, options = {}, auth = true) {
@@ -113,10 +207,6 @@ function initials(name) {
     .toUpperCase();
 }
 
-function badge(status) {
-  return `<span class="badge badge-${esc(status)}">${esc(String(status).replaceAll("_", " "))}</span>`;
-}
-
 function currentRoute() {
   const hash = location.hash.replace(/^#\/?/, "") || "order";
   return hash.split("/")[0];
@@ -165,17 +255,22 @@ function shell(content, route) {
   const customer = session.customer;
   const items = [...NAV];
   if (lastOrder) {
-    items.splice(1, 0, { route: "success", labelKey: "shop_confirmation", icon: "success" });
+    items.splice(2, 0, { route: "success", labelKey: "shop_confirmation", icon: "success" });
   }
+  const count = cartCount();
   const nav = items
-    .map(
-      (item) => `
+    .map((item) => {
+      const badge =
+        item.route === "cart" && count > 0
+          ? `<span class="nav-badge" aria-label="${esc(count)} items in cart">${esc(count > 99 ? "99+" : count)}</span>`
+          : "";
+      return `
       <a href="#/${item.route}" class="nav-link ${route === item.route ? "active" : ""}">
         ${NAV_ICONS[item.icon] || NAV_ICONS.order}
-        <span>${esc(t(item.labelKey))}</span>
+        <span class="nav-link-text">${esc(t(item.labelKey))}${badge}</span>
         <span class="chev">›</span>
-      </a>`,
-    )
+      </a>`;
+    })
     .join("");
 
   return `
@@ -198,6 +293,11 @@ function shell(content, route) {
           </div>
           <div class="topbar-right">
             ${languageToggleHtml({ id: "lang-select" })}
+            <a href="#/cart" class="cart-chip" title="${esc(t("shop_cart"))}">
+              ${NAV_ICONS.cart}
+              <span>${esc(t("shop_cart"))}</span>
+              ${count > 0 ? `<span class="nav-badge">${esc(count)}</span>` : ""}
+            </a>
             <div class="user-chip">
               <span class="user-chip-text">${esc(t("hi_user", { name: customer.customer_name }))}</span>
               <div class="user-avatar">${esc(initials(customer.customer_name))}</div>
@@ -376,9 +476,53 @@ function step(num, title, sub, body) {
     </section>`;
 }
 
+/** Shop browse — add products to cart */
+let shopSearchQuery = sessionStorage.getItem("metro_cart_shop_search") || "";
+
+function filterProducts(products, query) {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return products;
+  return products.filter((p) => {
+    const hay = [
+      p.product_name,
+      p.category,
+      p.product_id,
+      String(p.price ?? ""),
+    ]
+      .join(" ")
+      .toLowerCase();
+    return hay.includes(q);
+  });
+}
+
+function productCardsHtml(products) {
+  if (!products.length) {
+    return `<div class="card"><p class="subtitle" style="margin:0">${esc(t("search_no_results"))}</p></div>`;
+  }
+  return products
+    .map(
+      (p) => `
+      <article class="product-card" data-product-id="${esc(p.product_id)}">
+        <div class="product-card-body">
+          <p class="product-cat">${esc(p.category || "—")}</p>
+          <h3 class="product-name">${esc(p.product_name)}</h3>
+          <p class="product-price">${esc(money(p.price))}</p>
+        </div>
+        <div class="product-card-actions">
+          <label class="qty-inline">
+            <span>${esc(t("quantity"))}</span>
+            <input type="number" min="1" step="1" value="1" class="product-qty" aria-label="${esc(t("quantity"))}" />
+          </label>
+          <button type="button" class="btn btn-primary btn-add-cart">${esc(t("add_to_cart"))}</button>
+        </div>
+      </article>`,
+    )
+    .join("");
+}
+
 async function renderOrder() {
   document.getElementById("app").innerHTML = shell(
-    `${pageHead(t("shop_place_order"), t("shop_checkout_lede"))}
+    `${pageHead(t("shop_browse"), t("shop_browse_lede"))}
      <div class="card"><p class="subtitle" style="margin:0">${esc(t("loading_catalog"))}</p></div>`,
     "order",
   );
@@ -386,38 +530,210 @@ async function renderOrder() {
 
   try {
     const catalog = await ensureCatalog();
-    const customer = session.customer;
     const products = catalog.products || [];
+    const filtered = filterProducts(products, shopSearchQuery);
+
+    const main = `
+      ${pageHead(t("shop_browse"), t("shop_browse_lede"))}
+      <div class="shop-toolbar">
+        <form class="shop-search" id="shop-search-form" role="search">
+          <label class="sr-only" for="shop-search-input">${esc(t("search_products"))}</label>
+          <input
+            id="shop-search-input"
+            type="search"
+            placeholder="${esc(t("search_products_placeholder"))}"
+            value="${esc(shopSearchQuery)}"
+            autocomplete="off"
+          />
+          <button type="submit" class="btn btn-primary">${esc(t("search"))}</button>
+          ${
+            shopSearchQuery
+              ? `<button type="button" class="btn btn-secondary" id="shop-search-clear">${esc(t("clear_search"))}</button>`
+              : ""
+          }
+        </form>
+        <div class="shop-toolbar-right">
+          <p class="subtitle" style="margin:0">${esc(
+            t("search_results_count", {
+              shown: filtered.length,
+              total: products.length,
+            }),
+          )} · ${esc(t("shop_cart_hint", { count: cartCount() }))}</p>
+          <a class="btn btn-secondary" href="#/cart">${esc(t("view_cart"))}</a>
+        </div>
+      </div>
+      <div id="shop-toast"></div>
+      <div class="product-grid" id="product-grid">${productCardsHtml(filtered)}</div>`;
+
+    document.getElementById("app").innerHTML = shell(main, "order");
+    bindShell();
+
+    const searchInput = document.getElementById("shop-search-input");
+    const grid = document.getElementById("product-grid");
+
+    function applySearch(nextQuery, { refocus = false } = {}) {
+      shopSearchQuery = String(nextQuery || "");
+      sessionStorage.setItem("metro_cart_shop_search", shopSearchQuery);
+      const next = filterProducts(products, shopSearchQuery);
+      if (grid) grid.innerHTML = productCardsHtml(next);
+      const countEl = document.querySelector(".shop-toolbar-right .subtitle");
+      if (countEl) {
+        countEl.textContent = `${t("search_results_count", {
+          shown: next.length,
+          total: products.length,
+        })} · ${t("shop_cart_hint", { count: cartCount() })}`;
+      }
+      const clearBtn = document.getElementById("shop-search-clear");
+      const form = document.getElementById("shop-search-form");
+      if (shopSearchQuery && !clearBtn && form) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "btn btn-secondary";
+        btn.id = "shop-search-clear";
+        btn.textContent = t("clear_search");
+        form.appendChild(btn);
+        btn.addEventListener("click", () => {
+          if (searchInput) searchInput.value = "";
+          applySearch("", { refocus: true });
+        });
+      } else if (!shopSearchQuery && clearBtn) {
+        clearBtn.remove();
+      }
+      bindProductCards(products);
+      if (refocus) searchInput?.focus();
+    }
+
+    function bindProductCards(allProducts) {
+      document.querySelectorAll(".product-card").forEach((card) => {
+        const pid = card.dataset.productId;
+        const product = allProducts.find((p) => p.product_id === pid);
+        card.querySelector(".btn-add-cart")?.addEventListener("click", () => {
+          const qty = Math.max(1, Number(card.querySelector(".product-qty")?.value) || 1);
+          addToCart(product, qty);
+          sessionStorage.setItem(
+            "metro_cart_shop_toast",
+            t("added_to_cart", { name: product.product_name, qty }),
+          );
+          renderOrder();
+        });
+      });
+    }
+
+    document.getElementById("shop-search-form")?.addEventListener("submit", (e) => {
+      e.preventDefault();
+      applySearch(searchInput?.value || "");
+    });
+
+    // Live filter as the user types (short debounce)
+    let searchTimer = null;
+    searchInput?.addEventListener("input", () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => applySearch(searchInput.value), 180);
+    });
+
+    document.getElementById("shop-search-clear")?.addEventListener("click", () => {
+      if (searchInput) searchInput.value = "";
+      applySearch("", { refocus: true });
+    });
+
+    bindProductCards(products);
+
+    const toastMsg = sessionStorage.getItem("metro_cart_shop_toast");
+    if (toastMsg) {
+      sessionStorage.removeItem("metro_cart_shop_toast");
+      const toast = document.getElementById("shop-toast");
+      if (toast) toast.innerHTML = `<div class="alert alert-success">${esc(toastMsg)}</div>`;
+    }
+
+    if (shopSearchQuery) searchInput?.focus();
+  } catch (ex) {
+    document.getElementById("app").innerHTML = shell(
+      `${pageHead(t("shop_browse"), t("shop_browse_lede"))}
+       <div class="card"><div class="alert alert-error">${esc(ex.message)}</div></div>`,
+      "order",
+    );
+    bindShell();
+  }
+}
+
+/** Cart — uncheck items, edit qty, checkout selected */
+async function renderCart() {
+  document.getElementById("app").innerHTML = shell(
+    `${pageHead(t("shop_cart"), t("shop_cart_lede"))}
+     <div class="card"><p class="subtitle" style="margin:0">${esc(t("loading_catalog"))}</p></div>`,
+    "cart",
+  );
+  bindShell();
+
+  try {
+    const catalog = await ensureCatalog();
+    const customer = session.customer;
     const programs = catalog.programs || [];
     const devices = catalog.devices || [];
     const defaultProgram =
       programs.find((p) => p.program_id === customer.program_id) || programs[0];
+    const cart = loadCart();
+    const selected = selectedCartItems();
+    const selectedTotal = selectedCartTotal();
+
+    const rows = cart.length
+      ? cart
+          .map(
+            (item) => `
+        <tr class="cart-row ${item.selected ? "" : "cart-row-off"}" data-product-id="${esc(item.product_id)}">
+          <td class="cart-check">
+            <input type="checkbox" class="cart-select" ${item.selected ? "checked" : ""} aria-label="${esc(t("include_in_order"))}" />
+          </td>
+          <td>
+            <div class="cart-item-name">${esc(item.product_name)}</div>
+            <div class="cart-item-meta">${esc(item.category || "—")} · ${esc(item.product_id)}</div>
+          </td>
+          <td class="cart-price">${esc(money(item.price))}</td>
+          <td>
+            <input type="number" class="cart-qty" min="1" step="1" value="${esc(item.quantity)}" ${item.selected ? "" : "disabled"} />
+          </td>
+          <td class="cart-line">${esc(money(item.price * item.quantity))}</td>
+          <td>
+            <button type="button" class="btn btn-secondary btn-sm cart-remove">${esc(t("remove"))}</button>
+          </td>
+        </tr>`,
+          )
+          .join("")
+      : "";
+
+    const cartTable = cart.length
+      ? `
+      <div class="table-scroll">
+        <table class="cart-table">
+          <thead>
+            <tr>
+              <th>${esc(t("include_in_order"))}</th>
+              <th>${esc(t("product"))}</th>
+              <th>${esc(t("unit_price"))}</th>
+              <th>${esc(t("quantity"))}</th>
+              <th>${esc(t("line_total"))}</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <p class="subtitle cart-select-hint">${esc(t("cart_uncheck_hint"))}</p>`
+      : `<div class="alert alert-warning">${esc(t("cart_empty"))}</div>
+         <a class="btn btn-primary" href="#/order">${esc(t("shop_browse"))}</a>`;
 
     const main = `
-      ${pageHead(t("shop_place_order"), t("shop_checkout_lede"))}
+      ${pageHead(t("shop_cart"), t("shop_cart_lede"))}
       <div class="shop-layout">
         <div>
-          ${step(
-            "1",
-            t("contact_details"),
-            "",
-            `
-            <div class="form-grid">
-              <div class="field"><label>${esc(t("name"))}</label><input value="${esc(customer.customer_name)}" disabled /></div>
-              <div class="field"><label>${esc(t("phone"))}</label><input value="${esc(customer.phone_number || "")}" disabled /></div>
-              <div class="field span-2"><label>${esc(t("email"))}</label><input value="${esc(customer.email || "")}" disabled /></div>
-            </div>
-            ${
-              !(customer.phone_number || "").trim()
-                ? `<div class="alert alert-warning">${esc(t("no_phone_warning"))}</div>`
-                : ""
-            }`,
-          )}
-          ${step(
-            "2",
-            t("delivery_address"),
-            "",
-            `
+          ${step("1", t("your_cart"), t("cart_uncheck_hint"), cartTable)}
+          ${
+            cart.length
+              ? step(
+                  "2",
+                  t("delivery_address"),
+                  "",
+                  `
             <div class="form-grid">
               <div class="field"><label>${esc(t("street"))}</label><input id="f-street" value="${esc(customer.street || "")}" /></div>
               <div class="field"><label>${esc(t("city"))}</label><input id="f-city" value="${esc(customer.city || "")}" /></div>
@@ -425,12 +741,16 @@ async function renderOrder() {
               <div class="field"><label>${esc(t("zip_code"))}</label><input id="f-zip" value="${esc(customer.zip_code || "")}" /></div>
               <div class="field span-2"><label>${esc(t("country"))}</label><input id="f-country" value="${esc(customer.country || "India")}" /></div>
             </div>`,
-          )}
-          ${step(
-            "3",
-            t("sim_fields"),
-            t("sim_caption"),
-            `
+                )
+              : ""
+          }
+          ${
+            cart.length
+              ? step(
+                  "3",
+                  t("sim_fields"),
+                  t("sim_caption"),
+                  `
             <div class="form-grid-3">
               <div class="field"><label>${esc(t("ip_address"))}</label><input id="f-ip" placeholder="e.g. 203.0.113.111" /></div>
               <div class="field">
@@ -458,79 +778,116 @@ async function renderOrder() {
                 </select>
               </div>
             </div>`,
-          )}
-          ${step(
-            "4",
-            t("product_selection"),
-            "",
-            `
-            <div class="form-grid">
-              <div class="field">
-                <label>${esc(t("product"))}</label>
-                <select id="f-product">
-                  ${products
-                    .map(
-                      (p) =>
-                        `<option value="${esc(p.product_id)}" data-price="${esc(p.price)}" data-name="${esc(p.product_name)}">${esc(p.product_name)} — ${esc(money(p.price))}</option>`,
-                    )
-                    .join("")}
-                </select>
-              </div>
-              <div class="field">
-                <label>${esc(t("quantity"))}</label>
-                <input id="f-qty" type="number" min="1" step="1" value="1" />
-              </div>
-            </div>`,
-          )}
+                )
+              : ""
+          }
           <div id="order-error"></div>
         </div>
 
-        <aside class="card summary-rail">
+        ${
+          cart.length
+            ? `<aside class="card summary-rail">
           <h3>${esc(t("order_summary"))}</h3>
-          <div class="summary-row"><span>${esc(t("label_product"))}</span><strong id="sum-product">—</strong></div>
-          <div class="summary-row"><span>${esc(t("quantity"))}</span><strong id="sum-qty">1</strong></div>
+          <div class="summary-row"><span>${esc(t("selected_items"))}</span><strong id="sum-count">${esc(selected.length)}</strong></div>
           <div class="summary-row"><span>${esc(t("label_customer"))}</span><strong>${esc(customer.customer_name)}</strong></div>
+          <div id="sum-lines" class="sum-lines">
+            ${
+              selected.length
+                ? selected
+                    .map(
+                      (i) =>
+                        `<div class="summary-row"><span>${esc(i.product_name)} × ${esc(i.quantity)}</span><strong>${esc(money(i.price * i.quantity))}</strong></div>`,
+                    )
+                    .join("")
+                : `<p class="subtitle">${esc(t("no_items_selected"))}</p>`
+            }
+          </div>
           <div class="summary-total">
             <div class="label">${esc(t("total_price"))}</div>
-            <div class="value" id="sum-total">${esc(money(products[0]?.price || 0))}</div>
+            <div class="value" id="sum-total">${esc(money(selectedTotal))}</div>
           </div>
-          <button type="button" class="btn btn-primary" style="width:100%;margin-top:1rem" id="btn-purchase">${esc(t("complete_purchase"))}</button>
-        </aside>
+          <div class="summary-actions">
+            <button type="button" class="btn btn-primary" id="btn-purchase" ${
+              selected.length ? "" : "disabled"
+            }>${esc(t("place_selected_order"))}</button>
+            <a class="btn btn-secondary" href="#/order">${esc(t("continue_shopping"))}</a>
+          </div>
+        </aside>`
+            : ""
+        }
       </div>`;
 
-    document.getElementById("app").innerHTML = shell(main, "order");
+    document.getElementById("app").innerHTML = shell(main, "cart");
     bindShell();
 
-    const productEl = document.getElementById("f-product");
-    const qtyEl = document.getElementById("f-qty");
-
-    function refreshSummary() {
-      const opt = productEl.selectedOptions[0];
-      const price = Number(opt?.dataset.price || 0);
-      const qty = Math.max(1, Number(qtyEl.value) || 1);
-      document.getElementById("sum-product").textContent = opt?.dataset.name || "—";
-      document.getElementById("sum-qty").textContent = String(qty);
-      document.getElementById("sum-total").textContent = money(price * qty);
+    function refreshSummaryUi() {
+      const sel = selectedCartItems();
+      const total = selectedCartTotal();
+      const countEl = document.getElementById("sum-count");
+      const totalEl = document.getElementById("sum-total");
+      const linesEl = document.getElementById("sum-lines");
+      const btn = document.getElementById("btn-purchase");
+      if (countEl) countEl.textContent = String(sel.length);
+      if (totalEl) totalEl.textContent = money(total);
+      if (linesEl) {
+        linesEl.innerHTML = sel.length
+          ? sel
+              .map(
+                (i) =>
+                  `<div class="summary-row"><span>${esc(i.product_name)} × ${esc(i.quantity)}</span><strong>${esc(money(i.price * i.quantity))}</strong></div>`,
+              )
+              .join("")
+          : `<p class="subtitle">${esc(t("no_items_selected"))}</p>`;
+      }
+      if (btn) btn.disabled = !sel.length;
     }
-    productEl.onchange = refreshSummary;
-    qtyEl.oninput = refreshSummary;
-    refreshSummary();
 
-    document.getElementById("btn-purchase").onclick = async () => {
+    document.querySelectorAll(".cart-row").forEach((row) => {
+      const pid = row.dataset.productId;
+      const selectEl = row.querySelector(".cart-select");
+      const qtyEl = row.querySelector(".cart-qty");
+      const lineEl = row.querySelector(".cart-line");
+
+      selectEl?.addEventListener("change", () => {
+        setCartItemSelected(pid, selectEl.checked);
+        row.classList.toggle("cart-row-off", !selectEl.checked);
+        if (qtyEl) qtyEl.disabled = !selectEl.checked;
+        refreshSummaryUi();
+      });
+
+      qtyEl?.addEventListener("change", () => {
+        const q = Math.max(1, Number(qtyEl.value) || 1);
+        qtyEl.value = String(q);
+        setCartItemQty(pid, q);
+        const item = loadCart().find((i) => i.product_id === pid);
+        if (lineEl && item) lineEl.textContent = money(item.price * item.quantity);
+        refreshSummaryUi();
+      });
+
+      row.querySelector(".cart-remove")?.addEventListener("click", () => {
+        removeFromCart(pid);
+        renderCart();
+      });
+    });
+
+    document.getElementById("btn-purchase")?.addEventListener("click", async () => {
       const errEl = document.getElementById("order-error");
       errEl.innerHTML = "";
+      const toOrder = selectedCartItems();
+      if (!toOrder.length) {
+        errEl.innerHTML = `<div class="alert alert-error">${esc(t("no_items_selected"))}</div>`;
+        return;
+      }
+
       const street = document.getElementById("f-street").value.trim();
       const city = document.getElementById("f-city").value.trim();
       const state = document.getElementById("f-state").value.trim();
       const zip = document.getElementById("f-zip").value.trim();
       const country = document.getElementById("f-country").value.trim();
       const ip = document.getElementById("f-ip").value.trim();
-      const productId = productEl.value;
-      const qty = Math.max(1, Number(qtyEl.value) || 1);
       const programId = document.getElementById("f-program").value;
       const deviceId = document.getElementById("f-device").value;
-      const product = products.find((p) => p.product_id === productId);
-      const amount = Number(product?.price || 0) * qty;
+      const amount = selectedCartTotal();
 
       const errors = [];
       if (!(customer.phone_number || "").trim()) errors.push(t("err_phone_required"));
@@ -541,11 +898,15 @@ async function renderOrder() {
         return;
       }
 
+      const itemLines = toOrder
+        .map((i) => `• ${i.product_name} × ${i.quantity} — ${money(i.price * i.quantity)}`)
+        .join("\n");
+
       const ok = await confirmAction({
         title: t("confirm_place_order"),
         message: [
           t("order_summary"),
-          `${t("label_product")}: ${product?.product_name} × ${qty}`,
+          itemLines,
           `${t("label_amount")}: ${money(amount)}`,
           `${t("label_delivery_address")}: ${street}, ${city}, ${state} ${zip}`,
           `${t("label_ip")}: ${ip}`,
@@ -562,8 +923,10 @@ async function renderOrder() {
         const result = await api("/shop/orders", {
           method: "POST",
           body: JSON.stringify({
-            product_id: productId,
-            quantity: qty,
+            items: toOrder.map((i) => ({
+              product_id: i.product_id,
+              quantity: Number(i.quantity),
+            })),
             program_id: programId,
             device_id: deviceId,
             ip_address: ip,
@@ -574,19 +937,20 @@ async function renderOrder() {
             country: country || "India",
           }),
         });
+        removeSelectedFromCart();
         saveLastOrder(result);
         navigate("success");
       } catch (ex) {
         errEl.innerHTML = `<div class="alert alert-error">${esc(ex.message)}</div>`;
         btn.disabled = false;
-        btn.textContent = t("complete_purchase");
+        btn.textContent = t("place_selected_order");
       }
-    };
+    });
   } catch (ex) {
     document.getElementById("app").innerHTML = shell(
-      `${pageHead(t("shop_place_order"), t("shop_checkout_lede"))}
+      `${pageHead(t("shop_cart"), t("shop_cart_lede"))}
        <div class="card"><div class="alert alert-error">${esc(ex.message)}</div></div>`,
-      "order",
+      "cart",
     );
     bindShell();
   }
@@ -594,6 +958,18 @@ async function renderOrder() {
 
 function renderSuccess() {
   if (!lastOrder) return navigate("order");
+  const items = Array.isArray(lastOrder.items) ? lastOrder.items : [];
+  const itemsHtml = items.length
+    ? `<ul class="success-items">
+        ${items
+          .map(
+            (i) =>
+              `<li><span>${esc(i.product_name)} × ${esc(i.quantity)}</span><strong>${esc(money(i.line_amount))}</strong></li>`,
+          )
+          .join("")}
+      </ul>`
+    : `<p class="success-meta">${esc(lastOrder.product_name)} × ${esc(lastOrder.quantity)} · ${esc(money(lastOrder.amount))}</p>`;
+
   const main = `
     <div class="success-page">
       <div class="section-head success-page-head">
@@ -606,12 +982,14 @@ function renderSuccess() {
         <div class="success-stage">
           <div class="success-mark">✓</div>
           <h1>${esc(t("order_success"))}</h1>
-          <p class="success-meta">${esc(lastOrder.product_name)} × ${esc(lastOrder.quantity)} · ${esc(money(lastOrder.amount))}</p>
+          ${itemsHtml}
+          <p class="success-meta">${esc(t("label_amount"))}: ${esc(money(lastOrder.amount))}</p>
           <div class="success-id">
             <span>${esc(t("your_order_id"))}</span>
             <strong>${esc(lastOrder.order_id)}</strong>
           </div>
           <button type="button" class="btn btn-primary success-cta" id="btn-another">${esc(t("place_another_order"))}</button>
+          <button type="button" class="btn btn-secondary success-cta" style="margin-top:0.65rem" id="btn-cart">${esc(t("view_cart"))}</button>
         </div>
       </div>
     </div>`;
@@ -620,6 +998,10 @@ function renderSuccess() {
   document.getElementById("btn-another").onclick = () => {
     saveLastOrder(null);
     navigate("order");
+  };
+  document.getElementById("btn-cart").onclick = () => {
+    saveLastOrder(null);
+    navigate("cart");
   };
 }
 
@@ -705,6 +1087,7 @@ async function render() {
   if (route === "login") return navigate("order");
   if (route === "success") return renderSuccess();
   if (route === "account") return renderAccount();
+  if (route === "cart") return renderCart();
   return renderOrder();
 }
 

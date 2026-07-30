@@ -31,8 +31,8 @@ def _cursor(*fetch_results):
 # ---------------- R001 ----------------
 
 def test_r001_should_trigger():
-    # R001 now reads delay_minutes from rule_master (fallback 60 if missing)
-    cursor = _cursor([180])
+    # R001 forces 180-minute hold for any iPhone 16 (any program track)
+    cursor = _cursor()
 
     ctx = {
         "program_id": "P2",
@@ -46,16 +46,20 @@ def test_r001_should_trigger():
     assert "180-minute" in reason
 
 
-def test_r001_wrong_program():
+def test_r001_triggers_on_p1():
+    """iPhone 16 must HOLD on P1 as well — not only P2."""
+    cursor = _cursor()
+
     ctx = {
         "program_id": "P1",
-        "product_name": "iPhone 16 Pro",
+        "product_name": "iPhone 16",
     }
 
-    triggered, reason = check_r001(None, ctx)
+    triggered, reason = check_r001(cursor, ctx)
 
-    assert triggered is False
-    assert reason is None
+    assert triggered is True
+    assert "R001" in reason
+    assert "180-minute" in reason
 
 
 def test_r001_wrong_product():

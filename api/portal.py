@@ -536,6 +536,23 @@ def backlog(_: Dict[str, Any] = Depends(require_page(PAGE_FRAUD_DASHBOARD))):
     return {"orders": _df_records(df), "stats": _jsonable_dict(stats)}
 
 
+@router.get("/portal/orders/recent")
+def recent_orders_list(
+    limit: int = Query(50, ge=1, le=200),
+    _: Dict[str, Any] = Depends(require_page(PAGE_ADMIN_PANEL)),
+):
+    """Latest orders across all statuses (shop checkouts appear here even when APPROVED)."""
+    with get_cursor() as (_, cur):
+        from database.order_items import ensure_order_items_table
+
+        try:
+            ensure_order_items_table(cur)
+        except Exception:
+            pass
+        df = get_recent_orders(cur, limit=limit)
+    return {"orders": _df_records(df)}
+
+
 @router.get("/portal/orders/{order_id}")
 def order_detail(
     order_id: str,

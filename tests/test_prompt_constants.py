@@ -35,6 +35,7 @@ def test_schema_context_covers_core_tables():
         "master.customers",
         "master.products",
         "master.device_master",
+        "master.order_items",
         "master.order_rule_hits",
         "master.rule_master",
     ):
