@@ -58,20 +58,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: analyst-portal/package-lock.json
 
       - name: Install and build React portal
         working-directory: analyst-portal
         run: |
-          # Lockfile was generated on Windows; npm install resolves Linux native optional deps on CI.
-          npm install
-          npm run build
-
-      - name: Restore static background asset
-        run: |
-          mkdir -p static/analyst-portal/assets
-          cp analyst-portal/public/assets/portal-bg.png static/analyst-portal/assets/portal-bg.png
+          npm install --no-audit --no-fund
+          npx vite build --outDir dist
+          rm -rf ../static/analyst-portal/*
+          mkdir -p ../static/analyst-portal/assets
+          cp -r dist/* ../static/analyst-portal/
+          cp public/assets/portal-bg.png ../static/analyst-portal/assets/portal-bg.png
 
       - name: Verify build output
         run: |
