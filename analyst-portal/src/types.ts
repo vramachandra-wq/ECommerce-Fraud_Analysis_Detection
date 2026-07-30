@@ -110,6 +110,21 @@ export interface ChatResponse {
   insight_title?: string;
 }
 
+export interface AuditLogEntry {
+  audit_id: number;
+  order_id: string;
+  analyst_id: string | null;
+  analyst_name?: string | null;
+  action: string;
+  rule_name: string | null;
+  delay_minutes: number | null;
+  reason: string;
+  review_comments: string | null;
+  created_at: string;
+  customer_name?: string | null;
+  order_status?: string | null;
+}
+
 export const PAGE_ROUTES: Record<PageKey, string> = {
   ADMIN_PANEL: "/admin",
   FRAUD_DASHBOARD: "/dashboard",

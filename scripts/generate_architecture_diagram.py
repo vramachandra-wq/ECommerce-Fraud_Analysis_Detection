@@ -76,9 +76,9 @@ def main():
     draw.line([(740, 124), (450, 124)], fill=LINE, width=2)
     down_arrow(draw, 740, 106, 124)
 
-    # Portals
-    box(draw, 90, 145, 280, 68, "Customer Portal", "Streamlit", BLUE)
-    box(draw, 420, 145, 390, 68, "Internal Portal", "Streamlit", BLUE_DK)
+    # Portals (built static SPAs)
+    box(draw, 90, 145, 280, 68, "Customer Shop", "/shop/", BLUE)
+    box(draw, 420, 145, 390, 68, "Analyst Portal", "React → static", BLUE_DK)
 
     down_arrow(draw, 230, 213, 250)
     down_arrow(draw, 615, 213, 250)
@@ -109,7 +109,7 @@ def main():
         draw,
         W / 2,
         610,
-        "Python · Streamlit · FastAPI · PostgreSQL",
+        "Python · FastAPI · React · PostgreSQL",
         font(12),
         LINE,
     )

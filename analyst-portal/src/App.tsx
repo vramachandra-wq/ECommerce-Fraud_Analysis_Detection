@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import { AppLayout } from "./components/AppLayout";
 import { ProtectedPage } from "./components/ProtectedPage";
 import { AuthProvider, useAuth } from "./context/AuthContext";
@@ -23,8 +23,7 @@ export default function App() {
   return (
     <I18nProvider>
       <AuthProvider>
-        <BrowserRouter>
-          <Routes>
+        <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route element={<AppLayout />}>
               <Route index element={<HomeRedirect />} />
@@ -63,7 +62,6 @@ export default function App() {
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
-        </BrowserRouter>
       </AuthProvider>
     </I18nProvider>
   );

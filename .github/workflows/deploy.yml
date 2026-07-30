@@ -1,0 +1,205 @@
+# Continuous Deployment — manual only (on-demand).
+# GitHub → Actions → Deploy → Run workflow
+
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+        default: staging
+      ref:
+        description: Git ref to deploy (branch, tag, or SHA; empty = current branch)
+        required: false
+        default: ""
+      run_integration_tests:
+        description: Run integration tests before deploy
+        required: true
+        type: boolean
+        default: true
+
+concurrency:
+  group: deploy-${{ github.event.inputs.environment }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "20"
+  DB_HOST: localhost
+  DB_PORT: "5432"
+  DB_NAME: fraud_detection
+  DB_USER: postgres
+  DB_PASSWORD: postgres
+  GROQ_API_KEY: deploy-placeholder-not-used
+  PORTAL_SECRET: deploy-placeholder-change-in-target-env
+
+jobs:
+  validate-and-build:
+    name: Validate & build release
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref != '' && github.event.inputs.ref || github.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run unit tests
+        run: python -m pytest -m "not integration and not live_groq" -q --tb=short
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: analyst-portal/package-lock.json
+
+      - name: Build analyst portal
+        working-directory: analyst-portal
+        run: |
+          npm ci
+          npm run build
+          cp public/assets/portal-bg.png ../static/analyst-portal/assets/portal-bg.png
+
+      - name: Package release bundle
+        run: |
+          mkdir -p release/metro-cart
+          rsync -a \
+            --exclude '.venv' --exclude '.git' --exclude 'analyst-portal/node_modules' \
+            --exclude '.run' --exclude '__pycache__' --exclude '*.pyc' \
+            ./ release/metro-cart/
+          tar -czf metro-cart-${{ github.event.inputs.environment }}-${{ github.sha }}.tar.gz \
+            -C release metro-cart
+
+      - name: Upload release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: metro-cart-${{ github.event.inputs.environment }}-${{ github.sha }}
+          path: metro-cart-${{ github.event.inputs.environment }}-${{ github.sha }}.tar.gz
+          retention-days: 30
+
+  integration-tests:
+    name: Integration tests (optional)
+    runs-on: ubuntu-latest
+    needs: validate-and-build
+    if: github.event.inputs.run_integration_tests == true
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: fraud_detection
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d fraud_detection"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref != '' && github.event.inputs.ref || github.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Initialize database schema
+        env:
+          PGPASSWORD: postgres
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          psql -h localhost -U postgres -d fraud_detection \
+            -f init_scripts/ecommerce_fraud/schema.sql
+
+      - name: Run integration tests
+        run: python -m pytest -m integration -q --tb=short
+
+  deploy-ssh:
+    name: Deploy to server (SSH)
+    runs-on: ubuntu-latest
+    needs:
+      - validate-and-build
+      - integration-tests
+    if: |
+      always() &&
+      needs.validate-and-build.result == 'success' &&
+      (needs.integration-tests.result == 'success' || needs.integration-tests.result == 'skipped') &&
+      vars.DEPLOY_ENABLED == 'true'
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Download release bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: metro-cart-${{ github.event.inputs.environment }}-${{ github.sha }}
+
+      - name: Copy bundle to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_SSH_HOST }}
+          username: ${{ secrets.DEPLOY_SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_SSH_PORT || 22 }}
+          source: metro-cart-${{ github.event.inputs.environment }}-${{ github.sha }}.tar.gz
+          target: ${{ secrets.DEPLOY_REMOTE_PATH }}
+
+      - name: Extract and restart on server
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_SSH_HOST }}
+          username: ${{ secrets.DEPLOY_SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_SSH_PORT || 22 }}
+          script: |
+            set -euo pipefail
+            REMOTE="${{ secrets.DEPLOY_REMOTE_PATH }}"
+            ARCHIVE="metro-cart-${{ github.event.inputs.environment }}-${{ github.sha }}.tar.gz"
+            cd "$REMOTE"
+            tar -xzf "$ARCHIVE"
+            rm -f "$ARCHIVE"
+            chmod +x metro-cart/scripts/deploy_restart.sh || true
+            metro-cart/scripts/deploy_restart.sh || echo "Run restart manually on the server."
+
+  release-summary:
+    name: Release summary
+    runs-on: ubuntu-latest
+    needs:
+      - validate-and-build
+      - integration-tests
+      - deploy-ssh
+    if: always()
+    steps:
+      - run: |
+          echo "## Deploy summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Environment: ${{ github.event.inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Ref: ${{ github.event.inputs.ref != '' && github.event.inputs.ref || github.ref }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Artifact: metro-cart-${{ github.event.inputs.environment }}-${{ github.sha }}.tar.gz" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ vars.DEPLOY_ENABLED }}" = "true" ]; then
+            echo "- SSH deploy: attempted (see deploy-ssh job)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- SSH deploy: skipped (set repository variable \`DEPLOY_ENABLED=true\` and SSH secrets to enable)" >> "$GITHUB_STEP_SUMMARY"
+          fi

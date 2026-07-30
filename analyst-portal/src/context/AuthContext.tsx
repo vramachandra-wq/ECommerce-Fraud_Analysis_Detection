@@ -7,8 +7,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { api, ApiError } from "./api";
-import type { AuthSession, PageKey } from "./types";
+import { api, ApiError } from "../api";
+import type { AuthSession, PageKey } from "../types";
 
 interface AuthContextValue {
   session: AuthSession | null;

@@ -39,6 +39,7 @@ from utils.queries import (
     get_orders_over_time,
     get_permission_matrix,
     get_recent_orders,
+    get_review_audit_log,
     get_rule_stats,
 )
 from utils.pii import sanitize_pii_record
@@ -344,6 +345,29 @@ def rules(_: Dict[str, Any] = Depends(require_page(PAGE_ADMIN_PANEL))):
     with get_cursor() as (_, cur):
         rules_data = get_all_rules(cur)
     return {"rules": [_jsonable_dict(r) for r in rules_data]}
+
+
+@router.get("/portal/audit")
+def audit_log(
+    limit: int = 100,
+    offset: int = 0,
+    order_id: str | None = None,
+    _: Dict[str, Any] = Depends(require_page(PAGE_ADMIN_PANEL)),
+):
+    with get_cursor() as (_, cur):
+        payload = get_review_audit_log(
+            cur,
+            limit=limit,
+            offset=offset,
+            order_id=order_id.strip() if order_id else None,
+        )
+    entries = [_jsonable_dict(row) for row in payload["entries"]]
+    return {
+        "entries": entries,
+        "total": payload["total"],
+        "limit": payload["limit"],
+        "offset": payload["offset"],
+    }
 
 
 @router.get("/portal/power-bi")

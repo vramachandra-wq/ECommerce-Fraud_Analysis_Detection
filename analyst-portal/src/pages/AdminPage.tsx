@@ -17,6 +17,7 @@ import { useAuth } from "../context/AuthContext";
 import type { FraudRule, PageKey, PermissionAnalyst } from "../types";
 import { Alert, Button, Card, DataTable, MetricCard } from "../components/ui";
 import { DashboardPage } from "./DashboardPage";
+import { AuditLogTab } from "./AuditLogTab";
 
 const TABS = [
   { label: "Review Queue", tone: "blue" },
@@ -25,6 +26,7 @@ const TABS = [
   { label: "User Management", tone: "teal" },
   { label: "Analytics", tone: "amber" },
   { label: "Rule Management", tone: "navy" },
+  { label: "Audit Log", tone: "violet" },
 ] as const;
 
 type Tab = (typeof TABS)[number]["label"];
@@ -62,6 +64,11 @@ const TAB_TONES: Record<
     idle: "text-slate-500 hover:bg-slate-100 hover:text-slate-800",
     active: "bg-slate-100 text-slate-800 shadow-[inset_0_-2px_0_#1a237e]",
     dot: "bg-slate-700",
+  },
+  "Audit Log": {
+    idle: "text-slate-500 hover:bg-violet-50 hover:text-violet-700",
+    active: "bg-violet-50 text-violet-700 shadow-[inset_0_-2px_0_#7c3aed]",
+    dot: "bg-violet-500",
   },
 };
 
@@ -149,6 +156,7 @@ export function AdminPage() {
       {tab === "User Management" ? <UserManagementTab onError={setError} onSuccess={setSuccess} /> : null}
       {tab === "Analytics" ? <AnalyticsTab /> : null}
       {tab === "Rule Management" ? <RuleManagementTab onError={setError} onSuccess={setSuccess} /> : null}
+      {tab === "Audit Log" ? <AuditLogTab /> : null}
     </div>
   );
 }

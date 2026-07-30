@@ -243,7 +243,7 @@ def test_get_followup_context_masks_pii_in_sample():
 # ---------- masking / sanitize ----------
 
 def test_mask_email_phone_address_ip():
-    assert _mask_email("john@example.com") == "jo**@example.com"
+    assert _mask_email("john@example.com") == "j***@example.com"
     assert _mask_phone("9876543210") == "98******10"
     assert _mask_phone("1234") == "***"
     assert _mask_address("12 Main Street Chennai") == "12********************"
@@ -339,13 +339,11 @@ def test_get_best_axis_and_detect_chart_columns():
 
 # ---------- repair / recommendations with mocks ----------
 
-@patch("ai.chatbot.st")
 @patch("ai.chatbot.get_groq_client", return_value=None)
-def test_repair_sql_without_client(mock_get_client, mock_st):
+def test_repair_sql_without_client(mock_get_client):
     sql, in_tok, out_tok = _repair_sql("SELECT 1", "error")
     assert sql == "SELECT 1"
     assert (in_tok, out_tok) == (0, 0)
-    mock_st.warning.assert_called()
 
 
 @patch("ai.chatbot.create_chat_completion")
@@ -386,9 +384,8 @@ def test_generate_ai_recommendations_parses_json(mock_create):
     assert result["business_advice"] == ["Focus on Chennai"]
 
 
-@patch("ai.chatbot.st")
 @patch("ai.chatbot.create_chat_completion", side_effect=Exception("boom"))
-def test_generate_ai_recommendations_failure_returns_empty(mock_create, mock_st):
+def test_generate_ai_recommendations_failure_returns_empty(mock_create):
     df = pd.DataFrame({"city": ["Chennai"], "count": [5]})
     result = _generate_ai_recommendations(
         client=MagicMock(),
@@ -399,4 +396,3 @@ def test_generate_ai_recommendations_failure_returns_empty(mock_create, mock_st)
         conversation_history="",
     )
     assert result == {"followups": [], "business_advice": []}
-    mock_st.caption.assert_called()

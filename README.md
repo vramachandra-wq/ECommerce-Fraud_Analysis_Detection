@@ -1,6 +1,6 @@
 # Metro Cart — E-Commerce Fraud Detection & Analytics Platform
 
-Real-time, rule-based fraud detection for e-commerce orders. The platform evaluates every purchase against configurable rules, automates hold/review/reject decisions, supports analyst investigation, and exposes analytics through Streamlit portals, FastAPI, Power BI, and an AI chatbot.
+Real-time, rule-based fraud detection for e-commerce orders. The platform evaluates every purchase against configurable rules, automates hold/review/reject decisions, supports analyst investigation, and exposes analytics through web portals (React → static), FastAPI, Power BI, and an AI chatbot.
 
 ---
 
@@ -51,6 +51,7 @@ Also included:
 - Rule thresholds, intervals, and delay minutes (R001: delay only)
 - IP / email / phone blacklist management
 - KPI and rule analytics
+- **Review audit log** (approve / reject / auto-approve history)
 
 ## AI chatbot
 
@@ -91,7 +92,7 @@ Also included:
 |-----------|------------|
 | Backend API | FastAPI (+ lifespan auto-approval scheduler) |
 | Database | PostgreSQL 15 (Podman Compose) |
-| Frontends | Streamlit (`customer_app.py`, `analyst_app.py`) |
+| Frontends | React analyst portal (`analyst-portal/` → `static/analyst-portal/`), static customer shop (`static/customer-portal/`) |
 | Analytics | Power BI embed |
 | AI | Groq API |
 | Auth | bcrypt |
@@ -112,14 +113,15 @@ ECommerce-Fraud_Analysis_Detection/
 ├── images/                     # UI assets
 ├── init_scripts/ecommerce_fraud/
 │   └── schema.sql              # Full DDL + seed (Compose init)
-├── portals/                    # Streamlit pages (customer, analyst, admin, chatbot, …)
+├── analyst-portal/             # React source for analyst UI (build → static/analyst-portal/)
+├── static/
+│   ├── analyst-portal/         # Built analyst SPA (served at /portal/)
+│   └── customer-portal/        # Customer shop (served at /shop/)
 ├── scripts/
+│   ├── build_analyst_portal.ps1
 │   └── hash_seed_passwords.py  # Optional: bcrypt-hash live/seed passwords
 ├── tests/                      # Unit + integration tests
-├── ui/                         # Theme + i18n
 ├── utils/                      # Queries, PII helpers, order utils
-├── analyst_app.py
-├── customer_app.py
 ├── config.py
 ├── podman-compose.yaml
 ├── requirements.txt
@@ -151,8 +153,10 @@ First run will:
 1. Create `.venv` and install `requirements.txt`
 2. Create `.env` from `.env.example` if missing
 3. Start PostgreSQL via `podman-compose.yaml`
-4. Start FastAPI (`:8000`) and Streamlit apps (`:8501`, `:8502`)
+4. Start FastAPI (`:8000`) — serves `/portal/` and `/shop/`
 5. Open the service URLs in Chrome
+
+**Analyst portal:** build once with `.\scripts\build_analyst_portal.ps1` (requires Node.js). FastAPI serves the output from `static/analyst-portal/`.
 
 Stop everything:
 
@@ -165,8 +169,8 @@ Stop everything:
 | Service | URL |
 |---------|-----|
 | API docs | http://127.0.0.1:8000/docs |
-| Customer portal | http://localhost:8501 |
-| Analyst portal | http://localhost:8502 |
+| Analyst portal | http://127.0.0.1:8000/portal/ |
+| Customer shop | http://127.0.0.1:8000/shop/ |
 
 App logs: `.run/logs/`
 
@@ -222,15 +226,61 @@ pip install -r requirements.txt
 Copy-Item .env.example .env   # edit DB_* / GROQ_API_KEY
 podman-compose -f podman-compose.yaml up -d
 uvicorn api.main:app --reload --host 127.0.0.1 --port 8000
-streamlit run customer_app.py --server.port 8501
-streamlit run analyst_app.py --server.port 8502
+.\scripts\build_analyst_portal.ps1   # first time / after UI changes
 ```
 
 ## Tests
 
 ```powershell
+.\.venv\Scripts\pip install -r requirements-dev.txt
 .\.venv\Scripts\python.exe -m pytest -q
 ```
+
+Unit tests only (no database):
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -m "not integration and not live_groq" -q
+```
+
+---
+
+# CI/CD (GitHub Actions)
+
+## Continuous Integration (automatic)
+
+Runs on every **push** and **pull request** to `main` and `feature/**`:
+
+| Job | What it does |
+|-----|----------------|
+| Unit tests | `pytest -m "not integration and not live_groq"` |
+| Portal build | `npm ci && npm run build` → artifact upload |
+| Integration tests | PostgreSQL 15 + `schema.sql` + `pytest -m integration` |
+
+Workflow: `.github/workflows/ci.yml`
+
+## Continuous Deployment (manual only)
+
+Does **not** run on push. Trigger when needed:
+
+1. GitHub → **Actions** → **Deploy** → **Run workflow**
+2. Choose **staging** or **production**
+3. Optionally set git ref and integration test toggle
+
+Builds a release tarball (artifact). SSH deploy is optional.
+
+Workflow: `.github/workflows/deploy.yml`
+
+### Enable SSH deploy (optional)
+
+**Secrets:** `DEPLOY_SSH_HOST`, `DEPLOY_SSH_USER`, `DEPLOY_SSH_KEY`, `DEPLOY_REMOTE_PATH`, optional `DEPLOY_SSH_PORT`
+
+**Variable:** `DEPLOY_ENABLED` = `true`
+
+Create GitHub **Environments** `staging` / `production` for approval gates (optional).
+
+Remote restart: `scripts/deploy_restart.sh`
+
+---
 
 ## pgAdmin (optional)
 

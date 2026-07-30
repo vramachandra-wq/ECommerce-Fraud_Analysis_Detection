@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.DEV ? "/api" : "");
 
 export class ApiError extends Error {
   status: number;
@@ -145,4 +145,17 @@ export const api = {
       "/portal/chat",
       { method: "POST", body: JSON.stringify({ message, history }) },
     ),
+  auditLog: (params: { limit?: number; offset?: number; orderId?: string } = {}) => {
+    const query = new URLSearchParams();
+    if (params.limit != null) query.set("limit", String(params.limit));
+    if (params.offset != null) query.set("offset", String(params.offset));
+    if (params.orderId) query.set("order_id", params.orderId);
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return apiRequest<{
+      entries: import("./types").AuditLogEntry[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>(`/portal/audit${suffix}`);
+  },
 };
