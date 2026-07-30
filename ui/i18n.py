@@ -1,11 +1,10 @@
 """Lightweight UI i18n (English / Thai) — display-only, no functional impact.
 
 Usage:
-    from ui.i18n import t, cur_sym, language_toggle
+    from ui.i18n import t, cur_sym, set_lang
 
-    language_toggle()
-    st.title(t("app_title"))
-    st.button(t("log_out"))
+    set_lang("th")
+    label = t("log_out")
 
 Notes:
 - Only affects UI labels/text. Currency symbol is always ฿ (display only).
@@ -15,11 +14,10 @@ Notes:
 """
 from __future__ import annotations
 
-import streamlit as st
-
 LANG_KEY = "ui_lang"
 DEFAULT_LANG = "en"
 SUPPORTED_LANGS = ("en", "th")
+_current_lang = DEFAULT_LANG
 
 # ---------------------------------------------------------------------------
 # Translation catalog
@@ -46,6 +44,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 
     # --- Common actions ---
     "log_in": {"en": "Log In", "th": "เข้าสู่ระบบ"},
+    "sign_in_sso": {
+        "en": "Sign in with SSO",
+        "th": "เข้าสู่ระบบด้วย SSO",
+    },
+    "or_continue_with_password": {
+        "en": "Or continue with username and password",
+        "th": "หรือใช้ชื่อผู้ใช้และรหัสผ่าน",
+    },
+    "sso_login_failed": {
+        "en": "SSO sign-in failed",
+        "th": "เข้าสู่ระบบ SSO ไม่สำเร็จ",
+    },
     "log_out": {"en": "Log Out", "th": "ออกจากระบบ"},
     "change_password": {"en": "Change Password", "th": "เปลี่ยนรหัสผ่าน"},
     "current_password": {"en": "Current Password", "th": "รหัสผ่านปัจจุบัน"},
@@ -855,8 +865,14 @@ _validate_catalog()
 
 
 def _lang() -> str:
-    lang = st.session_state.get(LANG_KEY, DEFAULT_LANG)
-    return lang if lang in SUPPORTED_LANGS else DEFAULT_LANG
+    return _current_lang if _current_lang in SUPPORTED_LANGS else DEFAULT_LANG
+
+
+def set_lang(lang: str) -> None:
+    """Set active UI language for subsequent ``t()`` / ``format_duration_minutes()`` calls."""
+    global _current_lang
+    code = (lang or DEFAULT_LANG).strip().lower()
+    _current_lang = code if code in SUPPORTED_LANGS else DEFAULT_LANG
 
 
 def t(key: str, **kwargs) -> str:
@@ -892,31 +908,3 @@ def format_duration_minutes(minutes) -> str:
 def cur_sym() -> str:
     """Currency symbol shown in the UI. Always Thai Baht (฿)."""
     return "฿"
-
-
-def language_toggle(*, inline: bool = False) -> None:
-    """Renders an EN / Thai language dropdown."""
-    if LANG_KEY not in st.session_state:
-        st.session_state[LANG_KEY] = DEFAULT_LANG
-    if "_lang_selector" not in st.session_state:
-        st.session_state["_lang_selector"] = st.session_state[LANG_KEY]
-
-    def _select() -> str:
-        return st.selectbox(
-            t("language"),
-            options=list(SUPPORTED_LANGS),
-            format_func=lambda code: "English" if code == "en" else "ไทย",
-            key="_lang_selector",
-            label_visibility="collapsed",
-        )
-
-    if inline:
-        choice = _select()
-    else:
-        cols = st.columns([0.65, 0.35])
-        with cols[1]:
-            choice = _select()
-
-    if choice != st.session_state[LANG_KEY]:
-        st.session_state[LANG_KEY] = choice
-        st.rerun()

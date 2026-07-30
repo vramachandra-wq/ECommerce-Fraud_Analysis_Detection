@@ -209,10 +209,3 @@
   text-underline-offset: 2px;
 }
 .link-btn:hover { color: #1565c0; }
-
-.auth-demo {
-  margin-top: 1rem;
-  text-align: center;
-  color: var(--muted);
-  font-size: 0.78rem;
-}

@@ -7,6 +7,7 @@ import { AdminPage } from "./pages/AdminPage";
 import { ChatbotPage } from "./pages/ChatbotPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
+import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { PowerBIPage } from "./pages/PowerBIPage";
 import { PAGE_ROUTES } from "./types";
 
@@ -24,44 +25,45 @@ export default function App() {
     <I18nProvider>
       <AuthProvider>
         <Routes>
-            <Route path="/login" element={<LoginPage />} />
-            <Route element={<AppLayout />}>
-              <Route index element={<HomeRedirect />} />
-              <Route
-                path="/dashboard"
-                element={
-                  <ProtectedPage page="FRAUD_DASHBOARD">
-                    <DashboardPage />
-                  </ProtectedPage>
-                }
-              />
-              <Route
-                path="/admin"
-                element={
-                  <ProtectedPage page="ADMIN_PANEL">
-                    <AdminPage />
-                  </ProtectedPage>
-                }
-              />
-              <Route
-                path="/analytics"
-                element={
-                  <ProtectedPage page="POWER_BI_DASHBOARD">
-                    <PowerBIPage />
-                  </ProtectedPage>
-                }
-              />
-              <Route
-                path="/chatbot"
-                element={
-                  <ProtectedPage page="AI_CHATBOT">
-                    <ChatbotPage />
-                  </ProtectedPage>
-                }
-              />
-            </Route>
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route element={<AppLayout />}>
+            <Route index element={<HomeRedirect />} />
+            <Route path="/change-password" element={<ChangePasswordPage />} />
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedPage page="FRAUD_DASHBOARD">
+                  <DashboardPage />
+                </ProtectedPage>
+              }
+            />
+            <Route
+              path="/admin"
+              element={
+                <ProtectedPage page="ADMIN_PANEL">
+                  <AdminPage />
+                </ProtectedPage>
+              }
+            />
+            <Route
+              path="/analytics"
+              element={
+                <ProtectedPage page="POWER_BI_DASHBOARD">
+                  <PowerBIPage />
+                </ProtectedPage>
+              }
+            />
+            <Route
+              path="/chatbot"
+              element={
+                <ProtectedPage page="AI_CHATBOT">
+                  <ChatbotPage />
+                </ProtectedPage>
+              }
+            />
+          </Route>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
       </AuthProvider>
     </I18nProvider>
   );

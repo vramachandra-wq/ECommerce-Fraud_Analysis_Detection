@@ -14,64 +14,50 @@ interface AuthContextValue {
   session: AuthSession | null;
   loading: boolean;
   login: (username: string, password: string) => Promise<void>;
+  completeSsoLogin: () => Promise<void>;
   logout: () => void;
   hasPage: (page: PageKey) => boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-const STORAGE_KEY = "metro_cart_session";
+const AUTH_METHOD_KEY = "metro_cart_auth_method";
+const PORTAL_BASE_URL = new URL(import.meta.env.BASE_URL, window.location.origin).toString();
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      setLoading(false);
-      return;
-    }
-    try {
-      const parsed = JSON.parse(raw) as AuthSession;
-      setSession(parsed);
-      api
-        .me()
-        .then((me) => {
-          setSession((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  analyst: me.analyst,
-                  granted_pages: me.granted_pages,
-                  is_admin: me.is_admin,
-                }
-              : prev,
-          );
-        })
-        .catch(() => {
-          localStorage.removeItem(STORAGE_KEY);
-          localStorage.removeItem("metro_cart_token");
-          setSession(null);
-        })
-        .finally(() => setLoading(false));
-    } catch {
-      localStorage.removeItem(STORAGE_KEY);
-      localStorage.removeItem("metro_cart_token");
-      setLoading(false);
-    }
+    api
+      .me()
+      .then((me) => {
+        setSession({ ...me, token: "" } as AuthSession);
+      })
+      .catch(() => {
+        localStorage.removeItem(AUTH_METHOD_KEY);
+        setSession(null);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   const login = useCallback(async (username: string, password: string) => {
     const data = await api.login(username, password);
-    localStorage.setItem("metro_cart_token", data.token);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    setSession(data);
+    localStorage.setItem(AUTH_METHOD_KEY, "password");
+    setSession({ ...data, token: "" } as AuthSession);
+  }, []);
+
+  const completeSsoLogin = useCallback(async () => {
+    const data = await api.ssoComplete();
+    localStorage.setItem(AUTH_METHOD_KEY, "sso");
+    setSession({ ...data, token: "" } as AuthSession);
   }, []);
 
   const logout = useCallback(() => {
-    localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem("metro_cart_token");
+    localStorage.removeItem(AUTH_METHOD_KEY);
     setSession(null);
+    const apiOrigin = import.meta.env.VITE_API_ORIGIN ?? "http://127.0.0.1:8000";
+    const returnTo = new URL("login", PORTAL_BASE_URL).toString();
+    window.location.href = `${apiOrigin}/auth/sso/logout?return_to=${encodeURIComponent(returnTo)}`;
   }, []);
 
   const hasPage = useCallback(
@@ -80,8 +66,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ session, loading, login, logout, hasPage }),
-    [session, loading, login, logout, hasPage],
+    () => ({ session, loading, login, completeSsoLogin, logout, hasPage }),
+    [session, loading, login, completeSsoLogin, logout, hasPage],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

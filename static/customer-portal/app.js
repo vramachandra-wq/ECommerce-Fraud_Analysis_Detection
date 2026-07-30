@@ -270,8 +270,7 @@ async function renderLogin(mode = "login") {
       </div>`;
     actions = `
       <button class="btn btn-primary" style="width:100%" type="submit">${esc(t("sign_in"))}</button>
-      <button type="button" class="btn btn-secondary" style="width:100%;margin-top:0.65rem" id="goto-change-password">${esc(t("change_password"))}</button>
-      <p class="auth-demo">${esc(t("demo_hint"))}</p>`;
+      <button type="button" class="btn btn-secondary" style="width:100%;margin-top:0.65rem" id="goto-change-password">${esc(t("change_password"))}</button>`;
   }
 
   document.getElementById("app").innerHTML = `

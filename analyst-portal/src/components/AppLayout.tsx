@@ -1,5 +1,5 @@
 import { NavLink, Outlet, Navigate } from "react-router-dom";
-import { LogOut, Shield } from "lucide-react";
+import { KeyRound, LogOut, Shield } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { LanguageToggle, PAGE_LABEL_KEYS, useI18n } from "../i18n";
 import { PAGE_ROUTES, type PageKey } from "../types";
@@ -67,6 +67,17 @@ export function AppLayout() {
               </NavLink>
             ))}
           </nav>
+          <NavLink
+            to="/change-password"
+            className={({ isActive }) =>
+              `mt-2 flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${
+                isActive ? "bg-brand text-white" : "text-slate-700 hover:bg-slate-100"
+              }`
+            }
+          >
+            <KeyRound className="h-4 w-4" />
+            {t("change_password")}
+          </NavLink>
           <Button variant="ghost" className="mt-4 w-full justify-start gap-2" onClick={logout}>
             <LogOut className="h-4 w-4" />
             {t("log_out")}

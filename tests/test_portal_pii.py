@@ -104,22 +104,32 @@ def test_portal_order_detail_full_for_admin(
     assert order["ip_address"] == "192.168.1.100"
 
 
+@patch("api.admin.log_system_event")
 @patch("api.admin.blacklist_entity_from_order", return_value=("email", "rahul.mehta@example.com"))
 @patch("api.admin.psycopg2.connect")
-def test_blacklist_from_order_endpoint(mock_connect, _bl):
-    mock_conn = MagicMock()
-    mock_cursor = MagicMock()
-    mock_connect.return_value = mock_conn
-    mock_conn.cursor.return_value = mock_cursor
+def test_blacklist_from_order_endpoint(mock_connect, _bl, _log):
+    from api.auth import get_current_session
+    from auth.analyst_auth import ALL_PAGES
+    from tests.conftest import make_analyst_session
 
-    response = client.post(
-        "/blacklist-from-order",
-        json={
-            "order_id": "ORD-PII-1",
-            "entity_type": "email",
-            "reason": "fraud",
-            "blacklisted_by": "A1",
-        },
-    )
-    assert response.status_code == 200
-    assert "EMAIL" in response.json()["message"]
+    session = make_analyst_session(pages=list(ALL_PAGES))
+    app.dependency_overrides[get_current_session] = lambda: session
+    try:
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value.__enter__.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+
+        response = client.post(
+            "/blacklist-from-order",
+            json={
+                "order_id": "ORD-PII-1",
+                "entity_type": "email",
+                "reason": "fraud",
+                "blacklisted_by": "A1",
+            },
+        )
+        assert response.status_code == 200
+        assert "EMAIL" in response.json()["message"]
+    finally:
+        app.dependency_overrides.pop(get_current_session, None)

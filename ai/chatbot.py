@@ -3,16 +3,13 @@ import logging
 import pandas as pd
 import json
 
-from groq import APIConnectionError
 from ai.groq_client import get_groq_client, create_chat_completion
 from ai.prompt_constants import (
-    GROQ_API_KEY,
     GROQ_INTENT_MODEL,
     GROQ_REPAIR_MODEL,
     GROQ_SQL_MODEL,
     GROQ_SUMMARY_MODEL,
     MAX_HISTORY,
-    MAX_STORED_MESSAGES,
     MARKDOWN_PREVIEW_ROWS,
     SCHEMA_CONTEXT,
     SQL_SYSTEM_PROMPT,
@@ -35,8 +32,7 @@ from ai.prompt_constants import (
     RECOMMENDATION_MAX_TOKENS,
     RECOMMENDATION_REASONING_EFFORT,
 )
-from database.connection import get_pooled_connection, release_pooled_connection
-from database.transaction_repository import log_chatbot_interaction
+
 
 _KNOWN_DIMENSION_TABLES = [
     "customers",
@@ -53,34 +49,16 @@ _BLOCKED_KEYWORDS = [
 
 SENSITIVE_COLUMNS = {
     "email": "email",
-    "phone_number": "phone",
     "phone": "phone",
+    "phone_number": "phone",
     "mobile": "phone",
     "mobile_number": "phone",
     "address": "address",
     "default_address": "address",
+    "street": "address",
+    "ip": "ip",
     "ip_address": "ip",
-    "password": "secret",
 }
-
-
-def _sensitive_mask_type(column_name: str) -> str | None:
-    """Resolve mask type from an exact column name or common PII naming patterns."""
-    col = str(column_name).lower().strip()
-    if col in SENSITIVE_COLUMNS:
-        return SENSITIVE_COLUMNS[col]
-    if "email" in col:
-        return "email"
-    if "phone" in col or "mobile" in col:
-        return "phone"
-    if "password" in col or col in {"secret", "pwd"}:
-        return "secret"
-    if "ip_address" in col or col == "ip":
-        return "ip"
-    if "address" in col:
-        return "address"
-    return None
-
 
 PROHIBITED_SQL_COLUMNS = {
     "customers.password",
@@ -285,7 +263,7 @@ def _get_last_result_context(history: list[dict]) -> str:
             df = _restore_dataframe_types(df)
             df = sanitize_dataframe_for_llm(df)
             if not df.empty:
-                return dataframe_to_markdown(df, max_rows=MARKDOWN_PREVIEW_ROWS)
+                return df.head(MARKDOWN_PREVIEW_ROWS).to_markdown(index=False)
         except Exception:
             continue
     return ""
@@ -339,246 +317,6 @@ SAMPLE RESULT (first 3 rows — full dataset is larger):
 {dataframe_to_markdown(previous_df.head(3))}
 """
 
-# def _detect_analysis_context(
-#     user_query: str,
-#     sql_query: str,
-#     result_df: pd.DataFrame,
-#     assistant_summary: str,
-# ) -> dict:
-#     """
-#     Detect the business domains involved in the current analysis.
-
-#     Returns:
-#         {
-#             "fraud": True,
-#             "customer": False,
-#             "product": True,
-#             ...
-#         }
-#     """
-
-#     combined_text = " ".join([
-#         user_query.lower(),
-#         sql_query.lower(),
-#         assistant_summary.lower(),
-#         " ".join(result_df.columns.astype(str).str.lower())
-#     ])
-
-#     topics = {
-#         "fraud": [
-#             "fraud",
-#             "rejected",
-#             "flagged",
-#             "risk",
-#             "is_fraud",
-#             "rule",
-#             "review"
-#         ],
-
-#         "customer": [
-#             "customer",
-#             "user",
-#             "customer_name",
-#             "email",
-#             "phone"
-#         ],
-
-#         "product": [
-#             "product",
-#             "category",
-#             "item"
-#         ],
-
-#         "geography": [
-#             "city",
-#             "state",
-#             "country",
-#             "zip"
-#         ],
-
-#         "device": [
-#             "device",
-#             "ip",
-#             "browser"
-#         ],
-
-#         "revenue": [
-#             "amount",
-#             "revenue",
-#             "sales",
-#             "price"
-#         ],
-
-#         "order": [
-#             "order",
-#             "approved",
-#             "quantity"
-#         ]
-#     }
-
-#     detected = {}
-
-#     for topic, keywords in topics.items():
-#         detected[topic] = any(
-#             word in combined_text
-#             for word in keywords
-#         )
-
-#     return detected
-
-# def _generate_recommendations(context: dict) -> dict:
-#     """
-#     Generate follow-up questions, business advisories,
-#     and related analytical questions based on the detected context.
-#     """
-
-#     recommendations = {
-#         "followups": [],
-#         "advisories": [],
-#         "explore": []
-#     }
-
-#     if context.get("fraud"):
-#         recommendations["followups"].extend([
-#             "Which products have the highest fraud rate?",
-#             "Which customers are repeatedly involved in fraudulent transactions?",
-#             "Show fraud trends over time.",
-#             "Which fraud rules are triggered most frequently?",
-#             "Which states have the highest fraud percentage?"
-#         ])
-
-#         recommendations["advisories"].extend([
-#             "Monitor repeat fraudulent customers.",
-#             "Review fraud rules with the highest trigger frequency.",
-#             "Strengthen verification for high-value transactions.",
-#             "Investigate regions with abnormal fraud activity."
-#         ])
-
-#         recommendations["explore"].extend([
-#             "Analyze fraud by device.",
-#             "Compare fraud across product categories."
-#         ])
-
-#     if context.get("customer"):
-#         recommendations["followups"].extend([
-#             "Who are the top spending customers?",
-#             "Which customers have the highest rejection rate?",
-#             "Show customer purchases by state.",
-#             "Which customers place the most orders?"
-#         ])
-
-#         recommendations["advisories"].extend([
-#             "Identify high-value customers for retention.",
-#             "Review customers with frequent rejected orders."
-#         ])
-
-#     if context.get("product"):
-#         recommendations["followups"].extend([
-#             "Which products generate the highest revenue?",
-#             "Which products have the highest fraud rate?",
-#             "Compare product category performance.",
-#             "Show monthly sales by product."
-#         ])
-
-#         recommendations["advisories"].extend([
-#             "Review products with increasing fraud trends.",
-#             "Monitor low-performing products."
-#         ])
-
-#     if context.get("geography"):
-#         recommendations["followups"].extend([
-#             "Compare fraud across states.",
-#             "Which cities generate the highest revenue?",
-#             "Show approval rate by region."
-#         ])
-
-#         recommendations["advisories"].extend([
-#             "Focus fraud monitoring in high-risk regions.",
-#             "Compare approval rates across locations."
-#         ])
-
-#     if context.get("device"):
-#         recommendations["followups"].extend([
-#             "Which devices are linked to the most fraud?",
-#             "Compare fraud by device type."
-#         ])
-
-#         recommendations["advisories"].extend([
-#             "Monitor devices associated with repeated fraud."
-#         ])
-
-#     if context.get("revenue"):
-#         recommendations["followups"].extend([
-#             "Show monthly revenue trend.",
-#             "Which products contribute the most revenue?",
-#             "Compare revenue across categories."
-#         ])
-
-#         recommendations["advisories"].extend([
-#             "Monitor revenue fluctuations.",
-#             "Review declining product performance."
-#         ])
-
-#     # Remove duplicates while preserving order
-#     recommendations["followups"] = list(dict.fromkeys(recommendations["followups"]))
-#     recommendations["advisories"] = list(dict.fromkeys(recommendations["advisories"]))
-#     recommendations["explore"] = list(dict.fromkeys(recommendations["explore"]))
-
-#     return recommendations
-
-# def _render_recommendations(recommendations: dict):
-#     """
-#     Render AI-powered follow-up questions and business recommendations.
-#     """
-
-#     st.markdown("---")
-#     st.markdown("## 🤖 AI Recommendations")
-
-    # ----------------------------
-    # Follow-up Questions
-    # ----------------------------
-
-    # # for idx, msg in enumerate(st.session_state.messages):
-    # #     with st.chat_message(msg["role"]):
-
-    # #         st.markdown(msg["content"])
-
-
-    # #         followups = msg.get("followups", [])
-
-    # #         if followups:
-    # #             with st.expander("🔍 Suggested Follow-up Questions", expanded=True):
-    # #                 for i, question in enumerate(followups):
-
-    # #                     if st.button(
-    # #                         f"💡 {question}",
-    # #                         key=f"followup_{idx}_{i}",
-    # #                         use_container_width=True,
-    # #                     ):
-    # #                         st.session_state.selected_followup = question
-    # #                         st.rerun()
-    #         # for question in followups[:5]:
-    #         #     st.markdown(f"• {question}")
-
-    # # ----------------------------
-    # # Business Advisories
-    # # ----------------------------
-    # advisories = recommendations.get("advisories", [])
-
-    # if advisories:
-    #     with st.expander("💡 Business Advisory", expanded=False):
-    #         for advice in advisories[:4]:
-    #             st.markdown(f"• {advice}")
-
-    # # ----------------------------
-    # # Explore More
-    # # ----------------------------
-    # explore = recommendations.get("explore", [])
-
-    # if explore:
-    #     with st.expander("📈 Explore More", expanded=False):
-    #         for item in explore[:3]:
-    #             st.markdown(f"• {item}")   
 
 def _generate_ai_recommendations(
     client,
@@ -592,7 +330,7 @@ def _generate_ai_recommendations(
     Generate AI-powered follow-up questions and business advice.
     """
 
-    data_preview = dataframe_to_markdown(sanitized_df, max_rows=MARKDOWN_PREVIEW_ROWS)
+    data_preview = sanitized_df.head(MARKDOWN_PREVIEW_ROWS).to_markdown(index=False)
 
     prompt = AI_RECOMMENDATION_PROMPT.format(
         user_query=user_query,
@@ -641,8 +379,7 @@ def _generate_ai_recommendations(
 
     except Exception as e:
         logging.exception("AI recommendation generation failed")
-        # Avoid Streamlit UI calls here so the same helper works for the
-        # headless portal API (ai/chat_api.py) as well as Streamlit.
+        logging.warning(_friendly_error_message(e, "recommendations"))
         return {
             "followups": [],
             "business_advice": [],
@@ -737,7 +474,7 @@ def _repair_sql(sql: str, error: str) -> tuple[str, int, int]:
         in_tok, out_tok = _extract_usage(response)
         return _extract_sql(response.choices[0].message.content or ""), in_tok, out_tok
     except Exception as e:
-        logging.warning("SQL repair failed: %s", e)
+        logging.warning(_friendly_error_message(e, "repair"))
         return sql, 0, 0
 
 
@@ -763,81 +500,67 @@ from utils.pii import can_view_full_pii, mask_address, mask_email, mask_ip, mask
 def _mask_email(value):
     if pd.isna(value):
         return value
+    return mask_email(str(value))
 
-    value = str(value)
-
-    if "@" not in value:
-        return value
-
-    name, domain = value.split("@", 1)
-
-    if len(name) <= 1:
-        masked = "*"
-    else:
-        masked = name[0] + "*" * (len(name) - 1)
-
-    return f"{masked}@{domain}"
 
 def _mask_phone(value):
     if pd.isna(value):
         return value
+    return mask_phone(str(value))
 
-    value = str(value)
-
-    if len(value) <= 4:
-        return value
-
-    return "*" * (len(value) - 4) + value[-4:]
 
 def _mask_address(value):
     if pd.isna(value):
         return value
-    value = str(value).strip()
-    if len(value) <= 6:
-        return "***"
-    return value[:4] + "***" + value[-2:]
+    return mask_address(str(value))
+
 
 def _mask_ip(value):
     if pd.isna(value):
         return value
-    value = str(value).strip()
-    parts = value.split(".")
-    if len(parts) == 4:
-        return f"{parts[0]}.{parts[1]}.*.*"
-    if len(value) <= 4:
-        return "***"
-    return value[:4] + "***"
+    return mask_ip(str(value))
+
+
+def _sensitive_mask_type(column_name):
+    key = column_name.lower()
+    exact = SENSITIVE_COLUMNS.get(key)
+    if exact:
+        return exact
+
+    if key == "ip" or "ip_address" in key:
+        return "ip"
+    if "email" in key:
+        return "email"
+    if "phone" in key or "mobile" in key:
+        return "phone"
+    if "address" in key or "street" in key:
+        return "address"
+    return None
+
 
 def _mask_value(column_name, value):
     mask_type = _sensitive_mask_type(column_name)
-
     if mask_type == "email":
-        return mask_email(value)
-
+        return _mask_email(value)
     if mask_type == "phone":
-        return mask_phone(value)
-
+        return _mask_phone(value)
     if mask_type == "address":
-        return mask_address(value)
-
+        return _mask_address(value)
     if mask_type == "ip":
-        return mask_ip(value)
-
+        return _mask_ip(value)
     if mask_type == "secret":
         return "********" if not pd.isna(value) else value
-
     return value
+
 
 def _apply_pii_masks(df: pd.DataFrame) -> pd.DataFrame:
     """Unconditionally mask known PII columns."""
     masked_df = df.copy()
     for column in masked_df.columns:
-        mask_type = _sensitive_mask_type(column)
-        if mask_type:
+        if _sensitive_mask_type(column):
             masked_df[column] = masked_df[column].apply(
                 lambda value, col=column: _mask_value(col, value)
             )
-
     return masked_df
 
 def mask_sensitive_dataframe(
@@ -860,6 +583,7 @@ def sanitize_dataframe_for_llm(df: pd.DataFrame) -> pd.DataFrame:
     if df is None or df.empty:
         return df
     return _apply_pii_masks(df)
+
 
 
 def dataframe_to_markdown(df: pd.DataFrame, *, max_rows: int | None = None) -> str:

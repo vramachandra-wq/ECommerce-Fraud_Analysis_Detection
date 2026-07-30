@@ -1,56 +1,36 @@
-# Metro Cart Analyst Portal
+# Analyst Portal
 
-Two ways to run the analyst UI (replacement for `analyst_app.py`):
+Production serves the static portal from `static/analyst-portal/` via FastAPI:
 
-## Option 1 — No Node.js (recommended if npm is not installed)
-
-Start only the API:
-
-```bash
-uvicorn api.main:app --reload
-```
-
-Open:
-
-```
+```text
 http://127.0.0.1:8000/portal/
 ```
 
-Static files live in `static/analyst-portal/` and are served by FastAPI.
+Start the platform with:
 
-## Option 2 — React dev server (requires Node.js 18+)
-
-Install Node.js from https://nodejs.org/ then:
-
-## Environment
-
-Copy `.env.example` to `.env` in the project root and set:
-
-```env
-CORS_ALLOW_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+```powershell
+.\start.ps1
 ```
 
-The Vite dev server proxies `/api/*` to `http://127.0.0.1:8000` (see `vite.config.ts`).
+By default `start.ps1` does **not** rebuild from React, so hand-maintained static assets (SSO, rule matrix, IST scheduler labels, etc.) stay intact.
 
-For production builds, set `VITE_API_BASE_URL` to your deployed API URL.
+## Optional local React development
 
-## Features (parity with Streamlit `analyst_app.py`)
+```powershell
+cd analyst-portal
+npm install
+npm run dev
+```
 
-| Page | Route |
-|------|-------|
-| Fraud Analyst Dashboard | `/dashboard` |
-| Admin Control Panel | `/admin` |
-| Analytics Dashboards (Power BI) | `/analytics` |
-| AI Chatbot | `/chatbot` |
+Vite proxies API calls to FastAPI on port 8000.
 
-RBAC uses the same `master.analyst_permissions` page keys as the Streamlit app.
+## Publishing the React build (opt-in)
 
-## API endpoints added for the React UI
+This replaces files under `static/analyst-portal/`. Only do this when you intend the React app to be the served UI:
 
-- `POST /auth/login`, `GET /auth/me`
-- `GET /portal/queue`, `GET /portal/orders/{id}`
-- `GET /portal/analytics/*`, `GET /portal/permissions`, `GET /portal/rules`
-- `POST /portal/chat`
-- Existing mutation endpoints: `/approve-order`, `/blacklist-ip`, etc.
-
-See Swagger at **http://127.0.0.1:8000/docs**.
+```powershell
+.\start.ps1 -BuildPortal
+# or
+cd analyst-portal
+npm run build
+```

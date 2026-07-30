@@ -21,7 +21,7 @@ SHOP_DIR = Path(__file__).resolve().parent.parent / "static" / "customer-portal"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Background job: auto-approve backlog orders that exceeded delay_minutes
-    start_auto_approval_scheduler(interval_seconds=60)
+    start_auto_approval_scheduler(interval_seconds=1800)
     yield
     stop_auto_approval_scheduler()
 

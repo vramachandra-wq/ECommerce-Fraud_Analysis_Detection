@@ -77,10 +77,6 @@ EXTRA = {
     "shop_account": {"en": "My Account", "th": "บัญชีของฉัน"},
     "shop_section": {"en": "Shopping", "th": "ร้านค้า"},
     "hi_user": {"en": "Hi {name}", "th": "สวัสดี {name}"},
-    "demo_hint": {
-        "en": "Demo: U1001 / password123",
-        "th": "บัญชีทดสอบ: U1001 / password123",
-    },
     "loading_catalog": {"en": "Loading catalog…", "th": "กำลังโหลดสินค้า…"},
     "order_status_label": {"en": "Status", "th": "สถานะ"},
     "customer_login_subtitle": {

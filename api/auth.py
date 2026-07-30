@@ -6,11 +6,10 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import time
 from typing import Any, Dict, Optional
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Cookie, Depends, Header, HTTPException
 
 from auth.analyst_auth import (
     ALL_PAGES,
@@ -19,11 +18,11 @@ from auth.analyst_auth import (
     get_granted_pages,
     is_admin,
 )
-from config import DB_CONFIG
+from config import DB_CONFIG, PORTAL_SECRET, PORTAL_TOKEN_TTL
 import psycopg2
 
-PORTAL_SECRET = os.environ.get("PORTAL_SECRET", "metro-cart-dev-secret-change-me")
-TOKEN_TTL_SECONDS = int(os.environ.get("PORTAL_TOKEN_TTL", "86400"))
+TOKEN_TTL_SECONDS = PORTAL_TOKEN_TTL
+PORTAL_SESSION_COOKIE = "metro_cart_session"
 
 
 def _ordered_pages(granted) -> list[str]:
@@ -62,7 +61,11 @@ def authenticate_credentials(username: str, password: str) -> Optional[Dict[str,
             analyst = authenticate_analyst(cur, username, password, conn=conn)
             if not analyst:
                 return None
-            granted = get_granted_pages(cur, analyst)
+            return _session_for_analyst(cur, analyst)
+
+
+def _session_for_analyst(cur, analyst: Dict[str, Any]) -> Dict[str, Any]:
+    granted = get_granted_pages(cur, analyst)
     return {
         "analyst": analyst,
         "granted_pages": _ordered_pages(granted),
@@ -94,13 +97,48 @@ def get_analyst_by_id(analyst_id: str) -> Optional[Dict[str, Any]]:
     }
 
 
-def get_current_session(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
-    if not authorization or not authorization.startswith("Bearer "):
+def get_session_by_username(username: str) -> Optional[Dict[str, Any]]:
+    """Build an analyst session from username (used after Keycloak SSO)."""
+    with psycopg2.connect(**DB_CONFIG) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT analyst_id, employee_name, username, role
+                FROM master.analyst_users
+                WHERE username = %s
+                """,
+                (username,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            analyst = dict(zip(ANALYST_FIELDS, row))
+            return _session_for_analyst(cur, analyst)
+
+
+def _extract_session_token(
+    authorization: Optional[str],
+    portal_session: Optional[str],
+) -> Optional[str]:
+    if authorization and authorization.startswith("Bearer "):
+        return authorization.removeprefix("Bearer ").strip()
+    if portal_session:
+        return portal_session.strip()
+    return None
+
+
+def get_current_session(
+    authorization: Optional[str] = Header(None),
+    portal_session: Optional[str] = Cookie(None, alias=PORTAL_SESSION_COOKIE),
+) -> Dict[str, Any]:
+    token = _extract_session_token(authorization, portal_session)
+    if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    token = authorization.removeprefix("Bearer ").strip()
     analyst_id = verify_session_token(token)
     if not analyst_id:
         raise HTTPException(status_code=401, detail="Invalid or expired session")
+    if str(analyst_id).startswith("customer:"):
+        raise HTTPException(status_code=401, detail="Analyst session required")
     session = get_analyst_by_id(analyst_id)
     if not session:
         raise HTTPException(status_code=401, detail="User not found")
@@ -114,3 +152,10 @@ def require_page(page_key: str):
         return session
 
     return _checker
+
+
+def require_admin(session: Dict[str, Any] = Depends(get_current_session)) -> Dict[str, Any]:
+    """Require an authenticated Admin analyst (stricter than page RBAC)."""
+    if not session.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin role required")
+    return session

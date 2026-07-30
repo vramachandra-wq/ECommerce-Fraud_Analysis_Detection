@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { ChatMessage, ChatResponse } from "../types";
 import { Alert, Button, Card, DataTable } from "../components/ui";
@@ -55,8 +55,15 @@ export function ChatbotPage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [groqConfigured, setGroqConfigured] = useState(true);
 
   const canSend = useMemo(() => Boolean(input.trim()) && !loading, [input, loading]);
+
+  useEffect(() => {
+    api.config().then((cfg) => setGroqConfigured(Boolean(cfg.groq_configured ?? true))).catch(() => {
+      setGroqConfigured(true);
+    });
+  }, []);
 
   async function sendMessage(text: string) {
     if (!text.trim() || loading) return;
@@ -118,6 +125,11 @@ export function ChatbotPage() {
       </Card>
 
       {error ? <Alert tone="error">{error}</Alert> : null}
+      {!groqConfigured ? (
+        <Alert tone="warning">
+          Groq API key is missing. Analytics chat is unavailable until `GROQ_API_KEY` is configured.
+        </Alert>
+      ) : null}
 
       <Card title="Conversation">
         <div className="mb-4 max-h-[560px] space-y-4 overflow-y-auto">
@@ -192,9 +204,9 @@ export function ChatbotPage() {
             placeholder="Ask about orders, fraud, revenue..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            disabled={loading}
+            disabled={loading || !groqConfigured}
           />
-          <Button type="submit" disabled={!canSend}>
+          <Button type="submit" disabled={!canSend || !groqConfigured}>
             {loading ? "Thinking..." : "Send"}
           </Button>
           <Button type="button" variant="secondary" onClick={() => setMessages([])} disabled={loading}>

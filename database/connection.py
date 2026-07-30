@@ -1,18 +1,19 @@
 """Connection pooling for PostgreSQL via psycopg2."""
 from contextlib import contextmanager
-import threading
+from threading import Lock
+from typing import Optional
 
 import psycopg2
 import psycopg2.pool
 
 from config import DB_CONFIG
 
-_pool: psycopg2.pool.ThreadedConnectionPool | None = None
-_pool_lock = threading.Lock()
+_pool: Optional[psycopg2.pool.ThreadedConnectionPool] = None
+_pool_lock = Lock()
 
 
 def get_pool():
-    """Singleton threaded connection pool (thread-safe lazy init)."""
+    """Singleton threaded connection pool shared across the process."""
     global _pool
     if _pool is None:
         with _pool_lock:
@@ -26,11 +27,14 @@ def get_pool():
 
 
 def reset_pool_for_tests() -> None:
-    """Close and clear the pool — for unit tests only."""
+    """Drop the cached pool (unit tests only)."""
     global _pool
     with _pool_lock:
         if _pool is not None:
-            _pool.closeall()
+            try:
+                _pool.closeall()
+            except Exception:
+                pass
             _pool = None
 
 

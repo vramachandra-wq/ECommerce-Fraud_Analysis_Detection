@@ -9,6 +9,7 @@ from typing import Any, List, Optional, Sequence
 
 from fraud_engine.audit import fetch_order_audit_context, log_review_action
 from fraud_engine.backlog import lock_backlog_order_ids
+from utils.system_audit import log_system_event
 
 
 SYSTEM_ANALYST_ID = "SYSTEM"
@@ -61,6 +62,20 @@ def sync_expired_holds(
             rule_name=ctx.get("rule_name"),
             delay_minutes=ctx.get("delay_minutes"),
             review_comments=TIMEOUT_COMMENT,
+        )
+        log_system_event(
+            cursor,
+            action="ORDER_AUTO_APPROVE",
+            actor_type="system",
+            actor_id=SYSTEM_ANALYST_ID,
+            actor_name="Auto-approval scheduler",
+            resource_type="order",
+            resource_id=order_id,
+            details={
+                "rule_name": ctx.get("rule_name"),
+                "delay_minutes": ctx.get("delay_minutes"),
+            },
+            request_path="scheduler/auto-approval",
         )
         approved += 1
 

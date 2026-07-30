@@ -22,6 +22,7 @@ from fraud_engine.engine import evaluate_order
 from utils.order_utils import calculate_total, generate_order_id
 from utils.queries import list_devices, list_products, list_programs
 from utils.time_utils import utcnow_naive
+from utils.system_audit import actor_from_customer, log_system_event
 
 router = APIRouter()
 
@@ -115,7 +116,21 @@ def shop_login(body: CustomerLoginRequest):
                 cur, body.user_id.strip(), body.password, conn=conn
             )
     if not customer:
+        log_system_event(
+            action="AUTH_LOGIN",
+            actor_type="customer",
+            actor_id=body.user_id.strip(),
+            outcome="failure",
+            details={"reason": "invalid_credentials"},
+            request_path="/shop/auth/login",
+        )
         raise HTTPException(status_code=401, detail="Invalid user ID or password")
+    log_system_event(
+        action="AUTH_LOGIN",
+        **actor_from_customer(customer),
+        outcome="success",
+        request_path="/shop/auth/login",
+    )
     return {
         "customer": customer,
         "token": _customer_token(customer["user_id"]),
@@ -349,6 +364,21 @@ def shop_place_order(
                             for r in rules
                         ],
                     )
+
+                log_system_event(
+                    cur,
+                    action="ORDER_CREATE",
+                    **actor_from_customer(customer),
+                    resource_type="order",
+                    resource_id=order_id,
+                    details={
+                        "status": status,
+                        "amount": amount,
+                        "via": "shop",
+                        "rules": [r.get("rule_id") for r in rules],
+                    },
+                    request_path="/shop/orders",
+                )
     except HTTPException:
         raise
     except Exception as exc:

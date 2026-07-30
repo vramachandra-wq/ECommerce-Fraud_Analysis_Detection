@@ -1,4 +1,4 @@
-"""Unit tests for pure helpers in ai/chatbot.py (mocked Groq / Streamlit)."""
+"""Unit tests for pure helpers in ai/chatbot.py (mocked Groq)."""
 
 from unittest.mock import MagicMock, patch
 
@@ -18,6 +18,7 @@ from ai.chatbot import (
     _mask_email,
     _mask_ip,
     _mask_phone,
+    _sensitive_mask_type,
     _mask_value,
     _repair_sql,
     _restore_dataframe_types,
@@ -66,6 +67,28 @@ def test_strip_sql_comments():
     cleaned = _strip_sql_comments(sql)
     assert cleaned.lower().startswith("select")
     assert "update interpretation" not in cleaned.lower()
+
+
+def test_validate_sql_blocks_password_column():
+    ok, msg = _validate_sql("SELECT password FROM master.customers LIMIT 1")
+    assert ok is False
+    assert "password" in msg.lower()
+
+    ok, msg = _validate_sql(
+        "SELECT customers.password FROM master.customers LIMIT 1"
+    )
+    assert ok is False
+    assert "password" in msg.lower()
+
+
+def test_dataframe_to_markdown_renders_without_recursion():
+    from ai.chatbot import dataframe_to_markdown
+
+    df = pd.DataFrame([{"order_id": "O1", "amount": 10}])
+    text = dataframe_to_markdown(df)
+    assert "O1" in text
+    assert "10" in text
+    assert text != "(empty result)"
 
 
 def test_validate_sql_allows_select_and_with():
@@ -261,6 +284,13 @@ def test_mask_value_by_column():
     assert _mask_value("city", "Chennai") == "Chennai"
 
 
+def test_sensitive_mask_type_handles_aliases():
+    assert _sensitive_mask_type("customer_email") == "email"
+    assert _sensitive_mask_type("mobile_number") == "phone"
+    assert _sensitive_mask_type("shipping_address") == "address"
+    assert _sensitive_mask_type("source_ip_address") == "ip"
+
+
 def test_mask_sensitive_dataframe_role_based():
     df = pd.DataFrame(
         {
@@ -295,6 +325,20 @@ def test_sanitize_dataframe_for_llm_always_masks():
     aliased = sanitize_dataframe_for_llm(df)
     assert aliased.loc[0, "email"] == "al***@example.com"
     assert aliased.loc[0, "city"] == "Chennai"
+
+
+def test_sanitize_dataframe_for_llm_masks_aliased_columns():
+    df = pd.DataFrame(
+        {
+            "customer_email": ["alice@example.com"],
+            "mobile_number": ["9876543210"],
+            "shipping_address": ["21 MG Road, Bengaluru, Karnataka 560001"],
+        }
+    )
+    sanitized = sanitize_dataframe_for_llm(df)
+    assert sanitized.loc[0, "customer_email"] == "al***@example.com"
+    assert sanitized.loc[0, "mobile_number"] == "98******10"
+    assert sanitized.loc[0, "shipping_address"] == "21********, Bengaluru, Karnataka 560001"
 
 
 # ---------- dataframe / chart helpers ----------
@@ -339,11 +383,13 @@ def test_get_best_axis_and_detect_chart_columns():
 
 # ---------- repair / recommendations with mocks ----------
 
+@patch("ai.chatbot.logging.warning")
 @patch("ai.chatbot.get_groq_client", return_value=None)
-def test_repair_sql_without_client(mock_get_client):
+def test_repair_sql_without_client(mock_get_client, mock_warning):
     sql, in_tok, out_tok = _repair_sql("SELECT 1", "error")
     assert sql == "SELECT 1"
     assert (in_tok, out_tok) == (0, 0)
+    mock_warning.assert_called()
 
 
 @patch("ai.chatbot.create_chat_completion")
@@ -384,8 +430,9 @@ def test_generate_ai_recommendations_parses_json(mock_create):
     assert result["business_advice"] == ["Focus on Chennai"]
 
 
+@patch("ai.chatbot.logging.warning")
 @patch("ai.chatbot.create_chat_completion", side_effect=Exception("boom"))
-def test_generate_ai_recommendations_failure_returns_empty(mock_create):
+def test_generate_ai_recommendations_failure_returns_empty(mock_create, mock_warning):
     df = pd.DataFrame({"city": ["Chennai"], "count": [5]})
     result = _generate_ai_recommendations(
         client=MagicMock(),
@@ -396,3 +443,4 @@ def test_generate_ai_recommendations_failure_returns_empty(mock_create):
         conversation_history="",
     )
     assert result == {"followups": [], "business_advice": []}
+    mock_warning.assert_called()

@@ -152,7 +152,8 @@ def test_change_analyst_password_success():
     assert "UPDATE master.analyst_users" in update_sql
     new_hash = cursor.execute.call_args_list[-1][0][1][0]
     assert is_hashed(new_hash)
-    conn.commit.assert_called_once()
+    # Caller (API layer) owns the transaction so Keycloak sync can roll back.
+    conn.commit.assert_not_called()
 
 
 def test_change_analyst_password_by_username_success():
