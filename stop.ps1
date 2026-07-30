@@ -152,10 +152,10 @@ else {
     Write-Host "No service state file found. Cleaning API port..." -ForegroundColor Yellow
 }
 
-# Only the FastAPI port — Streamlit ports are no longer used
+# FastAPI port only
 Stop-PortListeners -Ports @($ApiPort)
 
-Write-Step "Stopping PostgreSQL container..."
+Write-Step "Stopping PostgreSQL + Keycloak containers..."
 Invoke-Compose -ComposeArgs @("-f", "podman-compose.yaml", "down")
 
 Write-Host ""

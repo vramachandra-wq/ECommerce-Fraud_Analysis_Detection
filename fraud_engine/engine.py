@@ -98,7 +98,7 @@ def evaluate_order(cursor: Any, ctx: Dict[str, Any]) -> Dict[str, Any]:
             "is_fraud": False,
         }
 
-    final_status = "PENDING_REVIEW"
+    final_status = "APPROVED"
     delay_minutes = 0
 
     # Every triggered rule is recorded and contributes to the combined reason,
@@ -115,17 +115,20 @@ def evaluate_order(cursor: Any, ctx: Dict[str, Any]) -> Dict[str, Any]:
         if STATUS_PRIORITY[action] > STATUS_PRIORITY[final_status]:
             final_status = action
 
-    # Review timeout: MAX delay_minutes across ALL triggered rules so every
-    # rule that tagged the order receives its full review window.
-    # delay_minutes is always read from rule_master (via _get_rule_metadata).
+    # Review timeout: MAX delay_minutes across triggered rules whose configured
+    # action is HOLD or REVIEW only. PASS / REJECTED do not use a review window,
+    # so their stored delay_minutes must not inflate multi-hit timeouts.
     for rule in triggered:
         meta = _get_rule_metadata(cursor, rule["rule_id"])
-        delay_minutes = max(delay_minutes, int(meta["delay_minutes"] or 0))
+        if meta["action"] in ("ON_HOLD", "PENDING_REVIEW"):
+            delay_minutes = max(delay_minutes, int(meta["delay_minutes"] or 0))
 
     if final_status == "REJECTED":
         delay_minutes = 0
     elif final_status in ("ON_HOLD", "PENDING_REVIEW") and delay_minutes <= 0:
         delay_minutes = DEFAULT_DELAY_MINUTES
+    elif final_status == "APPROVED":
+        delay_minutes = 0
 
     combined_reason = "; ".join(rule["rule_description"] for rule in triggered)
     is_fraud = final_status == "REJECTED"

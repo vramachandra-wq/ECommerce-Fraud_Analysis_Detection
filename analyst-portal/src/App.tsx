@@ -7,6 +7,7 @@ import { AdminPage } from "./pages/AdminPage";
 import { ChatbotPage } from "./pages/ChatbotPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
+import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { PowerBIPage } from "./pages/PowerBIPage";
 import { PAGE_ROUTES } from "./types";
 
@@ -23,11 +24,12 @@ export default function App() {
   return (
     <I18nProvider>
       <AuthProvider>
-        <BrowserRouter>
+        <BrowserRouter basename={import.meta.env.BASE_URL}>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route element={<AppLayout />}>
               <Route index element={<HomeRedirect />} />
+              <Route path="/change-password" element={<ChangePasswordPage />} />
               <Route
                 path="/dashboard"
                 element={

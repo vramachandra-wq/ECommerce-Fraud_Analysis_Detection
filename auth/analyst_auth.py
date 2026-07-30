@@ -140,7 +140,6 @@ def change_analyst_password(
         """,
         (hash_password(new_password), resolved_id),
     )
-    conn.commit()
     return True, "password_change_success"
 
 

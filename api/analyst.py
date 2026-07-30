@@ -1,44 +1,50 @@
-from fastapi import APIRouter, HTTPException
+from typing import Dict, Any, List
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import List
-import psycopg2
 from psycopg2.extras import RealDictCursor
+import psycopg2
+
+from api.auth import get_current_session, require_page
+from auth.analyst_auth import PAGE_FRAUD_DASHBOARD
 from config import DB_CONFIG
 from fraud_engine.audit import fetch_order_audit_context, log_review_action
+from utils.system_audit import actor_from_session, log_system_event
 
 router = APIRouter()
 
-# --- PYDANTIC MODELS ---
 
 class ApproveOrderRequest(BaseModel):
     order_id: str
     approved_at: str
-    reviewed_by: str
-    review_comments: str
+    reviewed_by: str = ""
+    review_comments: str = ""
+
 
 class RejectOrderRequest(BaseModel):
     order_id: str
     rejected_at: str
-    reviewed_by: str
-    review_comments: str
-    is_fraud: bool = True  # Defaults to True if omitted
+    reviewed_by: str = ""
+    review_comments: str = ""
+    is_fraud: bool = True
+
 
 class BatchApproveRequest(BaseModel):
     order_ids: List[str]
     approved_at: str
-    reviewed_by: str
-    review_comments: str
+    reviewed_by: str = ""
+    review_comments: str = ""
+
 
 class BatchRejectRequest(BaseModel):
     order_ids: List[str]
     rejected_at: str
-    reviewed_by: str
-    review_comments: str
+    reviewed_by: str = ""
+    review_comments: str = ""
     is_fraud: bool = True
 
 
 def _lock_and_update_approve(cur, order_id: str, approved_at: str, reviewed_by: str, comments: str) -> bool:
-    """Approve a single order with row lock; returns False if already resolved."""
     cur.execute(
         """
         SELECT order_id FROM master.orders
@@ -84,7 +90,6 @@ def _lock_and_update_approve(cur, order_id: str, approved_at: str, reviewed_by: 
 def _lock_and_update_reject(
     cur, order_id: str, rejected_at: str, reviewed_by: str, comments: str, is_fraud: bool
 ) -> bool:
-    """Reject / mark-fraud with row lock; returns False if already resolved."""
     cur.execute(
         """
         SELECT order_id FROM master.orders
@@ -128,10 +133,16 @@ def _lock_and_update_reject(
     return True
 
 
-# --- ENDPOINTS ---
+def _analyst_id(session: Dict[str, Any]) -> str:
+    return session["analyst"]["analyst_id"]
+
 
 @router.put("/approve-order")
-def approve_order(data: ApproveOrderRequest):
+def approve_order(
+    data: ApproveOrderRequest,
+    session: Dict[str, Any] = Depends(require_page(PAGE_FRAUD_DASHBOARD)),
+):
+    reviewed_by = _analyst_id(session)
     try:
         with psycopg2.connect(**DB_CONFIG) as conn:
             with conn.cursor() as cur:
@@ -139,7 +150,7 @@ def approve_order(data: ApproveOrderRequest):
                     cur,
                     data.order_id,
                     data.approved_at,
-                    data.reviewed_by,
+                    reviewed_by,
                     data.review_comments,
                 )
                 if not ok:
@@ -147,6 +158,15 @@ def approve_order(data: ApproveOrderRequest):
                         status_code=409,
                         detail=f"Order {data.order_id} is no longer in the review queue.",
                     )
+                log_system_event(
+                    cur,
+                    action="ORDER_APPROVE",
+                    **actor_from_session(session),
+                    resource_type="order",
+                    resource_id=data.order_id,
+                    details={"comments": data.review_comments},
+                    request_path="/approve-order",
+                )
         return {"message": "Approved"}
     except HTTPException:
         raise
@@ -155,7 +175,11 @@ def approve_order(data: ApproveOrderRequest):
 
 
 @router.put("/reject-order")
-def reject_order(data: RejectOrderRequest):
+def reject_order(
+    data: RejectOrderRequest,
+    session: Dict[str, Any] = Depends(require_page(PAGE_FRAUD_DASHBOARD)),
+):
+    reviewed_by = _analyst_id(session)
     try:
         with psycopg2.connect(**DB_CONFIG) as conn:
             with conn.cursor() as cur:
@@ -163,7 +187,7 @@ def reject_order(data: RejectOrderRequest):
                     cur,
                     data.order_id,
                     data.rejected_at,
-                    data.reviewed_by,
+                    reviewed_by,
                     data.review_comments,
                     data.is_fraud,
                 )
@@ -172,6 +196,15 @@ def reject_order(data: RejectOrderRequest):
                         status_code=409,
                         detail=f"Order {data.order_id} is no longer in the review queue.",
                     )
+                log_system_event(
+                    cur,
+                    action="ORDER_MARK_FRAUD" if data.is_fraud else "ORDER_REJECT",
+                    **actor_from_session(session),
+                    resource_type="order",
+                    resource_id=data.order_id,
+                    details={"comments": data.review_comments, "is_fraud": data.is_fraud},
+                    request_path="/reject-order",
+                )
         return {"message": "Rejected"}
     except HTTPException:
         raise
@@ -180,7 +213,11 @@ def reject_order(data: RejectOrderRequest):
 
 
 @router.put("/batch-approve")
-def batch_approve(data: BatchApproveRequest):
+def batch_approve(
+    data: BatchApproveRequest,
+    session: Dict[str, Any] = Depends(require_page(PAGE_FRAUD_DASHBOARD)),
+):
+    reviewed_by = _analyst_id(session)
     try:
         processed = []
         skipped = []
@@ -191,13 +228,26 @@ def batch_approve(data: BatchApproveRequest):
                         cur,
                         order_id,
                         data.approved_at,
-                        data.reviewed_by,
+                        reviewed_by,
                         data.review_comments,
                     )
                     if ok:
                         processed.append(order_id)
                     else:
                         skipped.append(order_id)
+                log_system_event(
+                    cur,
+                    action="ORDER_BATCH_APPROVE",
+                    **actor_from_session(session),
+                    resource_type="order",
+                    resource_id=",".join(processed[:20]) or None,
+                    details={
+                        "processed": processed,
+                        "skipped": skipped,
+                        "comments": data.review_comments,
+                    },
+                    request_path="/batch-approve",
+                )
         return {
             "message": f"Batch Approved {len(processed)} orders",
             "processed": processed,
@@ -208,7 +258,11 @@ def batch_approve(data: BatchApproveRequest):
 
 
 @router.put("/batch-reject")
-def batch_reject(data: BatchRejectRequest):
+def batch_reject(
+    data: BatchRejectRequest,
+    session: Dict[str, Any] = Depends(require_page(PAGE_FRAUD_DASHBOARD)),
+):
+    reviewed_by = _analyst_id(session)
     try:
         processed = []
         skipped = []
@@ -219,7 +273,7 @@ def batch_reject(data: BatchRejectRequest):
                         cur,
                         order_id,
                         data.rejected_at,
-                        data.reviewed_by,
+                        reviewed_by,
                         data.review_comments,
                         data.is_fraud,
                     )
@@ -227,6 +281,20 @@ def batch_reject(data: BatchRejectRequest):
                         processed.append(order_id)
                     else:
                         skipped.append(order_id)
+                log_system_event(
+                    cur,
+                    action="ORDER_BATCH_REJECT",
+                    **actor_from_session(session),
+                    resource_type="order",
+                    resource_id=",".join(processed[:20]) or None,
+                    details={
+                        "processed": processed,
+                        "skipped": skipped,
+                        "is_fraud": data.is_fraud,
+                        "comments": data.review_comments,
+                    },
+                    request_path="/batch-reject",
+                )
         return {
             "message": f"Batch Rejected {len(processed)} orders",
             "processed": processed,
@@ -237,7 +305,9 @@ def batch_reject(data: BatchRejectRequest):
 
 
 @router.get("/pending-reviews")
-def get_pending_reviews():
+def get_pending_reviews(
+    _: Dict[str, Any] = Depends(require_page(PAGE_FRAUD_DASHBOARD)),
+):
     try:
         with psycopg2.connect(**DB_CONFIG) as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:

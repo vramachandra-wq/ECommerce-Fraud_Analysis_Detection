@@ -1,12 +1,32 @@
+# Python
 .venv/
-.run/
-.env
-data_csv/
 __pycache__/
 *.py[cod]
 *.pyo
+
+# Environment
+.env
+
+# Runtime / logs
+.run/
+
+# Data
+data_csv/
+
+# Tools (portable Node, etc.)
+.tools/
+
+# Node / React
+analyst-portal/node_modules/
+analyst-portal/dist/
+*.tsbuildinfo
+
+# Testing
 .pytest_cache/
 pytest-cache-files-*/
+
+# IDE / OS
 .vscode/
+.idea/
 .DS_Store
 Thumbs.db

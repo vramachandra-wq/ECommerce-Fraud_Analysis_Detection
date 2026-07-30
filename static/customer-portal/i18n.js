@@ -256,10 +256,6 @@ export const TRANSLATIONS = {
     "en": "Hi {name}",
     "th": "สวัสดี {name}"
   },
-  "demo_hint": {
-    "en": "Demo: U1001 / password123",
-    "th": "บัญชีทดสอบ: U1001 / password123"
-  },
   "loading_catalog": {
     "en": "Loading catalog…",
     "th": "กำลังโหลดสินค้า…"

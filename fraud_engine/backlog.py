@@ -13,9 +13,9 @@ Business rules
 2. Applicable delay_minutes is read from master.rule_master via
    order_rule_hits — NEVER hardcoded.
 3. When an order is associated with multiple rules, use the MAXIMUM
-   delay_minutes among those rules so every triggered rule gets its
-   full review window.
-4. Fallback: if an order has no rule hits, use orders.delay_minutes
+   delay_minutes among triggered rules whose action is HOLD or REVIEW
+   (PASS / REJECTED delays are ignored for timeout calculation).
+4. Fallback: if an order has no HOLD/REVIEW rule hits, use orders.delay_minutes
    (snapshot written at evaluation time), then default 60.
 5. An order is backlog when:
        current_timestamp >= tagged_timestamp + delay_minutes
@@ -61,7 +61,7 @@ def is_backlog_order(
 
 def get_applicable_delay_minutes(cursor: Any, order_id: str) -> int:
     """
-    Resolve delay_minutes for one order from rule_master (max of hits).
+    Resolve delay_minutes for one order from rule_master (max of HOLD/REVIEW hits).
     Falls back to orders.delay_minutes, then DEFAULT_DELAY_MINUTES.
     """
     cursor.execute(
@@ -72,6 +72,7 @@ def get_applicable_delay_minutes(cursor: Any, order_id: str) -> int:
                 FROM master.order_rule_hits h
                 JOIN master.rule_master rm ON rm.rule_id = h.rule_id
                 WHERE h.order_id = o.order_id
+                  AND UPPER(rm.action) IN ('HOLD', 'REVIEW')
             ),
             NULLIF(o.delay_minutes, 0),
             %s
@@ -114,6 +115,7 @@ def _backlog_select_sql(order_ids: Optional[Sequence[str]] = None) -> str:
                         FROM master.order_rule_hits h
                         JOIN master.rule_master rm ON rm.rule_id = h.rule_id
                         WHERE h.order_id = o.order_id
+                          AND UPPER(rm.action) IN ('HOLD', 'REVIEW')
                     ),
                     NULLIF(o.delay_minutes, 0),
                     {DEFAULT_DELAY_MINUTES}

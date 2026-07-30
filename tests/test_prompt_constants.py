@@ -53,7 +53,7 @@ def test_sql_system_prompt_rules():
     prompt = pc.SQL_SYSTEM_PROMPT
     assert "SELECT" in prompt
     assert "WITH" in prompt
-    assert "DDL" in prompt or "DML" in prompt or "Never SELECT *" in prompt
+    assert "Never use SELECT *" in prompt or "Never SELECT *" in prompt
 
 
 def test_summary_prompt_format():

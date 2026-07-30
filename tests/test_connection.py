@@ -6,6 +6,7 @@ from database.connection import (
     get_cursor,
     get_pooled_connection,
     release_pooled_connection,
+    reset_pool_for_tests,
 )
 
 
@@ -13,7 +14,7 @@ from database.connection import (
 
 @patch("database.connection.psycopg2.pool.ThreadedConnectionPool")
 def test_get_pool(mock_pool):
-    get_pool.clear()
+    reset_pool_for_tests()
 
     pool = get_pool()
 

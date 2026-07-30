@@ -1,19 +1,15 @@
-﻿import re
+import re
 import logging
 import pandas as pd
-import streamlit as st
 import json
 
-from groq import APIConnectionError
 from ai.groq_client import get_groq_client, create_chat_completion
 from ai.prompt_constants import (
-    GROQ_API_KEY,
     GROQ_INTENT_MODEL,
     GROQ_REPAIR_MODEL,
     GROQ_SQL_MODEL,
     GROQ_SUMMARY_MODEL,
     MAX_HISTORY,
-    MAX_STORED_MESSAGES,
     MARKDOWN_PREVIEW_ROWS,
     SCHEMA_CONTEXT,
     SQL_SYSTEM_PROMPT,
@@ -36,8 +32,7 @@ from ai.prompt_constants import (
     RECOMMENDATION_MAX_TOKENS,
     RECOMMENDATION_REASONING_EFFORT,
 )
-from database.connection import get_pooled_connection, release_pooled_connection
-from database.transaction_repository import log_chatbot_interaction
+
 
 _KNOWN_DIMENSION_TABLES = [
     "customers",
@@ -54,34 +49,16 @@ _BLOCKED_KEYWORDS = [
 
 SENSITIVE_COLUMNS = {
     "email": "email",
-    "phone_number": "phone",
     "phone": "phone",
+    "phone_number": "phone",
     "mobile": "phone",
     "mobile_number": "phone",
     "address": "address",
     "default_address": "address",
+    "street": "address",
+    "ip": "ip",
     "ip_address": "ip",
-    "password": "secret",
 }
-
-
-def _sensitive_mask_type(column_name: str) -> str | None:
-    """Resolve mask type from an exact column name or common PII naming patterns."""
-    col = str(column_name).lower().strip()
-    if col in SENSITIVE_COLUMNS:
-        return SENSITIVE_COLUMNS[col]
-    if "email" in col:
-        return "email"
-    if "phone" in col or "mobile" in col:
-        return "phone"
-    if "password" in col or col in {"secret", "pwd"}:
-        return "secret"
-    if "ip_address" in col or col == "ip":
-        return "ip"
-    if "address" in col:
-        return "address"
-    return None
-
 
 PROHIBITED_SQL_COLUMNS = {
     "customers.password",
@@ -286,7 +263,7 @@ def _get_last_result_context(history: list[dict]) -> str:
             df = _restore_dataframe_types(df)
             df = sanitize_dataframe_for_llm(df)
             if not df.empty:
-                return dataframe_to_markdown(df, max_rows=MARKDOWN_PREVIEW_ROWS)
+                return df.head(MARKDOWN_PREVIEW_ROWS).to_markdown(index=False)
         except Exception:
             continue
     return ""
@@ -340,246 +317,6 @@ SAMPLE RESULT (first 3 rows — full dataset is larger):
 {dataframe_to_markdown(previous_df.head(3))}
 """
 
-# def _detect_analysis_context(
-#     user_query: str,
-#     sql_query: str,
-#     result_df: pd.DataFrame,
-#     assistant_summary: str,
-# ) -> dict:
-#     """
-#     Detect the business domains involved in the current analysis.
-
-#     Returns:
-#         {
-#             "fraud": True,
-#             "customer": False,
-#             "product": True,
-#             ...
-#         }
-#     """
-
-#     combined_text = " ".join([
-#         user_query.lower(),
-#         sql_query.lower(),
-#         assistant_summary.lower(),
-#         " ".join(result_df.columns.astype(str).str.lower())
-#     ])
-
-#     topics = {
-#         "fraud": [
-#             "fraud",
-#             "rejected",
-#             "flagged",
-#             "risk",
-#             "is_fraud",
-#             "rule",
-#             "review"
-#         ],
-
-#         "customer": [
-#             "customer",
-#             "user",
-#             "customer_name",
-#             "email",
-#             "phone"
-#         ],
-
-#         "product": [
-#             "product",
-#             "category",
-#             "item"
-#         ],
-
-#         "geography": [
-#             "city",
-#             "state",
-#             "country",
-#             "zip"
-#         ],
-
-#         "device": [
-#             "device",
-#             "ip",
-#             "browser"
-#         ],
-
-#         "revenue": [
-#             "amount",
-#             "revenue",
-#             "sales",
-#             "price"
-#         ],
-
-#         "order": [
-#             "order",
-#             "approved",
-#             "quantity"
-#         ]
-#     }
-
-#     detected = {}
-
-#     for topic, keywords in topics.items():
-#         detected[topic] = any(
-#             word in combined_text
-#             for word in keywords
-#         )
-
-#     return detected
-
-# def _generate_recommendations(context: dict) -> dict:
-#     """
-#     Generate follow-up questions, business advisories,
-#     and related analytical questions based on the detected context.
-#     """
-
-#     recommendations = {
-#         "followups": [],
-#         "advisories": [],
-#         "explore": []
-#     }
-
-#     if context.get("fraud"):
-#         recommendations["followups"].extend([
-#             "Which products have the highest fraud rate?",
-#             "Which customers are repeatedly involved in fraudulent transactions?",
-#             "Show fraud trends over time.",
-#             "Which fraud rules are triggered most frequently?",
-#             "Which states have the highest fraud percentage?"
-#         ])
-
-#         recommendations["advisories"].extend([
-#             "Monitor repeat fraudulent customers.",
-#             "Review fraud rules with the highest trigger frequency.",
-#             "Strengthen verification for high-value transactions.",
-#             "Investigate regions with abnormal fraud activity."
-#         ])
-
-#         recommendations["explore"].extend([
-#             "Analyze fraud by device.",
-#             "Compare fraud across product categories."
-#         ])
-
-#     if context.get("customer"):
-#         recommendations["followups"].extend([
-#             "Who are the top spending customers?",
-#             "Which customers have the highest rejection rate?",
-#             "Show customer purchases by state.",
-#             "Which customers place the most orders?"
-#         ])
-
-#         recommendations["advisories"].extend([
-#             "Identify high-value customers for retention.",
-#             "Review customers with frequent rejected orders."
-#         ])
-
-#     if context.get("product"):
-#         recommendations["followups"].extend([
-#             "Which products generate the highest revenue?",
-#             "Which products have the highest fraud rate?",
-#             "Compare product category performance.",
-#             "Show monthly sales by product."
-#         ])
-
-#         recommendations["advisories"].extend([
-#             "Review products with increasing fraud trends.",
-#             "Monitor low-performing products."
-#         ])
-
-#     if context.get("geography"):
-#         recommendations["followups"].extend([
-#             "Compare fraud across states.",
-#             "Which cities generate the highest revenue?",
-#             "Show approval rate by region."
-#         ])
-
-#         recommendations["advisories"].extend([
-#             "Focus fraud monitoring in high-risk regions.",
-#             "Compare approval rates across locations."
-#         ])
-
-#     if context.get("device"):
-#         recommendations["followups"].extend([
-#             "Which devices are linked to the most fraud?",
-#             "Compare fraud by device type."
-#         ])
-
-#         recommendations["advisories"].extend([
-#             "Monitor devices associated with repeated fraud."
-#         ])
-
-#     if context.get("revenue"):
-#         recommendations["followups"].extend([
-#             "Show monthly revenue trend.",
-#             "Which products contribute the most revenue?",
-#             "Compare revenue across categories."
-#         ])
-
-#         recommendations["advisories"].extend([
-#             "Monitor revenue fluctuations.",
-#             "Review declining product performance."
-#         ])
-
-#     # Remove duplicates while preserving order
-#     recommendations["followups"] = list(dict.fromkeys(recommendations["followups"]))
-#     recommendations["advisories"] = list(dict.fromkeys(recommendations["advisories"]))
-#     recommendations["explore"] = list(dict.fromkeys(recommendations["explore"]))
-
-#     return recommendations
-
-# def _render_recommendations(recommendations: dict):
-#     """
-#     Render AI-powered follow-up questions and business recommendations.
-#     """
-
-#     st.markdown("---")
-#     st.markdown("## 🤖 AI Recommendations")
-
-    # ----------------------------
-    # Follow-up Questions
-    # ----------------------------
-
-    # # for idx, msg in enumerate(st.session_state.messages):
-    # #     with st.chat_message(msg["role"]):
-
-    # #         st.markdown(msg["content"])
-
-
-    # #         followups = msg.get("followups", [])
-
-    # #         if followups:
-    # #             with st.expander("🔍 Suggested Follow-up Questions", expanded=True):
-    # #                 for i, question in enumerate(followups):
-
-    # #                     if st.button(
-    # #                         f"💡 {question}",
-    # #                         key=f"followup_{idx}_{i}",
-    # #                         use_container_width=True,
-    # #                     ):
-    # #                         st.session_state.selected_followup = question
-    # #                         st.rerun()
-    #         # for question in followups[:5]:
-    #         #     st.markdown(f"• {question}")
-
-    # # ----------------------------
-    # # Business Advisories
-    # # ----------------------------
-    # advisories = recommendations.get("advisories", [])
-
-    # if advisories:
-    #     with st.expander("💡 Business Advisory", expanded=False):
-    #         for advice in advisories[:4]:
-    #             st.markdown(f"• {advice}")
-
-    # # ----------------------------
-    # # Explore More
-    # # ----------------------------
-    # explore = recommendations.get("explore", [])
-
-    # if explore:
-    #     with st.expander("📈 Explore More", expanded=False):
-    #         for item in explore[:3]:
-    #             st.markdown(f"• {item}")   
 
 def _generate_ai_recommendations(
     client,
@@ -593,7 +330,7 @@ def _generate_ai_recommendations(
     Generate AI-powered follow-up questions and business advice.
     """
 
-    data_preview = dataframe_to_markdown(sanitized_df, max_rows=MARKDOWN_PREVIEW_ROWS)
+    data_preview = sanitized_df.head(MARKDOWN_PREVIEW_ROWS).to_markdown(index=False)
 
     prompt = AI_RECOMMENDATION_PROMPT.format(
         user_query=user_query,
@@ -642,8 +379,7 @@ def _generate_ai_recommendations(
 
     except Exception as e:
         logging.exception("AI recommendation generation failed")
-        # Avoid Streamlit UI calls here so the same helper works for the
-        # headless portal API (ai/chat_api.py) as well as Streamlit.
+        logging.warning(_friendly_error_message(e, "recommendations"))
         return {
             "followups": [],
             "business_advice": [],
@@ -711,7 +447,7 @@ def _repair_sql(sql: str, error: str) -> tuple[str, int, int]:
     """Attempt to repair invalid SQL using Groq. Returns (sql, input_tokens, output_tokens)."""
     client = get_groq_client()
     if not client:
-        st.warning("⚠️ Groq client unavailable. Cannot repair SQL.")
+        logging.warning("Groq client unavailable. Cannot repair SQL.")
         return sql, 0, 0
 
     repair_prompt = REPAIR_PROMPT_TEMPLATE.format(
@@ -738,7 +474,7 @@ def _repair_sql(sql: str, error: str) -> tuple[str, int, int]:
         in_tok, out_tok = _extract_usage(response)
         return _extract_sql(response.choices[0].message.content or ""), in_tok, out_tok
     except Exception as e:
-        st.warning(_friendly_error_message(e, "repair"))
+        logging.warning(_friendly_error_message(e, "repair"))
         return sql, 0, 0
 
 
@@ -764,86 +500,67 @@ from utils.pii import can_view_full_pii, mask_address, mask_email, mask_ip, mask
 def _mask_email(value):
     if pd.isna(value):
         return value
+    return mask_email(str(value))
 
-    value = str(value)
-
-    if "@" not in value:
-        return value
-
-    name, domain = value.split("@", 1)
-
-    if len(name) <= 1:
-        masked = "*"
-    else:
-        masked = name[0] + "*" * (len(name) - 1)
-
-    return f"{masked}@{domain}"
 
 def _mask_phone(value):
     if pd.isna(value):
         return value
+    return mask_phone(str(value))
 
-    value = str(value)
-
-    if len(value) <= 4:
-        return value
-
-    return "*" * (len(value) - 4) + value[-4:]
 
 def _mask_address(value):
     if pd.isna(value):
         return value
-    value = str(value).strip()
-    if len(value) <= 6:
-        return "***"
-    return value[:4] + "***" + value[-2:]
+    return mask_address(str(value))
+
 
 def _mask_ip(value):
     if pd.isna(value):
         return value
-    value = str(value).strip()
-    parts = value.split(".")
-    if len(parts) == 4:
-        return f"{parts[0]}.{parts[1]}.*.*"
-    if len(value) <= 4:
-        return "***"
-    return value[:4] + "***"
+    return mask_ip(str(value))
+
+
+def _sensitive_mask_type(column_name):
+    key = column_name.lower()
+    exact = SENSITIVE_COLUMNS.get(key)
+    if exact:
+        return exact
+
+    if key == "ip" or "ip_address" in key:
+        return "ip"
+    if "email" in key:
+        return "email"
+    if "phone" in key or "mobile" in key:
+        return "phone"
+    if "address" in key or "street" in key:
+        return "address"
+    return None
+
 
 def _mask_value(column_name, value):
     mask_type = _sensitive_mask_type(column_name)
-
     if mask_type == "email":
         return _mask_email(value)
-
     if mask_type == "phone":
         return _mask_phone(value)
-
     if mask_type == "address":
         return _mask_address(value)
-
     if mask_type == "ip":
         return _mask_ip(value)
-
-    if mask_type == "secret":
-        return "********" if not pd.isna(value) else value
-
     return value
 
-def sanitize_dataframe_for_llm(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Returns a dataframe with PII columns masked for LLM prompts and UI display.
-    """
 
 def _apply_pii_masks(df: pd.DataFrame) -> pd.DataFrame:
     """Unconditionally mask known PII columns."""
     masked_df = df.copy()
     for column in masked_df.columns:
-        if column.lower() in SENSITIVE_COLUMNS:
+        if _sensitive_mask_type(column):
             masked_df[column] = masked_df[column].apply(
                 lambda value, col=column: _mask_value(col, value)
             )
+    return masked_df
 
-    return sanitized_df
 
 def mask_sensitive_dataframe(
     df: pd.DataFrame,
@@ -865,6 +582,7 @@ def sanitize_dataframe_for_llm(df: pd.DataFrame) -> pd.DataFrame:
     if df is None or df.empty:
         return df
     return _apply_pii_masks(df)
+
 
 
 def dataframe_to_markdown(df: pd.DataFrame, *, max_rows: int | None = None) -> str:
@@ -921,1026 +639,3 @@ def _detect_chart_columns(df: pd.DataFrame):
         x_axis = numeric_cols[0]
 
     return x_axis, y_axis
-
-def _render_chart(df: pd.DataFrame, chart_key: str = "live") -> None:
-    """
-    Interactive chart renderer.
-
-    Features
-    --------
-    • Auto chart selection
-    • Manual chart selection
-    • X-Axis selection
-    • Y-Axis selection
-    • Horizontal bar chart
-    • Line chart
-    • Area chart
-    • Pie chart
-    • Scatter chart
-    • Table only option
-
-    No SQL is re-executed.
-    Everything works on the existing dataframe.
-    """
-
-    if df.empty:
-        return
-
-    if len(df.columns) < 2:
-        st.info("Not enough columns available to visualize.")
-        return
-
-    df = _restore_dataframe_types(df.copy())
-
-    numeric_cols = (
-        df.select_dtypes(include="number")
-        .columns
-        .tolist()
-    )
-
-    datetime_cols = (
-        df.select_dtypes(include=["datetime64"])
-        .columns
-        .tolist()
-    )
-
-    category_cols = (
-        df.select_dtypes(
-            include=[
-                "object",
-                "category",
-                "bool",
-            ]
-        )
-        .columns
-        .tolist()
-    )
-
-    if not numeric_cols:
-        st.info("No numeric columns available for charting.")
-        return
-
-    auto_x, auto_y = _detect_chart_columns(df)
-
-    st.markdown("---")
-    st.markdown("## 📊 Visualization")
-
-    control_col1, control_col2, control_col3 = st.columns(3)
-
-    with control_col1:
-
-        chart_type = st.selectbox(
-            "Chart Type",
-            [
-                "Auto",
-                "Bar Chart",
-                "Horizontal Bar",
-                "Line Chart",
-                "Area Chart",
-                "Pie Chart",
-                "Scatter Plot",
-                "Table Only",
-            ],
-            key=f"chart_type_{chart_key}",
-        )
-
-    available_x = []
-
-    if datetime_cols:
-        available_x.extend(datetime_cols)
-
-    if category_cols:
-        available_x.extend(category_cols)
-
-    if not available_x:
-        available_x.extend(numeric_cols)
-
-    with control_col2:
-
-        x_axis = st.selectbox(
-            "X Axis",
-            available_x,
-            index=available_x.index(auto_x)
-            if auto_x in available_x
-            else 0,
-            key=f"x_axis_{chart_key}",
-        )
-
-    with control_col3:
-
-        y_axis = st.selectbox(
-            "Y Axis",
-            numeric_cols,
-            index=numeric_cols.index(auto_y)
-            if auto_y in numeric_cols
-            else 0,
-            key=f"y_axis_{chart_key}",
-        )
-
-    chart_df = df.copy()
-
-    if chart_type == "Table Only":
-        return
-
-    if chart_type == "Auto":
-
-        if datetime_cols:
-            chart_type = "Line Chart"
-
-        elif category_cols:
-
-            if chart_df[x_axis].nunique() <= 5:
-                chart_type = "Pie Chart"
-
-            else:
-                chart_type = "Bar Chart"
-
-        else:
-            chart_type = "Scatter Plot"
-
-    st.caption(f"Current Visualization: **{chart_type}**")
-
-    # ==========================================================
-    # BAR CHART
-    # ==========================================================
-
-    if chart_type == "Bar Chart":
-
-        try:
-
-            plot_df = (
-                chart_df[[x_axis, y_axis]]
-                .sort_values(y_axis, ascending=False)
-                .set_index(x_axis)
-            )
-
-            st.bar_chart(
-                plot_df,
-                use_container_width=True,
-            )
-
-        except Exception as e:
-
-            st.warning(_friendly_error_message(e, "chart"))
-
-        return
-
-
-    # ==========================================================
-    # HORIZONTAL BAR CHART
-    # ==========================================================
-
-    if chart_type == "Horizontal Bar":
-
-        try:
-
-            import plotly.express as px
-
-            plot_df = (
-                chart_df[[x_axis, y_axis]]
-                .sort_values(y_axis)
-            )
-
-            fig = px.bar(
-                plot_df,
-                x=y_axis,
-                y=x_axis,
-                orientation="h",
-                text_auto=True,
-            )
-
-            fig.update_layout(
-                height=500,
-                yaxis_title=x_axis,
-                xaxis_title=y_axis,
-            )
-
-            st.plotly_chart(
-                fig,
-                use_container_width=True,
-            )
-
-        except Exception as e:
-
-            st.warning(_friendly_error_message(e, "chart"))
-
-        return
-
-
-    # ==========================================================
-    # LINE CHART
-    # ==========================================================
-
-    if chart_type == "Line Chart":
-
-        try:
-
-            plot_df = (
-                chart_df[[x_axis, y_axis]]
-                .sort_values(x_axis)
-                .set_index(x_axis)
-            )
-
-            st.line_chart(
-                plot_df,
-                use_container_width=True,
-            )
-
-        except Exception as e:
-
-            st.warning(_friendly_error_message(e, "chart"))
-
-        return
-
-
-    # ==========================================================
-    # AREA CHART
-    # ==========================================================
-
-    if chart_type == "Area Chart":
-
-        try:
-
-            plot_df = (
-                chart_df[[x_axis, y_axis]]
-                .sort_values(x_axis)
-                .set_index(x_axis)
-            )
-
-            st.area_chart(
-                plot_df,
-                use_container_width=True,
-            )
-
-        except Exception as e:
-
-            st.warning(_friendly_error_message(e, "chart"))
-
-        return
-
-
-    # ==========================================================
-    # PIE CHART
-    # ==========================================================
-
-    if chart_type == "Pie Chart":
-
-        try:
-
-            import plotly.express as px
-
-            pie_df = chart_df[[x_axis, y_axis]]
-
-            fig = px.pie(
-                pie_df,
-                names=x_axis,
-                values=y_axis,
-                hole=0.45,
-            )
-
-            fig.update_traces(
-                textposition="inside",
-                textinfo="percent+label",
-            )
-
-            fig.update_layout(
-                height=500,
-            )
-
-            st.plotly_chart(
-                fig,
-                use_container_width=True,
-            )
-
-        except Exception as e:
-
-            st.warning(_friendly_error_message(e, "chart"))
-
-        return
-
-    # ==========================================================
-    # SCATTER PLOT
-    # ==========================================================
-
-    if chart_type == "Scatter Plot":
-
-        try:
-
-            if len(numeric_cols) < 2:
-                st.info("Scatter plot requires at least two numeric columns.")
-                return
-
-            x_numeric = st.selectbox(
-                "Scatter X Axis",
-                numeric_cols,
-                index=0,
-                key=f"scatter_x_{chart_key}",
-            )
-
-            y_numeric = st.selectbox(
-                "Scatter Y Axis",
-                numeric_cols,
-                index=1 if len(numeric_cols) > 1 else 0,
-                key=f"scatter_y_{chart_key}",
-            )
-
-            st.scatter_chart(
-                chart_df,
-                x=x_numeric,
-                y=y_numeric,
-                use_container_width=True,
-            )
-
-        except Exception as e:
-
-            st.warning(_friendly_error_message(e, "chart"))
-
-        return
-
-
-    # ==========================================================
-    # FALLBACK
-    # ==========================================================
-
-    try:
-
-        plot_df = chart_df[[x_axis, y_axis]].set_index(x_axis)
-
-        st.bar_chart(
-            plot_df,
-            use_container_width=True,
-        )
-
-    except Exception as e:
-
-        st.warning(_friendly_error_message(e, "chart"))
-
-    st.markdown("---")
-
-    with st.expander("📊 Visualization Information", expanded=False):
-
-        st.markdown(
-            f"""
-**Chart Type:** {chart_type}
-
-**Rows Displayed:** {len(chart_df)}
-
-**Columns Available:** {len(chart_df.columns)}
-
-**Selected X Axis:** `{x_axis}`
-
-**Selected Y Axis:** `{y_axis}`
-"""
-        )
-
-
-def _run_query_pipeline(user_query: str) -> None:
-    client = get_groq_client()
-    if not client:
-        st.error("🔑 Groq API key missing — add `GROQ_API_KEY` to your `.env` file.")
-        return
-
-    recent_messages = st.session_state.messages[:-1][-MAX_HISTORY:]
-    total_input_tokens = 0
-    total_output_tokens = 0
-
-    with st.chat_message("assistant"):
-        with st.status("Processing Analytics Request…", expanded=True) as status:
-            sql_query: str | None = None
-            try:
-                status.write("🔍 Checking conversation context…")
-                intent, in_tok, out_tok = _classify_intent(client, user_query, recent_messages)
-                total_input_tokens += in_tok
-                total_output_tokens += out_tok
-
-                if intent == "GENERAL":
-                    status.write("💬 Detected advisory question — answering from prior context, no new query needed")
-                    transcript = "\n".join(
-                        f"{m['role'].upper()}: {m['content']}" for m in recent_messages
-                    )
-                    data_context = _get_last_result_context(recent_messages)
-
-                    try:
-                        advisory_messages = [{
-                            "role": "system",
-                            "content": ADVISORY_SYSTEM_PROMPT.format(
-                                conversation_context=transcript or "(no prior conversation)",
-                                data_context=data_context or "(no prior data table available)",
-                                user_query=user_query,
-                            ),
-                        }]
-                        advisory_completion = create_chat_completion(
-                            client,
-                            model=GROQ_SUMMARY_MODEL,
-                            messages=advisory_messages,
-                            temperature=0.4,
-                            max_tokens=ADVISORY_MAX_TOKENS,
-                            reasoning_effort=ADVISORY_REASONING_EFFORT,
-                            include_reasoning=False,
-                        )
-                        advisory_answer = advisory_completion.choices[0].message.content or ""
-                        in_tok, out_tok = _extract_usage(advisory_completion)
-                        total_input_tokens += in_tok
-                        total_output_tokens += out_tok
-                        if getattr(advisory_completion.choices[0], "finish_reason", None) == "length":
-                            # Ran out of tokens mid-answer — retry once with a
-                            # larger budget rather than showing a cut-off answer.
-                            advisory_completion = create_chat_completion(
-                                client,
-                                model=GROQ_SUMMARY_MODEL,
-                                messages=advisory_messages,
-                                temperature=0.4,
-                                max_tokens=ADVISORY_MAX_TOKENS * 2,
-                                reasoning_effort=ADVISORY_REASONING_EFFORT,
-                                include_reasoning=False,
-                            )
-                            advisory_answer = advisory_completion.choices[0].message.content or ""
-                            in_tok, out_tok = _extract_usage(advisory_completion)
-                            total_input_tokens += in_tok
-                            total_output_tokens += out_tok
-
-                        if not advisory_answer.strip():
-                            advisory_answer = (
-                                "I wasn't able to generate a written answer for that this time. "
-                                "Could you try rephrasing the question?"
-                            )
-                    except Exception as e:
-                        status.update(label="❌ Could not generate answer", state="complete", expanded=False)
-                        friendly = _friendly_error_message(e, "summary")
-                        st.error(friendly)
-                        log_chatbot_interaction(
-                            user_query,
-                            None,
-                            None,
-                            f"ADVISORY_ERROR: {str(e)}",
-                            input_tokens=total_input_tokens,
-                            output_tokens=total_output_tokens,
-                        )
-                        st.session_state.messages.append(
-                            {"role": "assistant", "content": friendly, "sql": None, "df": None}
-                        )
-                        return
-
-                    status.update(label="✅ Answer ready", state="complete", expanded=False)
-                    st.markdown(advisory_answer)
-
-                    log_chatbot_interaction(
-                        user_query,
-                        None,
-                        None,
-                        advisory_answer,
-                        input_tokens=total_input_tokens,
-                        output_tokens=total_output_tokens,
-                    )
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": advisory_answer,
-                        "sql": None,
-                        "df": None,
-                    })
-                    if len(st.session_state.messages) > MAX_STORED_MESSAGES:
-                        st.session_state.messages = st.session_state.messages[-MAX_STORED_MESSAGES:]
-                    return
-
-                llm_payload = [
-                    {
-                        "role": "system",
-                        "content": SQL_SYSTEM_PROMPT,
-                    }
-                ]
-
-                if intent == "FOLLOWUP_QUERY":
-                    status.write("↪ Detected follow-up question — using previous query context")
-
-                    followup_context = _get_followup_context(recent_messages)
-
-                    if followup_context:
-                        llm_payload.append({
-                            "role": "user",
-                            "content": f"""This is a follow-up question. Use the context below to understand what the user is referring to, then write a new SQL query that answers their follow-up.
-
-{followup_context}
-
-FOLLOW-UP RULES:
-- Modify the previous SQL to answer the follow-up rather than writing a completely unrelated query.
-- Keep the same analytical intent and only change the part the user is asking about (e.g. a different city, date range, filter, or aggregation level).
-- If the user uses pronouns ("those", "them", "it", "that"), resolve them from the previous question and result above.
-- Do NOT copy the previous SQL verbatim — adapt it to the new question.
-- Always apply LIMIT unless the question asks for all records.
-
-The user's follow-up question is below. Respond with ONLY the SQL query.""",
-                        })
-
-                else:
-                    status.write("🆕 Detected new question — starting fresh")
-
-                llm_payload.append({
-                    "role": "user",
-                    "content": user_query,
-                })
-
-                status.write("🧠 Generating SQL query…")
-                try:
-                    completion = create_chat_completion(
-                        client,
-                        model=GROQ_SQL_MODEL,
-                        messages=llm_payload,
-                        temperature=0.0,
-                        max_tokens=SQL_MAX_TOKENS,
-                        reasoning_effort=SQL_REASONING_EFFORT,
-                        include_reasoning=False,
-                    )
-                    sql_query = _extract_sql(completion.choices[0].message.content or "")
-                    in_tok, out_tok = _extract_usage(completion)
-                    total_input_tokens += in_tok
-                    total_output_tokens += out_tok
-                except APIConnectionError as e:
-                    status.update(label="❌ Connection issue", state="complete", expanded=False)
-                    friendly = _friendly_error_message(e, "connection")
-                    st.error(friendly)
-                    log_chatbot_interaction(
-                        user_query,
-                        None,
-                        None,
-                        f"CONNECTION_ERROR: {str(e)}",
-                        input_tokens=total_input_tokens,
-                        output_tokens=total_output_tokens,
-                    )
-                    st.session_state.messages.append(
-                        {"role": "assistant", "content": friendly, "sql": None, "df": None}
-                    )
-                    return
-                except Exception as e:
-                    status.update(label="❌ Could not generate query", state="complete", expanded=False)
-                    friendly = _friendly_error_message(e, "generation")
-                    st.error(friendly)
-                    log_chatbot_interaction(
-                        user_query,
-                        None,
-                        None,
-                        f"GENERATION_ERROR: {str(e)}",
-                        input_tokens=total_input_tokens,
-                        output_tokens=total_output_tokens,
-                    )
-                    st.session_state.messages.append(
-                        {"role": "assistant", "content": friendly, "sql": None, "df": None}
-                    )
-                    return
-
-                is_valid, validation_error = _validate_sql(sql_query)
-                if is_valid:
-                    sql_query = _strip_sql_comments(sql_query)
-                else:
-                    status.write("🔧 Attempting query repair…")
-                    repaired, repair_in_tok, repair_out_tok = _repair_sql(sql_query, validation_error)
-                    total_input_tokens += repair_in_tok
-                    total_output_tokens += repair_out_tok
-                    repaired_valid, repaired_error = _validate_sql(repaired)
-                    if repaired_valid:
-                        sql_query = _strip_sql_comments(repaired)
-                        status.write("✅ Query repaired successfully")
-                    else:
-                        status.update(label="⚠️ Query validation failed", state="complete", expanded=False)
-                        st.error(validation_error)
-                        log_chatbot_interaction(
-                            user_query,
-                            sql_query,
-                            None,
-                            f"BLOCKED: {validation_error}",
-                            input_tokens=total_input_tokens,
-                            output_tokens=total_output_tokens,
-                        )
-                        st.session_state.messages.append(
-                            {"role": "assistant", "content": f"⚠️ {validation_error}", "sql": sql_query, "df": None}
-                        )
-                        return
-
-                status.write("🗄️ Executing query against database…")
-                conn = None
-                try:
-                    conn = get_pooled_connection()
-                    result_df = pd.read_sql_query(sql_query, conn)
-                except Exception as e:
-                    status.update(label="❌ Data not available", state="complete", expanded=False)
-                    friendly = _friendly_error_message(e, "execution")
-                    st.error(friendly)
-                    log_chatbot_interaction(
-                        user_query,
-                        sql_query,
-                        None,
-                        f"DB_ERROR: {str(e)}",
-                        input_tokens=total_input_tokens,
-                        output_tokens=total_output_tokens,
-                    )
-                    st.session_state.messages.append(
-                        {"role": "assistant", "content": friendly, "sql": sql_query, "df": None}
-                    )
-                    return
-                finally:
-                    if conn:
-                        release_pooled_connection(conn)
-
-                if result_df.empty:
-                    status.update(label="⚠️ No matching data", state="complete", expanded=False)
-                    msg = (
-                        "📭 No matching data found for your question. Try rephrasing it, "
-                        "or ask about a different metric, time period, or filter."
-                    )
-                    st.info(msg)
-                    log_chatbot_interaction(
-                        user_query,
-                        sql_query,
-                        None,
-                        "The query executed successfully but returned no matching rows.",
-                        input_tokens=total_input_tokens,
-                        output_tokens=total_output_tokens,
-                    )
-                    st.session_state.messages.append(
-                        {"role": "assistant", "content": msg, "sql": sql_query, "df": None}
-                    )
-                    return
-
-                result_df = _restore_dataframe_types(result_df)
-                # Sanitize dataframe before sending it to any LLM
-                sanitized_df = sanitize_dataframe_for_llm(result_df)
-                strategy_mode = _wants_strategy_answer(user_query)
-                summary_prompt_template = (
-                    STRATEGY_SUMMARY_PROMPT_BASE if strategy_mode else SUMMARY_SYSTEM_PROMPT_BASE
-                )
-                status.write(
-                    "🚀 Turning results into growth strategies…" if strategy_mode
-                    else "📝 Generating executive insight summary…"
-                )
-                data_preview = dataframe_to_markdown(sanitized_df, max_rows=MARKDOWN_PREVIEW_ROWS)
-
-            result_df = _restore_dataframe_types(result_df)
-            analyst = st.session_state.get("analyst")
-            # Role-based masking for UI; always-masked copy for LLM + logs
-            display_df = mask_sensitive_dataframe(result_df, analyst=analyst)
-            sanitized_df = sanitize_dataframe_for_llm(result_df)
-            strategy_mode = _wants_strategy_answer(user_query)
-            summary_prompt_template = (
-                STRATEGY_SUMMARY_PROMPT_BASE if strategy_mode else SUMMARY_SYSTEM_PROMPT_BASE
-            )
-            status.write(
-                "🚀 Turning results into growth strategies…" if strategy_mode
-                else "📝 Generating executive insight summary…"
-            )
-            data_preview = sanitized_df.head(MARKDOWN_PREVIEW_ROWS).to_markdown(index=False)
-
-            try:
-                summary_completion = create_chat_completion(
-                    client,
-                    model=GROQ_SUMMARY_MODEL,
-                    messages=[{
-                        "role": "system",
-                        "content": summary_prompt_template.format(
-                            user_query=user_query,
-                            data_preview=data_preview,
-                        ),
-                    }],
-                    temperature=0.3,
-                    max_tokens=SUMMARY_MAX_TOKENS,
-                    reasoning_effort=SUMMARY_REASONING_EFFORT,
-                    include_reasoning=False,
-                )
-                assistant_summary = summary_completion.choices[0].message.content or ""
-                in_tok, out_tok = _extract_usage(summary_completion)
-                total_input_tokens += in_tok
-                total_output_tokens += out_tok
-                finish_reason = getattr(
-                    summary_completion.choices[0], "finish_reason", None
-                )
-                if finish_reason == "length" or not assistant_summary.strip():
-                    # Ran out of tokens mid-summary (or reasoning ate the
-                    # whole budget) — retry once with a larger budget
-                    # rather than showing a cut-off/blank answer.
-                    summary_completion = create_chat_completion(
-                        client,
-                        model=GROQ_SUMMARY_MODEL,
-                        messages=[{
-                            "role": "system",
-                            "content": summary_prompt_template.format(
-                                user_query=user_query,
-                                data_preview=data_preview,
-                            ),
-                        }],
-                        temperature=0.3,
-                        max_tokens=SUMMARY_MAX_TOKENS,
-                        reasoning_effort=SUMMARY_REASONING_EFFORT,
-                        include_reasoning=False,
-                    )
-                    assistant_summary = summary_completion.choices[0].message.content or ""
-                    in_tok, out_tok = _extract_usage(summary_completion)
-                    total_input_tokens += in_tok
-                    total_output_tokens += out_tok
-                    finish_reason = getattr(
-                        summary_completion.choices[0], "finish_reason", None
-                    )
-                    if finish_reason == "length" or not assistant_summary.strip():
-                        # Ran out of tokens mid-summary (or reasoning ate the
-                        # whole budget) — retry once with a larger budget
-                        # rather than showing a cut-off/blank answer.
-                        summary_completion = create_chat_completion(
-                            client,
-                            model=GROQ_SUMMARY_MODEL,
-                            messages=[{
-                                "role": "system",
-                                "content": summary_prompt_template.format(
-                                    user_query=user_query,
-                                    data_preview=data_preview,
-                                ),
-                            }],
-                            temperature=0.3,
-                            max_tokens=SUMMARY_MAX_TOKENS * 2,
-                            reasoning_effort=SUMMARY_REASONING_EFFORT,
-                            include_reasoning=False,
-                        )
-                        assistant_summary = summary_completion.choices[0].message.content or ""
-                        in_tok, out_tok = _extract_usage(summary_completion)
-                        total_input_tokens += in_tok
-                        total_output_tokens += out_tok
-
-                    if not assistant_summary.strip():
-                        assistant_summary = "Unable to generate a written summary. Please review the data below."
-                except Exception as e:
-                    st.warning(_friendly_error_message(e, "summary"))
-                    assistant_summary = "Unable to generate a written summary. Please review the data below."
-
-                status.update(label="✅ Analysis completed", state="complete", expanded=False)
-                with st.expander("📋 View Result Data", expanded=False):
-                    st.dataframe(sanitized_df, use_container_width=True)
-
-                _render_chart(sanitized_df, chart_key=f"live_{len(st.session_state.messages)}")
-                st.markdown("### 🚀 Growth Strategies" if strategy_mode else "### 📋 Key Insights")
-                st.markdown(assistant_summary)
-
-            assistant_payload = {
-                "role": "assistant",
-                "content": assistant_summary,
-                "sql": sql_query,
-                "df": display_df.to_dict(orient="records"),
-                "followups": recommendations.get("followups") or [],
-                "business_advice": recommendations.get("business_advice") or [],
-                "strategy_mode": strategy_mode,
-            }
-            _render_assistant_panel(
-                assistant_payload,
-                key_prefix=f"live_{len(st.session_state.messages)}",
-            )
-
-                conversation_history = "\n".join(
-                    f"{m['role'].upper()}: {m['content']}" for m in recent_messages
-                )
-                recommendations = _generate_ai_recommendations(
-                    client=client,
-                    user_query=user_query,
-                    sql_query=sql_query,
-                    sanitized_df=sanitized_df,
-                    executive_summary=assistant_summary,
-                    conversation_history=conversation_history,
-                )
-
-                if recommendations["business_advice"]:
-                    st.markdown("##### 📈 Business Advice")
-                    for advice in recommendations["business_advice"]:
-                        st.markdown(f"• {advice}")
-
-                if recommendations["followups"]:
-                    st.markdown("##### 💡 Suggested Questions")
-                    for i, question in enumerate(recommendations["followups"]):
-                        if st.button(
-                            f"💡 {question}",
-                            key=f"followup_live_{len(st.session_state.messages)}_{i}",
-                            use_container_width=True,
-                        ):
-                            st.session_state.selected_followup = question
-                            st.rerun()
-
-                log_chatbot_interaction(
-                    user_query,
-                    sql_query,
-                    result_df,
-                    assistant_summary,
-                    input_tokens=total_input_tokens,
-                    output_tokens=total_output_tokens,
-                )
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": assistant_summary,
-                    "sql": sql_query,
-                    "df": sanitized_df.to_dict(orient="records"),
-                    "followups": recommendations["followups"],
-                    "business_advice": recommendations["business_advice"],
-                })
-
-                if len(st.session_state.messages) > MAX_STORED_MESSAGES:
-                    st.session_state.messages = st.session_state.messages[-MAX_STORED_MESSAGES:]
-
-            except Exception as e:
-                status.update(label="❌ Pipeline error", state="complete", expanded=False)
-                err_msg = _friendly_error_message(e, "pipeline")
-                st.exception(e)
-                st.error(err_msg)
-                log_chatbot_interaction(
-                    user_query,
-                    sql_query,
-                    None,
-                    str(e),
-                    input_tokens=total_input_tokens,
-                    output_tokens=total_output_tokens,
-                )
-                st.session_state.messages.append(
-                    {"role": "assistant", "content": err_msg, "sql": sql_query, "df": None}
-                )
-
-
-def render_chatbot_tab() -> None:
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    st.header("🛒 E-commerce Fraud Detection Analytics Chatbot")
-
-    st.markdown(
-        """
-Ask questions about:
-
-- 🛍️ Orders & Sales
-- 💰 Revenue Analysis
-- 🚨 Fraud Detection
-- 👥 Customer Analytics
-- 📦 Product Performance
-- 📱 Device Analysis
-- 📋 Fraud Rule Analysis
-- 🌍 Geographic Insights
-        """
-    )
-
-    st.info(
-        """
-### 💡 Example Questions
-
-• Total fraudulent orders
-
-• Fraud rate by state
-
-• Top 10 customers by spending
-
-• Revenue by product category
-
-• Top selling products
-
-• Fraud orders by device type
-
-• Revenue by city
-        """
-    )
-
-    st.markdown("---")
-
-    with st.sidebar:
-        st.markdown("---")
-        st.markdown("### 🔌 Connection Status")
-
-    Sequence (always the same live and after reload):
-      1. Result table
-      2. Chart / visualization
-      3. Insights / summary text
-      4. Business advice
-      5. Suggested follow-ups
-    """
-    df_restored = None
-    stored_df = msg.get("df")
-    if stored_df is not None:
-        try:
-            df_restored = pd.DataFrame(stored_df)
-            df_restored = _restore_dataframe_types(df_restored)
-            df_restored = mask_sensitive_dataframe(
-                df_restored, analyst=st.session_state.get("analyst")
-            )
-            if df_restored.empty:
-                df_restored = None
-        except Exception:
-            logging.exception(
-                "Failed to reload stored results for message key_prefix=%s",
-                key_prefix,
-            )
-            st.warning("Couldn't reload the saved results for this message.")
-            df_restored = None
-
-        if st.button(
-            "🗑️ Clear Chat History",
-            use_container_width=True,
-            key="clear_chat_btn",
-        ):
-            st.session_state.messages = []
-            st.rerun()
-
-
-    # =====================================================
-    # Chat History
-    # =====================================================
-
-    for idx, msg in enumerate(st.session_state.messages):
-
-        with st.chat_message(msg["role"]):
-
-            st.markdown(msg["content"])
-
-            # Suggested Follow-up Questions
-            followups = msg.get("followups", [])
-
-            if followups:
-
-                st.markdown("##### 💡 Suggested Questions")
-
-                for i, question in enumerate(followups):
-
-                    if st.button(
-                        f"💡 {question}",
-                        key=f"followup_{idx}_{i}",
-                        use_container_width=True,
-                    ):
-                        st.session_state.selected_followup = question
-                        st.rerun()
-
-            # Business Advice
-            business_advice = msg.get("business_advice", [])
-
-            if business_advice:
-
-                st.markdown("##### 📈 Business Advice")
-
-                for advice in business_advice:
-                    st.markdown(f"• {advice}")
-
-            # Restore DataFrame
-            stored_df = msg.get("df")
-
-            if stored_df is not None:
-
-                try:
-
-                    df_restored = pd.DataFrame(stored_df)
-                    df_restored = _restore_dataframe_types(df_restored)
-
-                    if not df_restored.empty:
-
-                        with st.expander(
-                            "📋 View Query Result",
-                            expanded=False,
-                        ):
-
-                            st.dataframe(
-                                df_restored,
-                                use_container_width=True,
-                                key=f"hist_df_{idx}",
-                            )
-
-                        _render_chart(
-                            df_restored,
-                            chart_key=f"hist_{idx}",
-                        )
-
-                except Exception:
-
-                    logging.exception(
-                        "Failed to reload stored results for history message idx=%s",
-                        idx,
-                    )
-
-                    st.warning(
-                        "📋 Couldn't reload the saved results for this message."
-                    )
-    # ---------------------------------------------------------
-# Handle Follow-up Button Click or Manual Chat Input
-# ---------------------------------------------------------
-
-    if "selected_followup" in st.session_state:
-
-        user_query = st.session_state.pop("selected_followup", None)
-        if user_query is None:
-            user_query = st.chat_input(
-                "Ask any E-commerce Analytics question..."
-            )
-
-    else:
-        user_query = st.chat_input(
-            "Ask any E-commerce Analytics question..."
-        )
-
-
-
-    if user_query:
-
-        st.session_state.messages.append(
-            {
-                "role": "user",
-                "content": user_query,
-            }
-        )
-
-        with st.chat_message("user"):
-            st.markdown(user_query)
-
-        _run_query_pipeline(user_query)

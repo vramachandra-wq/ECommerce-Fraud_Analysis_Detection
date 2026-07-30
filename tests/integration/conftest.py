@@ -52,10 +52,25 @@ def db_cursor(db_conn):
 
 @pytest.fixture
 def api_client(db_available):
-    """FastAPI TestClient hitting the real database (no psycopg2 mocks)."""
+    """FastAPI TestClient hitting the real database (no psycopg2 mocks).
+
+    Authenticated as the seed Admin analyst so protected routes
+    (/create-order, /pending-reviews, /approve-order, blacklist APIs) work.
+    """
     from api.main import app
 
     with TestClient(app) as client:
+        login = client.post(
+            "/auth/login",
+            json={
+                "username": SEED_ANALYST["username"],
+                "password": SEED_ANALYST["password"],
+            },
+        )
+        assert login.status_code == 200, login.text
+        token = login.json().get("token")
+        assert token, "login response missing session token"
+        client.headers.update({"Authorization": f"Bearer {token}"})
         yield client
 
 

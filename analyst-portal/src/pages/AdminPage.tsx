@@ -363,6 +363,7 @@ function UserManagementTab({
   onError: (msg: string) => void;
   onSuccess: (msg: string) => void;
 }) {
+  const { session } = useAuth();
   const [form, setForm] = useState({
     analyst_id: "",
     employee_name: "",
@@ -383,7 +384,10 @@ function UserManagementTab({
       onError("Please confirm analyst creation.");
       return;
     }
-    await api.createAnalyst(form);
+    await api.createAnalyst({
+      ...form,
+      actor_role: session?.analyst.role,
+    });
     onSuccess(`Analyst ${form.employee_name} created.`);
     setForm({ analyst_id: "", employee_name: "", username: "", password: "", role: "Fraud Analyst" });
     const refreshed = await api.analystPerformance();
@@ -412,7 +416,7 @@ function UserManagementTab({
           >
             <option>Fraud Analyst</option>
             <option>Senior Fraud Analyst</option>
-            <option>Admin</option>
+            {session?.analyst.role === "Admin" ? <option>Admin</option> : null}
           </select>
           <label className="flex items-center gap-2 text-sm md:col-span-2">
             <input type="checkbox" checked={confirm} onChange={(e) => setConfirm(e.target.checked)} />
@@ -446,12 +450,45 @@ function AnalyticsTab() {
     recent_orders: Record<string, unknown>[];
     orders_over_time: { order_date: string; order_count: number }[];
   } | null>(null);
+  const [scheduler, setScheduler] = useState<{
+    running: boolean;
+    interval_seconds: number;
+    last_started_at?: string | null;
+    last_finished_at?: string | null;
+    last_success_at?: string | null;
+    last_failure_at?: string | null;
+    last_error?: string | null;
+    last_processed_count: number;
+    total_processed_count: number;
+    run_count: number;
+    success_count: number;
+    failure_count: number;
+  } | null>(null);
 
   useEffect(() => {
     api.analyticsSummary().then(setSummary);
+    api.schedulerStatus().then((data) => setScheduler(data.scheduler));
   }, []);
 
   if (!summary) return <p className="text-sm text-muted">Loading analytics...</p>;
+
+  const fmt = (value?: string | null) => {
+    if (!value) return "—";
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return value;
+    return (
+      new Intl.DateTimeFormat("en-IN", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      }).format(d) + " IST"
+    );
+  };
 
   const statusEntries = Object.entries(summary.kpis.status_counts || {})
     .map(([status, value]) => ({ status, value: Number(value) || 0 }))
@@ -480,6 +517,25 @@ function AnalyticsTab() {
         <MetricCard label="Total Fraud Orders" value={summary.kpis.total_fraud.toLocaleString()} />
         <MetricCard label="Fraud Rate" value={`${summary.kpis.fraud_rate}%`} />
       </div>
+
+      {scheduler ? (
+        <Card title="Auto-Approval Scheduler">
+          <div className="grid gap-4 md:grid-cols-4">
+            <MetricCard label="Status" value={scheduler.running ? "Running" : "Stopped"} />
+            <MetricCard label="Runs" value={scheduler.run_count} />
+            <MetricCard label="Last Processed" value={scheduler.last_processed_count} />
+            <MetricCard label="Total Auto-Approved" value={scheduler.total_processed_count} />
+          </div>
+          <div className="mt-4 grid gap-3 text-sm text-muted md:grid-cols-2">
+            <p>Last finished: {fmt(scheduler.last_finished_at)}</p>
+            <p>Last success: {fmt(scheduler.last_success_at)}</p>
+            <p>Last failure: {fmt(scheduler.last_failure_at)}</p>
+            <p>Interval: every {scheduler.interval_seconds}s</p>
+            <p>Failures: {scheduler.failure_count}</p>
+          </div>
+          {scheduler.last_error ? <Alert tone="warning">{scheduler.last_error}</Alert> : null}
+        </Card>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card title="Order Status Distribution">
@@ -591,6 +647,7 @@ function RuleManagementTab({
   const [threshold, setThreshold] = useState(0);
   const [intervalValue, setIntervalValue] = useState(1);
   const [intervalUnit, setIntervalUnit] = useState("MINUTE");
+  const [delayMinutes, setDelayMinutes] = useState(60);
 
   useEffect(() => {
     api.rules().then((data) => {
@@ -605,34 +662,59 @@ function RuleManagementTab({
 
   useEffect(() => {
     if (!selected) return;
-    setAction(selected.action);
+    const isR001 = selected.rule_id === "R001";
+    const isBlacklist = selected.rule_name.toLowerCase().includes("blacklist");
+    setAction(isR001 ? "HOLD" : isBlacklist ? "REJECTED" : selected.action);
     setThreshold(Number(selected.threshold_value ?? 0));
     setIntervalValue(Number(selected.time_interval_value ?? 1));
     setIntervalUnit(selected.time_interval_unit ?? "MINUTE");
+    setDelayMinutes(Number(selected.delay_minutes ?? (isR001 ? 180 : 60)));
   }, [selected]);
+
+  if (!selected) return <p className="text-sm text-muted">No rules found.</p>;
+
+  const isR001 = selected.rule_id === "R001";
+  const isBlacklist = selected.rule_name.toLowerCase().includes("blacklist");
+  const effectiveAction = (isR001 ? "HOLD" : isBlacklist ? "REJECTED" : action).toUpperCase();
+  const supportsThreshold =
+    !isR001 && !isBlacklist && ["VELOCITY", "BEHAVIORAL", "LINKAGE"].includes(selected.rule_type);
+  const supportsInterval =
+    !isR001 && !isBlacklist && (selected.rule_type === "VELOCITY" || selected.rule_type === "BEHAVIORAL");
+  const canEditAction = !isR001 && !isBlacklist;
+  const canEditThreshold = supportsThreshold && effectiveAction !== "PASS";
+  const canEditInterval = supportsInterval && effectiveAction !== "PASS";
+  const canEditDelay = isR001
+    ? true
+    : !isBlacklist && (effectiveAction === "HOLD" || effectiveAction === "REVIEW");
 
   async function save() {
     if (!selected) return;
+
+    if (canEditThreshold && !(threshold >= 0)) {
+      onError("Threshold must be 0 or greater.");
+      return;
+    }
+    if (canEditInterval && !(intervalValue >= 1)) {
+      onError("Time interval must be at least 1.");
+      return;
+    }
+    if (canEditDelay && !(delayMinutes >= 1)) {
+      onError("Delay minutes must be at least 1.");
+      return;
+    }
+
     await api.updateRule({
       rule_id: selected.rule_id,
-      action,
-      threshold_value: selected.rule_type === "STATIC" || selected.rule_name.toLowerCase().includes("blacklist")
-        ? null
-        : threshold,
-      time_interval_value:
-        selected.rule_type === "VELOCITY" || selected.rule_type === "BEHAVIORAL" ? intervalValue : null,
-      time_interval_unit:
-        selected.rule_type === "VELOCITY" || selected.rule_type === "BEHAVIORAL" ? intervalUnit : null,
+      action: effectiveAction,
+      threshold_value: supportsThreshold ? threshold : null,
+      time_interval_value: supportsInterval ? intervalValue : null,
+      time_interval_unit: supportsInterval ? intervalUnit : null,
+      delay_minutes: delayMinutes,
     });
     onSuccess(`Rule ${selected.rule_id} updated.`);
     const refreshed = await api.rules();
     setRules(refreshed.rules);
   }
-
-  if (!selected) return <p className="text-sm text-muted">No rules found.</p>;
-
-  const isLocked =
-    selected.rule_id === "R001" || selected.rule_name.toLowerCase().includes("blacklist");
 
   return (
     <Card title="Rule Configuration Management">
@@ -653,14 +735,16 @@ function RuleManagementTab({
         Type: <span className="font-medium">{selected.rule_type}</span>
       </p>
 
-      {isLocked ? (
-        <Alert tone="info">Action is locked for this rule in the Streamlit admin panel as well.</Alert>
+      {!canEditAction ? (
+        <Alert tone="info">
+          Action is locked to <strong>{effectiveAction}</strong> for this rule.
+        </Alert>
       ) : (
         <label className="mt-4 block text-sm">
           Action
           <select
             className="mt-1 w-full rounded-lg border border-border px-3 py-2"
-            value={action}
+            value={effectiveAction}
             onChange={(e) => setAction(e.target.value)}
           >
             {["HOLD", "REVIEW", "REJECTED", "PASS"].map((opt) => (
@@ -678,7 +762,7 @@ function RuleManagementTab({
             className="mt-1 w-full rounded-lg border border-border px-3 py-2"
             value={threshold}
             onChange={(e) => setThreshold(Number(e.target.value))}
-            disabled={selected.rule_type === "STATIC"}
+            disabled={!canEditThreshold}
           />
         </label>
         <label className="text-sm">
@@ -688,7 +772,7 @@ function RuleManagementTab({
             className="mt-1 w-full rounded-lg border border-border px-3 py-2"
             value={intervalValue}
             onChange={(e) => setIntervalValue(Number(e.target.value))}
-            disabled={!(selected.rule_type === "VELOCITY" || selected.rule_type === "BEHAVIORAL")}
+            disabled={!canEditInterval}
           />
         </label>
         <label className="text-sm">
@@ -697,7 +781,7 @@ function RuleManagementTab({
             className="mt-1 w-full rounded-lg border border-border px-3 py-2"
             value={intervalUnit}
             onChange={(e) => setIntervalUnit(e.target.value)}
-            disabled={!(selected.rule_type === "VELOCITY" || selected.rule_type === "BEHAVIORAL")}
+            disabled={!canEditInterval}
           >
             {["MINUTE", "HOUR", "DAY", "WEEK"].map((unit) => (
               <option key={unit}>{unit}</option>
@@ -705,6 +789,23 @@ function RuleManagementTab({
           </select>
         </label>
       </div>
+
+      <label className="mt-4 block text-sm">
+        Delay Minutes
+        <input
+          type="number"
+          min={1}
+          className="mt-1 w-full rounded-lg border border-border px-3 py-2"
+          value={delayMinutes}
+          onChange={(e) => setDelayMinutes(Number(e.target.value))}
+          disabled={!canEditDelay}
+        />
+      </label>
+      {isR001 ? (
+        <Alert tone="info">R001 uses Delay Minutes as the hold window (interval fields do not apply).</Alert>
+      ) : !canEditDelay ? (
+        <p className="mt-1 text-sm text-muted">Delay applies only to HOLD/REVIEW actions.</p>
+      ) : null}
 
       <Button className="mt-4" onClick={() => save().catch((e) => onError(e.message))}>
         Save Rule Changes

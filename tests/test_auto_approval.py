@@ -40,7 +40,9 @@ def test_sync_expired_holds_uses_backlog_lock():
         return_value={"rule_name": "P2 iPhone 16 Rule", "delay_minutes": 180},
     ), patch(
         "fraud_engine.auto_approval.log_review_action",
-    ) as log_mock:
+    ) as log_mock, patch(
+        "fraud_engine.auto_approval.log_system_event",
+    ):
         cursor.rowcount = 1
         updated = sync_expired_holds(conn, cursor)
 

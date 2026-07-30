@@ -164,6 +164,18 @@ export const TRANSLATIONS = {
     "en": "Sign In",
     "th": "เข้าสู่ระบบ"
   },
+  "sign_in_sso": {
+    "en": "Sign in with SSO",
+    "th": "เข้าสู่ระบบด้วย SSO"
+  },
+  "or_continue_with_password": {
+    "en": "Or continue with username and password",
+    "th": "หรือใช้ชื่อผู้ใช้และรหัสผ่าน"
+  },
+  "sso_login_failed": {
+    "en": "SSO sign-in failed",
+    "th": "เข้าสู่ระบบ SSO ไม่สำเร็จ"
+  },
   "sign_in_cta": {
     "en": "Sign In",
     "th": "เข้าสู่ระบบ →"
