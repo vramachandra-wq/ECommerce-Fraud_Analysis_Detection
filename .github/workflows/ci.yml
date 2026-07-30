@@ -69,6 +69,7 @@ jobs:
 
       - name: Restore static background asset
         run: |
+          mkdir -p static/analyst-portal/assets
           cp analyst-portal/public/assets/portal-bg.png static/analyst-portal/assets/portal-bg.png
 
       - name: Verify build output

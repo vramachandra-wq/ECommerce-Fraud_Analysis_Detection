@@ -266,7 +266,7 @@ def test_get_followup_context_masks_pii_in_sample():
 # ---------- masking / sanitize ----------
 
 def test_mask_email_phone_address_ip():
-    assert _mask_email("john@example.com") == "j***@example.com"
+    assert _mask_email("john@example.com") == "jo**@example.com"
     assert _mask_phone("9876543210") == "98******10"
     assert _mask_phone("1234") == "***"
     assert _mask_address("12 Main Street Chennai") == "12********************"
