@@ -19,7 +19,7 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.12"
-  NODE_VERSION: "20"
+  NODE_VERSION: "22"
   DB_HOST: localhost
   DB_PORT: "5432"
   DB_NAME: fraud_detection
@@ -64,7 +64,8 @@ jobs:
       - name: Install and build React portal
         working-directory: analyst-portal
         run: |
-          npm ci
+          # Lockfile was generated on Windows; npm install resolves Linux native optional deps on CI.
+          npm install
           npm run build
 
       - name: Restore static background asset
