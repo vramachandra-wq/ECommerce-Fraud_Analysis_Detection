@@ -302,17 +302,6 @@ Integration tests (require live PostgreSQL):
 .\.venv\Scripts\python.exe -m pytest -m integration -q
 ```
 
-## CI/CD
-
-GitHub Actions workflows live in `.github/workflows/`:
-
-| Workflow | Trigger | Purpose |
-|----------|---------|---------|
-| `ci.yml` | Push / PR to `main` or `feature/**` | Unit tests, React portal build, integration tests (Postgres 15 + `schema.sql`) |
-| `deploy.yml` | Manual (`workflow_dispatch`) | Optional staging/production deploy; builds release tarball; SSH deploy when `DEPLOY_ENABLED=true` and secrets are configured |
-
-CI does not deploy automatically. Use the **Deploy** workflow from the GitHub Actions tab when you want to publish.
-
 ## pgAdmin (optional)
 
 | Parameter | Value |

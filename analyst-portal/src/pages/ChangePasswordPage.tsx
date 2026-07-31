@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from "react";
+import { FormEvent, useState } from "react";
 import { api, ApiError } from "../api";
 import { useI18n } from "../i18n";
 import { Alert, Button, Card } from "../components/ui";

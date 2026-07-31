@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppLayout } from "./components/AppLayout";
 import { ProtectedPage } from "./components/ProtectedPage";
 import { AuthProvider, useAuth } from "./context/AuthContext";
@@ -24,46 +24,48 @@ export default function App() {
   return (
     <I18nProvider>
       <AuthProvider>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route element={<AppLayout />}>
-            <Route index element={<HomeRedirect />} />
-            <Route path="/change-password" element={<ChangePasswordPage />} />
-            <Route
-              path="/dashboard"
-              element={
-                <ProtectedPage page="FRAUD_DASHBOARD">
-                  <DashboardPage />
-                </ProtectedPage>
-              }
-            />
-            <Route
-              path="/admin"
-              element={
-                <ProtectedPage page="ADMIN_PANEL">
-                  <AdminPage />
-                </ProtectedPage>
-              }
-            />
-            <Route
-              path="/analytics"
-              element={
-                <ProtectedPage page="POWER_BI_DASHBOARD">
-                  <PowerBIPage />
-                </ProtectedPage>
-              }
-            />
-            <Route
-              path="/chatbot"
-              element={
-                <ProtectedPage page="AI_CHATBOT">
-                  <ChatbotPage />
-                </ProtectedPage>
-              }
-            />
-          </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <BrowserRouter basename={import.meta.env.BASE_URL}>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route element={<AppLayout />}>
+              <Route index element={<HomeRedirect />} />
+              <Route path="/change-password" element={<ChangePasswordPage />} />
+              <Route
+                path="/dashboard"
+                element={
+                  <ProtectedPage page="FRAUD_DASHBOARD">
+                    <DashboardPage />
+                  </ProtectedPage>
+                }
+              />
+              <Route
+                path="/admin"
+                element={
+                  <ProtectedPage page="ADMIN_PANEL">
+                    <AdminPage />
+                  </ProtectedPage>
+                }
+              />
+              <Route
+                path="/analytics"
+                element={
+                  <ProtectedPage page="POWER_BI_DASHBOARD">
+                    <PowerBIPage />
+                  </ProtectedPage>
+                }
+              />
+              <Route
+                path="/chatbot"
+                element={
+                  <ProtectedPage page="AI_CHATBOT">
+                    <ChatbotPage />
+                  </ProtectedPage>
+                }
+              />
+            </Route>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
       </AuthProvider>
     </I18nProvider>
   );

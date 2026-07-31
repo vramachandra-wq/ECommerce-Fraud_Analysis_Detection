@@ -183,19 +183,6 @@ export const api = {
       "/portal/chat",
       { method: "POST", body: JSON.stringify({ message, history }) },
     ),
-  auditLog: (params: { limit?: number; offset?: number; orderId?: string } = {}) => {
-    const query = new URLSearchParams();
-    if (params.limit != null) query.set("limit", String(params.limit));
-    if (params.offset != null) query.set("offset", String(params.offset));
-    if (params.orderId) query.set("order_id", params.orderId);
-    const suffix = query.toString() ? `?${query.toString()}` : "";
-    return apiRequest<{
-      entries: import("./types").AuditLogEntry[];
-      total: number;
-      limit: number;
-      offset: number;
-    }>(`/portal/audit${suffix}`);
-  },
 };
 
 /** Full browser URL that starts the SSO OIDC redirect (bypasses Vite /api rewrite). */

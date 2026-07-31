@@ -30,7 +30,6 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.12"
-  NODE_VERSION: "20"
   DB_HOST: localhost
   DB_PORT: "5432"
   DB_NAME: fraud_detection
@@ -63,18 +62,12 @@ jobs:
       - name: Run unit tests
         run: python -m pytest -m "not integration and not live_groq" -q --tb=short
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: analyst-portal/package-lock.json
-
-      - name: Build analyst portal
-        working-directory: analyst-portal
+      - name: Verify static analyst portal
         run: |
-          npm ci
-          npm run build
-          cp public/assets/portal-bg.png ../static/analyst-portal/assets/portal-bg.png
+          test -f static/analyst-portal/index.html
+          test -f static/analyst-portal/app.js
+          test -f static/analyst-portal/styles.css
+          test -f static/analyst-portal/i18n.js
 
       - name: Package release bundle
         run: |

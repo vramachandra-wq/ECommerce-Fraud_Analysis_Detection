@@ -1,4 +1,4 @@
-﻿import re
+import re
 import logging
 import pandas as pd
 import json
@@ -548,8 +548,6 @@ def _mask_value(column_name, value):
         return _mask_address(value)
     if mask_type == "ip":
         return _mask_ip(value)
-    if mask_type == "secret":
-        return "********" if not pd.isna(value) else value
     return value
 
 
@@ -562,6 +560,7 @@ def _apply_pii_masks(df: pd.DataFrame) -> pd.DataFrame:
                 lambda value, col=column: _mask_value(col, value)
             )
     return masked_df
+
 
 def mask_sensitive_dataframe(
     df: pd.DataFrame,

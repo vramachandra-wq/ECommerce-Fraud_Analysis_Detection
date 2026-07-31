@@ -2,25 +2,23 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
-export default defineConfig(({ command }) => {
-  const isDev = command === "serve";
-
-  return {
-    plugins: [react(), tailwindcss()],
-    base: isDev ? "/" : "/portal/",
-    build: {
-      outDir: "../static/analyst-portal",
-      emptyOutDir: true,
-    },
-    server: {
-      port: 5173,
-      proxy: {
-        "/api": {
-          target: "http://127.0.0.1:8000",
-          changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/api/, ""),
-        },
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  base: "/portal/",
+  build: {
+    // Opt-in publish target (.\start.ps1 -BuildPortal or npm run build).
+    // emptyOutDir false avoids wiping hand-maintained static assets by accident.
+    outDir: "../static/analyst-portal",
+    emptyOutDir: false,
+  },
+  server: {
+    port: 5173,
+    proxy: {
+      "/api": {
+        target: "http://127.0.0.1:8000",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ""),
       },
     },
-  };
+  },
 });

@@ -390,3 +390,57 @@ def get_review_audit_log(
     cols = [d.name for d in cursor.description]
     entries = [dict(zip(cols, row)) for row in cursor.fetchall()]
     return {"entries": entries, "total": total, "limit": limit, "offset": offset}
+
+
+def get_review_audit_log(
+    cursor: Any,
+    *,
+    limit: int = 100,
+    offset: int = 0,
+    order_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Paginated order review audit trail with analyst and order context."""
+    limit = max(1, min(int(limit), 500))
+    offset = max(0, int(offset))
+
+    filters = ""
+    params: List[Any] = []
+    if order_id:
+        filters = "WHERE a.order_id = %s"
+        params.append(order_id.strip())
+
+    cursor.execute(
+        f"""
+        SELECT COUNT(*) FROM master.order_review_audit a {filters}
+        """,
+        params,
+    )
+    total = int(cursor.fetchone()[0])
+
+    cursor.execute(
+        f"""
+        SELECT
+            a.audit_id,
+            a.order_id,
+            a.analyst_id,
+            au.employee_name AS analyst_name,
+            a.action,
+            a.rule_name,
+            a.delay_minutes,
+            a.reason,
+            a.review_comments,
+            a.created_at,
+            o.customer_name,
+            o.order_status
+        FROM master.order_review_audit a
+        LEFT JOIN master.analyst_users au ON au.analyst_id = a.analyst_id
+        LEFT JOIN master.orders o ON o.order_id = a.order_id
+        {filters}
+        ORDER BY a.created_at DESC, a.audit_id DESC
+        LIMIT %s OFFSET %s
+        """,
+        [*params, limit, offset],
+    )
+    cols = [d.name for d in cursor.description]
+    entries = [dict(zip(cols, row)) for row in cursor.fetchall()]
+    return {"entries": entries, "total": total, "limit": limit, "offset": offset}
