@@ -3,7 +3,7 @@ import time
 import logging
 import httpx
 from groq import Groq, APIConnectionError, APITimeoutError, RateLimitError
-from config import GROQ_API_KEY, is_groq_api_key_configured
+from config import GROQ_API_KEY, GROQ_SSL_VERIFY, is_groq_api_key_configured
 
 _client = None
 
@@ -14,13 +14,12 @@ def get_groq_client():
         if not is_groq_api_key_configured():
             return None
 
-        # Create a custom HTTP client tailored for corporate networks/VPNs
+        # Default verify=False for SSL-inspecting proxies; set GROQ_SSL_VERIFY=true when possible.
         custom_http_client = httpx.Client(
-            verify=False,  # Bypasses corporate SSL interception (Zscaler, etc.)
-            timeout=60.0   # Increases timeout to account for proxy routing
+            verify=GROQ_SSL_VERIFY,
+            timeout=45.0,
         )
 
-        # Initialize Groq with the custom client
         _client = Groq(
             api_key=GROQ_API_KEY,
             http_client=custom_http_client
@@ -29,7 +28,7 @@ def get_groq_client():
     return _client
 
 
-def create_chat_completion(client, *, max_retries: int = 3, backoff_factor: float = 1.0, stream: bool = False, **kwargs):
+def create_chat_completion(client, *, max_retries: int = 2, backoff_factor: float = 0.6, stream: bool = False, **kwargs):
     """Call `client.chat.completions.create` with retries on connection/timeouts."""
     
     if client is None:

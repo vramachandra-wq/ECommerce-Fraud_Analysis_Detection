@@ -49,6 +49,8 @@ export interface OrderLineItem {
   quantity: number;
   unit_price: number;
   line_amount: number;
+  line_status?: string | null;
+  flagged_reason?: string | null;
 }
 
 export interface OrderDetail {

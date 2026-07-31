@@ -307,7 +307,9 @@ export function DashboardPage() {
       {orders.length > 0 ? (
         <Card title="Single Order Investigation">
           <label className="mb-4 block text-sm">
-            <span className="mb-1 block font-medium">Order ID</span>
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Select order to review
+            </span>
             <select
               className="w-full rounded-lg border border-border px-3 py-2"
               value={activeOrderId}
@@ -324,12 +326,24 @@ export function DashboardPage() {
 
           {detail ? (
             <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <h3 className="text-lg font-semibold">{String(detail.order.order_id)}</h3>
-                <StatusBadge status={String(detail.order.order_status)} />
+              <div className="flex flex-wrap items-end justify-between gap-3 rounded-xl border border-border bg-white p-4 shadow-sm">
+                <div>
+                  <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Order ID</p>
+                  <h3 className="text-xl font-bold tracking-tight text-slate-900">
+                    {String(detail.order.order_id)}
+                  </h3>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusBadge status={String(detail.order.order_status)} />
+                  {detail.order.program_id ? (
+                    <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
+                      {String(detail.order.program_id)}
+                    </span>
+                  ) : null}
+                </div>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-3">
+              <div className="grid gap-3 md:grid-cols-3">
                 <MetricCard label="Review Delay" value={`${timing?.delay_minutes ?? "—"}m`} />
                 <MetricCard
                   label="Time Left"
@@ -339,76 +353,144 @@ export function DashboardPage() {
                       : formatMinutes(timing?.minutes_remaining_display ?? timing?.minutes_remaining)
                   }
                 />
-                <MetricCard label="Triggered Rule" value={String(timing?.rule_name || detail.order.flagged_reason || "—")} />
+                <MetricCard
+                  label="Time Overdue"
+                  value={timing?.is_overdue ? formatMinutes(timing?.minutes_overdue) : "—"}
+                />
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
-                <div className="rounded-lg bg-slate-50 p-4 text-sm">
-                  <p className="mb-2 font-semibold">Customer Details</p>
-                  <p>
-                    {String(detail.order.customer_name)} ({String(detail.order.user_id)})
+                <div className="rounded-xl border border-border bg-white p-4 text-sm">
+                  <p className="mb-3 border-b border-border pb-2 text-xs font-bold uppercase tracking-wide text-slate-700">
+                    Customer Details
                   </p>
-                  <p>
-                    Email: {displayPii(detail.order.email, "email", session?.analyst)}
-                    {detail.blacklists.email ? " (blacklisted)" : ""}
-                  </p>
-                  <p>
-                    Phone: {displayPii(detail.order.phone_number, "phone", session?.analyst)}
-                    {detail.blacklists.phone ? " (blacklisted)" : ""}
-                  </p>
-                  <p>Address: {displayPii(detail.order.address, "address", session?.analyst)}</p>
+                  <dl className="space-y-2">
+                    <div>
+                      <dt className="text-xs font-semibold uppercase text-slate-500">Name</dt>
+                      <dd className="font-medium">
+                        {String(detail.order.customer_name)}{" "}
+                        <span className="text-slate-500">({String(detail.order.user_id)})</span>
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-semibold uppercase text-slate-500">Email</dt>
+                      <dd>
+                        {displayPii(detail.order.email, "email", session?.analyst)}
+                        {detail.blacklists.email ? (
+                          <span className="ml-1 rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-bold text-red-700">
+                            blacklisted
+                          </span>
+                        ) : null}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-semibold uppercase text-slate-500">Phone</dt>
+                      <dd>
+                        {displayPii(detail.order.phone_number, "phone", session?.analyst)}
+                        {detail.blacklists.phone ? (
+                          <span className="ml-1 rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-bold text-red-700">
+                            blacklisted
+                          </span>
+                        ) : null}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-semibold uppercase text-slate-500">Address</dt>
+                      <dd>{displayPii(detail.order.address, "address", session?.analyst)}</dd>
+                    </div>
+                  </dl>
                 </div>
-                <div className="rounded-lg bg-slate-50 p-4 text-sm">
-                  <p className="mb-2 font-semibold">Order Details</p>
+                <div className="rounded-xl border border-border bg-white p-4 text-sm">
+                  <p className="mb-3 border-b border-border pb-2 text-xs font-bold uppercase tracking-wide text-slate-700">
+                    Order Details
+                  </p>
                   {Array.isArray(detail.order.items) && (detail.order.items as OrderLineItem[]).length > 0 ? (
-                    <div className="mb-3 overflow-auto">
-                      <p className="mb-1 font-medium">
-                        Items: {(detail.order.items as OrderLineItem[]).length}
-                      </p>
+                    <div className="mb-3 overflow-auto rounded-lg border border-slate-200">
+                      <div className="flex items-center justify-between bg-slate-50 px-2 py-1.5 text-xs font-semibold">
+                        <span>Items</span>
+                        <span className="rounded-full bg-blue-50 px-2 py-0.5 text-blue-700">
+                          {(detail.order.items as OrderLineItem[]).length}
+                        </span>
+                      </div>
                       <table className="w-full text-left text-xs">
                         <thead>
                           <tr className="text-slate-500">
-                            <th className="py-1 pr-2">#</th>
-                            <th className="py-1 pr-2">Product</th>
-                            <th className="py-1 pr-2">Qty</th>
-                            <th className="py-1 pr-2">Unit</th>
-                            <th className="py-1">Line</th>
+                            <th className="px-2 py-1.5">#</th>
+                            <th className="px-2 py-1.5">Product</th>
+                            <th className="px-2 py-1.5">Qty</th>
+                            <th className="px-2 py-1.5">Unit</th>
+                            <th className="px-2 py-1.5">Line</th>
+                            <th className="px-2 py-1.5">Status</th>
                           </tr>
                         </thead>
                         <tbody>
                           {(detail.order.items as OrderLineItem[]).map((item) => (
-                            <tr key={`${item.product_id}-${item.line_no}`} className="border-t border-slate-200">
-                              <td className="py-1 pr-2">{item.line_no}</td>
-                              <td className="py-1 pr-2">
+                            <tr
+                              key={`${item.product_id}-${item.line_no}`}
+                              className={`border-t border-slate-200 ${item.flagged_reason ? "bg-red-50/60" : ""}`}
+                            >
+                              <td className="px-2 py-1.5">{item.line_no}</td>
+                              <td className="px-2 py-1.5">
                                 <div className="font-medium">{item.product_name}</div>
                                 <div className="text-slate-500">
                                   {item.category || "—"} · {item.product_id}
                                 </div>
+                                {item.flagged_reason ? (
+                                  <div className="mt-1 text-[11px] text-red-700">{item.flagged_reason}</div>
+                                ) : null}
                               </td>
-                              <td className="py-1 pr-2">{item.quantity}</td>
-                              <td className="py-1 pr-2">₹ {Number(item.unit_price).toLocaleString("en-IN")}</td>
-                              <td className="py-1">₹ {Number(item.line_amount).toLocaleString("en-IN")}</td>
+                              <td className="px-2 py-1.5">{item.quantity}</td>
+                              <td className="px-2 py-1.5">฿ {Number(item.unit_price).toLocaleString("en-IN")}</td>
+                              <td className="px-2 py-1.5">฿ {Number(item.line_amount).toLocaleString("en-IN")}</td>
+                              <td className="px-2 py-1.5">
+                                {item.line_status ? <StatusBadge status={String(item.line_status)} /> : "—"}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
                   ) : (
-                    <p>
+                    <p className="mb-2">
                       Product: {String(detail.order.product_name)} x{String(detail.order.quantity)}
                     </p>
                   )}
-                  <p>Amount: ₹ {Number(detail.order.amount).toLocaleString("en-IN")}</p>
-                  <p>
-                    IP: {displayPii(detail.order.ip_address, "ip", session?.analyst)}
-                    {detail.blacklists.ip ? " (blacklisted)" : ""}
-                  </p>
-                  <p>Device: {String(detail.order.device_id)}</p>
-                  <p>Placed At: {String(detail.order.order_timestamp)}</p>
+                  <dl className="space-y-2 border-t border-dashed border-slate-200 pt-3">
+                    <div>
+                      <dt className="text-xs font-semibold uppercase text-slate-500">Amount</dt>
+                      <dd className="text-base font-bold">
+                        ฿ {Number(detail.order.amount).toLocaleString("en-IN")}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-semibold uppercase text-slate-500">IP</dt>
+                      <dd>
+                        {displayPii(detail.order.ip_address, "ip", session?.analyst)}
+                        {detail.blacklists.ip ? (
+                          <span className="ml-1 rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-bold text-red-700">
+                            blacklisted
+                          </span>
+                        ) : null}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-semibold uppercase text-slate-500">Device</dt>
+                      <dd>{String(detail.order.device_id || "—")}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-semibold uppercase text-slate-500">Placed At</dt>
+                      <dd>{String(detail.order.order_timestamp || "—")}</dd>
+                    </div>
+                  </dl>
                 </div>
               </div>
 
-              <Alert tone="warning">Flagged reason: {String(detail.order.flagged_reason)}</Alert>
+              {detail.order.flagged_reason ? (
+                <div className="rounded-xl border border-red-200 border-l-4 border-l-red-500 bg-red-50 px-4 py-3 text-sm text-red-800">
+                  <p className="mb-1 text-xs font-bold uppercase tracking-wide">Flagged reason</p>
+                  <p>{String(detail.order.flagged_reason)}</p>
+                </div>
+              ) : null}
 
               {!detail.blacklists.ip ? (
                 <div className="rounded-lg border border-border p-4">

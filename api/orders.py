@@ -118,4 +118,4 @@ def create_order(
         return {"message": "Order Created successfully"}
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Database error while creating order.")

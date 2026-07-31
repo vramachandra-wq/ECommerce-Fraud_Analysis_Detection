@@ -470,7 +470,7 @@ def shop_place_order(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Order failed: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Order failed. Please try again.") from exc
 
     return {
         "message": "Order created successfully",
@@ -556,4 +556,4 @@ def shop_get_order(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to load order: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Failed to load order.") from exc

@@ -66,8 +66,9 @@ def _get_rule_metadata(cursor: Any, rule_id: str) -> Dict[str, Any]:
             delay_minutes = int(row[1]) if row[1] is not None else DEFAULT_DELAY_MINUTES
             if delay_minutes <= 0:
                 delay_minutes = DEFAULT_DELAY_MINUTES
-            # Product rule R001 always uses a 180-minute hold window.
+            # Product rule R001 always uses a 180-minute HOLD window.
             if rule_id == "R001":
+                action_str = "HOLD"
                 delay_minutes = R001_HOLD_DELAY_MINUTES
 
             _RULE_METADATA_CACHE[rule_id] = {

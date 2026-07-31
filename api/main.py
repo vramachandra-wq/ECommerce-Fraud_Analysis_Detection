@@ -20,15 +20,19 @@ SHOP_DIR = Path(__file__).resolve().parent.parent / "static" / "customer-portal"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Ensure multi-item order schema exists on existing databases.
+    # Ensure multi-item order + system audit schema exist on existing databases.
     try:
         import psycopg2
         from config import DB_CONFIG
         from database.order_items import ensure_order_items_table
+        from database.system_audit import ensure_system_audit_table
+        from utils.system_audit import import_file_audit_logs_if_empty
 
         with psycopg2.connect(**DB_CONFIG) as conn:
             with conn.cursor() as cur:
                 ensure_order_items_table(cur)
+                ensure_system_audit_table(cur)
+                import_file_audit_logs_if_empty(cur)
             conn.commit()
     except Exception:
         # Startup should not crash if DB is briefly unavailable; place-order also ensures.

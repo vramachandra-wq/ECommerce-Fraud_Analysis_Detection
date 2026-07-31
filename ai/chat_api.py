@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -225,8 +226,9 @@ def _generate_insights(
         total_in += in_tok
         total_out += out_tok
 
-        finish_reason = getattr(completion.choices[0], "finish_reason", None)
-        if finish_reason == "length" or not summary.strip():
+        # Only retry when the answer is empty (avoid a second slow call on
+        # finish_reason=length when content is already usable).
+        if not summary.strip():
             completion = create_chat_completion(
                 client,
                 model=GROQ_SUMMARY_MODEL,
@@ -466,41 +468,61 @@ def process_chat_message(user_query: str, history: List[Dict[str, Any]]) -> Dict
     summary = "Unable to generate a written summary. Please review the data below."
     insight_title = "AI Insights"
     recommendations: Dict[str, Any] = {"followups": [], "business_advice": []}
+    conversation_history = "\n".join(
+        f"{m['role'].upper()}: {m['content']}" for m in recent_messages
+    )
 
-    try:
-        summary, insight_title, sum_in, sum_out = _generate_insights(
-            client, user_query, sanitized_df
-        )
-        total_input_tokens += sum_in
-        total_output_tokens += sum_out
-    except Exception as exc:
-        _safe_log_chatbot_interaction(
-            user_query,
-            sql_query,
-            sanitized_df,
-            f"INSIGHT_ERROR: {exc}",
-            input_tokens=total_input_tokens,
-            output_tokens=total_output_tokens,
-        )
+    # Run summary + follow-up recommendations in parallel — they both only
+    # need the query result, and waiting for them sequentially nearly doubles
+    # end-to-end latency after SQL succeeds.
+    def _insights_job():
+        return _generate_insights(client, user_query, sanitized_df)
 
-    try:
-        conversation_history = "\n".join(
-            f"{m['role'].upper()}: {m['content']}" for m in recent_messages
-        )
-        recommendations = _generate_ai_recommendations(
+    def _recs_job():
+        return _generate_ai_recommendations(
             client=client,
             user_query=user_query,
             sql_query=sql_query,
             sanitized_df=sanitized_df,
-            executive_summary=summary,
+            # Recommendations also get the data preview; do not wait on summary.
+            executive_summary="(see data preview)",
             conversation_history=conversation_history,
-        ) or recommendations
+        )
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            insights_fut = pool.submit(_insights_job)
+            recs_fut = pool.submit(_recs_job)
+            try:
+                summary, insight_title, sum_in, sum_out = insights_fut.result()
+                total_input_tokens += sum_in
+                total_output_tokens += sum_out
+            except Exception as exc:
+                _safe_log_chatbot_interaction(
+                    user_query,
+                    sql_query,
+                    sanitized_df,
+                    f"INSIGHT_ERROR: {exc}",
+                    input_tokens=total_input_tokens,
+                    output_tokens=total_output_tokens,
+                )
+            try:
+                recommendations = recs_fut.result() or recommendations
+            except Exception as exc:
+                _safe_log_chatbot_interaction(
+                    user_query,
+                    sql_query,
+                    sanitized_df,
+                    f"RECOMMENDATION_ERROR: {exc}",
+                    input_tokens=total_input_tokens,
+                    output_tokens=total_output_tokens,
+                )
     except Exception as exc:
         _safe_log_chatbot_interaction(
             user_query,
             sql_query,
             sanitized_df,
-            f"RECOMMENDATION_ERROR: {exc}",
+            f"POST_SQL_LLM_ERROR: {exc}",
             input_tokens=total_input_tokens,
             output_tokens=total_output_tokens,
         )

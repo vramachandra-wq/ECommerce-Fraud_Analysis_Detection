@@ -6,7 +6,7 @@ from ai import prompt_constants as pc
 def test_history_and_preview_limits():
     assert pc.MAX_HISTORY == 8
     assert pc.MAX_STORED_MESSAGES == 100
-    assert pc.MARKDOWN_PREVIEW_ROWS == 15
+    assert pc.MARKDOWN_PREVIEW_ROWS == 10
 
 
 def test_token_budgets_are_positive():

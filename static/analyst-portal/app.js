@@ -3,7 +3,7 @@ import {
   curSym,
   languageToggleHtml,
   bindLanguageToggle,
-} from "./i18n.js?v=59";
+} from "./i18n.js?v=61";
 
 const PAGE_LABEL_KEYS = {
   ADMIN_PANEL: "nav_admin_panel",
@@ -444,24 +444,32 @@ function investigationTimingHtml(timing, order) {
 function investigationStreamlitMetricsHtml(timing, order) {
   const tm = timing || {};
   const delay = tm.delay_minutes ?? order?.delay_minutes ?? "—";
-  const remaining = tm.is_overdue
-    ? "0 min"
-    : formatMinutes(tm.minutes_remaining_display ?? tm.minutes_remaining);
+  const remainingRaw = tm.minutes_remaining_display ?? tm.minutes_remaining;
+  const remaining = tm.is_overdue ? "0 min" : formatMinutes(remainingRaw);
   const overdue = tm.is_overdue ? formatMinutes(tm.minutes_overdue) : "—";
+  const overdueClass = tm.is_overdue ? "inv-metric-card inv-metric-overdue" : "inv-metric-card";
   return `
-    <div class="overview-grid inv-metrics">
-      <div class="stat-card inv-metric-card">
-        <div class="stat-value">${esc(delay)}</div>
-        <div class="stat-label">${esc(t("delay_minutes"))}</div>
+    <div class="inv-metrics" role="group" aria-label="${esc(t("review_timing") || "Review timing")}">
+      <div class="inv-metric-card">
+        <div class="inv-metric-kicker">${esc(t("delay_minutes"))}</div>
+        <div class="inv-metric-value">${esc(delay)}<span class="inv-metric-unit">m</span></div>
       </div>
-      <div class="stat-card inv-metric-card">
-        <div class="stat-value">${esc(remaining)}</div>
-        <div class="stat-label">${esc(t("remaining_review"))}</div>
+      <div class="${overdueClass}">
+        <div class="inv-metric-kicker">${esc(t("remaining_review"))}</div>
+        <div class="inv-metric-value">${esc(remaining)}</div>
       </div>
-      <div class="stat-card inv-metric-card">
-        <div class="stat-value ${tm.is_overdue ? "timing-overdue" : ""}">${esc(overdue)}</div>
-        <div class="stat-label">${esc(t("time_overdue"))}</div>
+      <div class="${overdueClass}">
+        <div class="inv-metric-kicker">${esc(t("time_overdue"))}</div>
+        <div class="inv-metric-value ${tm.is_overdue ? "timing-overdue" : ""}">${esc(overdue)}</div>
       </div>
+    </div>`;
+}
+
+function invDlRow(label, valueHtml, { warn = false } = {}) {
+  return `
+    <div class="inv-dl-row${warn ? " inv-dl-row-warn" : ""}">
+      <dt>${esc(label)}</dt>
+      <dd>${valueHtml}</dd>
     </div>`;
 }
 
@@ -484,19 +492,27 @@ function blacklistSecurityHtml(type, value, entry, prefix) {
   const lockKey = type === "ip" ? "lock_ip" : type === "phone" ? "lock_phone" : "lock_email";
 
   if (entry) {
-    return `<div class="alert alert-info">${esc(
-      t(alreadyKey, {
-        value: shown,
-        reason: entry.reason || "—",
-        by: entry.blacklisted_by_name || entry.blacklisted_by || "—",
-        at: formatUtc(entry.blacklisted_at),
-      }),
-    )}</div>`;
+    return `<div class="inv-security inv-security-locked">
+      <div class="inv-security-locked-body">
+        <span class="inv-security-pill">${esc(type.toUpperCase())}</span>
+        <div>${esc(
+          t(alreadyKey, {
+            value: shown,
+            reason: entry.reason || "—",
+            by: entry.blacklisted_by_name || entry.blacklisted_by || "—",
+            at: formatUtc(entry.blacklisted_at),
+          }),
+        )}</div>
+      </div>
+    </div>`;
   }
 
   return `
     <details class="inv-security">
-      <summary>${esc(t(titleKey, { value: shown }))}</summary>
+      <summary>
+        <span class="inv-security-pill">${esc(type.toUpperCase())}</span>
+        <span>${esc(t(titleKey, { value: shown }))}</span>
+      </summary>
       <div class="inv-security-body">
         <div class="field">
           <label>${esc(t("blacklist_reason"))}</label>
@@ -510,21 +526,25 @@ function blacklistSecurityHtml(type, value, entry, prefix) {
 function orderItemsHtml(order) {
   const items = Array.isArray(order?.items) ? order.items : [];
   if (!items.length) {
-    return `<p><strong>${esc(t("label_product") || "Product")}:</strong> ${esc(order.product_name)} x${esc(order.quantity)}</p>`;
+    return `<div class="inv-product-fallback">
+      <span class="inv-dl-label">${esc(t("label_product") || "Product")}</span>
+      <strong>${esc(order.product_name)}</strong>
+      <span class="inv-qty-chip">× ${esc(order.quantity)}</span>
+    </div>`;
   }
   const rows = items
     .map(
       (item) => `
-      <tr>
-        <td>${esc(item.line_no ?? "")}</td>
+      <tr class="${item.flagged_reason || (item.line_status && item.line_status !== "APPROVED") ? "inv-item-flagged" : ""}">
+        <td class="inv-col-num">${esc(item.line_no ?? "")}</td>
         <td>
           <div class="inv-item-name">${esc(item.product_name)}</div>
           <div class="inv-item-meta">${esc(item.category || "—")} · ${esc(item.product_id)}</div>
           ${item.flagged_reason ? `<div class="inv-item-reason">${esc(item.flagged_reason)}</div>` : ""}
         </td>
-        <td>${esc(item.quantity)}</td>
-        <td>${money(item.unit_price)}</td>
-        <td>${money(item.line_amount)}</td>
+        <td class="inv-col-num">${esc(item.quantity)}</td>
+        <td class="inv-col-money">${money(item.unit_price)}</td>
+        <td class="inv-col-money">${money(item.line_amount)}</td>
         <td>${item.line_status ? badge(item.line_status) : "—"}</td>
       </tr>`,
     )
@@ -532,12 +552,22 @@ function orderItemsHtml(order) {
   const rules = Array.isArray(order?.triggered_rules) ? order.triggered_rules : [];
   const rulesHtml = rules.length
     ? `<div class="inv-rule-hits">
-        <p><strong>${esc(t("triggered_rules") || "Triggered rules")}:</strong></p>
-        <ul>${rules.map((r) => `<li><code>${esc(r.rule_id)}</code> — ${esc(r.rule_description || r.rule_name || "")}</li>`).join("")}</ul>
+        <div class="inv-rule-hits-title">${esc(t("triggered_rules") || "Triggered rules")}</div>
+        <ul>${rules
+          .map(
+            (r) =>
+              `<li><span class="inv-rule-id">${esc(r.rule_id)}</span><span class="inv-rule-desc">${esc(
+                r.rule_description || r.rule_name || "",
+              )}</span></li>`,
+          )
+          .join("")}</ul>
       </div>`
     : "";
   return `
-    <p><strong>${esc(t("order_items") || "Items")}:</strong> ${esc(items.length)}</p>
+    <div class="inv-items-head">
+      <span>${esc(t("order_items") || "Items")}</span>
+      <span class="inv-items-count">${esc(items.length)}</span>
+    </div>
     <div class="table-scroll inv-items-wrap">
       <table class="inv-items-table">
         <thead>
@@ -566,8 +596,9 @@ function orderInvestigationHtml({
   selectedId = "",
 }) {
   const bl = blacklists || {};
+  const inReview = ["ON_HOLD", "PENDING_REVIEW"].includes(String(order.order_status || ""));
   const selectHtml = orderOptions?.length
-    ? `<div class="field">
+    ? `<div class="field inv-select-field">
         <label>${esc(t("select_order_review"))}</label>
         <select id="${prefix}-order-select">
           ${orderOptions
@@ -580,57 +611,87 @@ function orderInvestigationHtml({
       </div>`
     : "";
 
+  const emailVal = `${esc(displayPii(order.email, "email") || "—")}${bl.email ? ` <span class="inv-bl-tag">${esc(t("blacklisted_suffix"))}</span>` : ""}`;
+  const phoneVal = `${esc(displayPii(order.phone_number, "phone") || "—")}${bl.phone ? ` <span class="inv-bl-tag">${esc(t("blacklisted_suffix"))}</span>` : ""}`;
+  const ipVal = `${esc(displayPii(order.ip_address, "ip") || "—")}${bl.ip ? ` <span class="inv-bl-tag">${esc(t("blacklisted_suffix"))}</span>` : ""}`;
+
   return `
     <div class="card inv-panel">
-      <h2 class="inv-title">${esc(t("single_order_investigation"))}</h2>
+      <div class="inv-panel-header">
+        <div>
+          <p class="inv-kicker">${esc(t("investigation_kicker") || "Case review")}</p>
+          <h2 class="inv-title">${esc(t("single_order_investigation"))}</h2>
+        </div>
+        ${inReview ? `<span class="inv-status-hint">${esc(t("awaiting_decision") || "Awaiting analyst decision")}</span>` : ""}
+      </div>
       ${selectHtml}
-      <div class="inv-order-head">
-        <h3 style="margin:0">Order ${esc(order.order_id)} ${badge(order.order_status)}</h3>
+      <div class="inv-hero">
+        <div class="inv-hero-main">
+          <span class="inv-hero-label">${esc(t("order_id") || "Order ID")}</span>
+          <div class="inv-hero-id">${esc(order.order_id)}</div>
+        </div>
+        <div class="inv-hero-meta">
+          ${badge(order.order_status)}
+          ${order.program_id ? `<span class="inv-chip">${esc(order.program_id)}</span>` : ""}
+          <span class="inv-chip inv-chip-muted">${esc(formatUtc(order.order_timestamp))}</span>
+        </div>
       </div>
       ${investigationStreamlitMetricsHtml(timing, order)}
       <div class="inv-details-grid">
-        <div>
-          <h4>${esc(t("customer_details"))}</h4>
-          <p><strong>${esc(t("label_name") || "Name")}:</strong> ${esc(order.customer_name)} (${esc(order.user_id)})</p>
-          <p><strong>${esc(t("email"))}:</strong> ${esc(displayPii(order.email, "email") || "—")}${bl.email ? ` ${esc(t("blacklisted_suffix"))}` : ""}</p>
-          <p><strong>${esc(t("phone"))}:</strong> ${esc(displayPii(order.phone_number, "phone") || "—")}${bl.phone ? ` ${esc(t("blacklisted_suffix"))}` : ""}</p>
-          <p><strong>${esc(t("label_address") || "Address")}:</strong> ${esc(displayPii(order.address, "address") || "—")}</p>
-        </div>
-        <div>
-          <h4>${esc(t("order_details"))}</h4>
+        <section class="inv-section">
+          <h4 class="inv-section-title">${esc(t("customer_details"))}</h4>
+          <dl class="inv-dl">
+            ${invDlRow(t("label_name") || "Name", `<strong>${esc(order.customer_name)}</strong> <span class="inv-muted">(${esc(order.user_id)})</span>`)}
+            ${invDlRow(t("email"), emailVal, { warn: !!bl.email })}
+            ${invDlRow(t("phone"), phoneVal, { warn: !!bl.phone })}
+            ${invDlRow(t("label_address") || "Address", esc(displayPii(order.address, "address") || "—"))}
+          </dl>
+        </section>
+        <section class="inv-section">
+          <h4 class="inv-section-title">${esc(t("order_details"))}</h4>
           ${orderItemsHtml(order)}
-          <p><strong>${esc(t("label_amount") || "Amount")}:</strong> ${money(order.amount)}</p>
-          <p><strong>${esc(t("ip_address") || "IP Address")}:</strong> ${esc(displayPii(order.ip_address, "ip") || "—")}${bl.ip ? ` ${esc(t("blacklisted_suffix"))}` : ""}</p>
-          <p><strong>${esc(t("label_device") || "Device")}:</strong> ${esc(order.device_id || "—")}</p>
-          <p><strong>${esc(t("label_placed_at") || "Placed At")}:</strong> ${esc(formatUtc(order.order_timestamp))}</p>
-        </div>
+          <dl class="inv-dl inv-dl-compact">
+            ${invDlRow(t("label_amount") || "Amount", `<strong class="inv-amount">${money(order.amount)}</strong>`)}
+            ${invDlRow(t("ip_address") || "IP Address", ipVal, { warn: !!bl.ip })}
+            ${invDlRow(t("label_device") || "Device", esc(order.device_id || "—"))}
+            ${invDlRow(t("label_placed_at") || "Placed At", esc(formatUtc(order.order_timestamp)))}
+          </dl>
+        </section>
       </div>
       ${
         order.flagged_reason
-          ? `<div class="inv-flagged">${esc(t("flagged_reason", { reason: order.flagged_reason }))}</div>`
+          ? `<div class="inv-flagged" role="status">
+              <div class="inv-flagged-label">${esc(t("flagged_reason_label") || "Flagged reason")}</div>
+              <div class="inv-flagged-text">${esc(order.flagged_reason)}</div>
+            </div>`
           : ""
       }
-      <div class="inv-security-list">
-        ${blacklistSecurityHtml("ip", order.ip_address, bl.ip, prefix)}
-        ${blacklistSecurityHtml("phone", order.phone_number, bl.phone, prefix)}
-        ${blacklistSecurityHtml("email", order.email, bl.email, prefix)}
-      </div>
+      <section class="inv-section inv-section-security">
+        <h4 class="inv-section-title">${esc(t("security_actions") || "Security actions")}</h4>
+        <div class="inv-security-list">
+          ${blacklistSecurityHtml("ip", order.ip_address, bl.ip, prefix)}
+          ${blacklistSecurityHtml("phone", order.phone_number, bl.phone, prefix)}
+          ${blacklistSecurityHtml("email", order.email, bl.email, prefix)}
+        </div>
+      </section>
       ${
-        ["ON_HOLD", "PENDING_REVIEW"].includes(String(order.order_status || ""))
-          ? `<h3 class="inv-decision-title">${esc(t("analyst_decision"))}</h3>
-      <div class="inv-decision">
-        <div class="field">
-          <label>${esc(t("review_comments"))}</label>
-          <textarea id="${prefix}-comments" rows="4">${esc(comments)}</textarea>
+        inReview
+          ? `<section class="inv-section inv-section-decision">
+        <h3 class="inv-decision-title">${esc(t("analyst_decision"))}</h3>
+        <div class="inv-decision">
+          <div class="field">
+            <label>${esc(t("review_comments"))}</label>
+            <textarea id="${prefix}-comments" rows="4" placeholder="${esc(t("review_comments"))}">${esc(comments)}</textarea>
+          </div>
+          <div class="row-actions inv-decision-actions">
+            <button type="button" class="btn btn-primary" id="${prefix}-approve">${esc(t("approve_order"))}</button>
+            <button type="button" class="btn btn-secondary" id="${prefix}-reject">${esc(t("reject_order"))}</button>
+            <button type="button" class="btn btn-fraud" id="${prefix}-fraud">${esc(t("reject_order_fraud"))}</button>
+          </div>
+          <div id="${prefix}-status"></div>
         </div>
-        <div class="row-actions inv-decision-actions">
-          <button type="button" class="btn btn-primary" id="${prefix}-approve">${esc(t("approve_order"))}</button>
-          <button type="button" class="btn btn-secondary" id="${prefix}-reject">${esc(t("reject_order"))}</button>
-          <button type="button" class="btn btn-fraud" id="${prefix}-fraud">${esc(t("reject_order_fraud"))}</button>
-        </div>
-        <div id="${prefix}-status"></div>
-      </div>`
-          : `<div class="alert alert-info">${esc(t("order_not_in_review") || "This order is not in the review queue (already approved/rejected). Line items are shown above.")}</div>`
+      </section>`
+          : `<div class="alert alert-info inv-closed-note">${esc(t("order_not_in_review") || "This order is not in the review queue (already approved/rejected). Line items are shown above.")}</div>`
       }
     </div>`;
 }
@@ -1511,13 +1572,6 @@ const ADMIN_TAB_DEFS = [
     tone: "navy",
     icon: "rules",
   },
-  {
-    id: "audit",
-    labelKey: "tab_audit_log",
-    blurbKey: "admin_tab_blurb_audit",
-    tone: "slate",
-    icon: "audit",
-  },
 ];
 
 function adminTabs() {
@@ -1538,7 +1592,6 @@ function adminTabIcon(kind) {
     users: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>`,
     chart: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 4-6"/></svg>`,
     rules: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V7l8-4z"/><path d="M9 12l2 2 4-4"/></svg>`,
-    audit: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>`,
   };
   return icons[kind] || icons.queue;
 }
@@ -1574,6 +1627,9 @@ function syncAdminTabButtons() {
 }
 
 async function renderAdmin() {
+  if (!ADMIN_TAB_DEFS.some((tab) => tab.id === adminActiveTab)) {
+    adminActiveTab = "queue";
+  }
   document.getElementById("app").innerHTML = shell(`
     <header class="admin-page-head">
       <div>
@@ -1630,7 +1686,6 @@ async function loadAdminTab(tab) {
     else if (tab === "users") await renderAdminUsers(main);
     else if (tab === "analytics") await renderAdminAnalytics(main);
     else if (tab === "rules") await renderAdminRules(main);
-    else if (tab === "audit") await renderAdminAuditLog(main);
     else main.innerHTML = `<div class="alert alert-error">${esc(t("unknown_tab"))}</div>`;
   } catch (ex) {
     main.innerHTML = `<div class="alert alert-error">${esc(ex.message)}</div>`;
@@ -2964,123 +3019,6 @@ async function renderAdminRules(body) {
   paintRule();
 }
 
-const AUDIT_PAGE_SIZE = 50;
-
-function formatAuditWhen(value) {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleString();
-}
-
-async function renderAdminAuditLog(body) {
-  let offset = 0;
-  let orderFilter = "";
-  let appliedOrderId = "";
-
-  async function loadPage() {
-    body.innerHTML = `
-      <p class="subtitle" style="margin-bottom:1rem">${esc(t("audit_log_lede"))}</p>
-      <div class="card admin-feature-card" style="margin-bottom:1rem">
-        <h3>${esc(t("audit_filter_order"))}</h3>
-        <form id="audit-filter-form" class="row-actions" style="margin-top:0.75rem;align-items:flex-end">
-          <label class="field" style="margin:0;flex:1;min-width:12rem">
-            <span>${esc(t("audit_filter_order"))}</span>
-            <input id="audit-order-filter" type="text" placeholder="ORD000123" value="${esc(orderFilter)}" />
-          </label>
-          <button type="submit" class="btn btn-secondary">${esc(t("audit_apply_filter"))}</button>
-          ${appliedOrderId ? `<button type="button" class="btn btn-secondary" id="audit-clear-filter">${esc(t("audit_clear_filter"))}</button>` : ""}
-        </form>
-      </div>
-      <div id="audit-log-panel"><div class="admin-loading"><span class="admin-loading-dot"></span> ${esc(t("loading_ellipsis"))}</div></div>`;
-
-    document.getElementById("audit-filter-form")?.addEventListener("submit", (e) => {
-      e.preventDefault();
-      orderFilter = document.getElementById("audit-order-filter")?.value?.trim() || "";
-      appliedOrderId = orderFilter;
-      offset = 0;
-      void loadPage();
-    });
-    document.getElementById("audit-clear-filter")?.addEventListener("click", () => {
-      orderFilter = "";
-      appliedOrderId = "";
-      offset = 0;
-      void loadPage();
-    });
-
-    const panel = document.getElementById("audit-log-panel");
-    try {
-      const params = new URLSearchParams({
-        limit: String(AUDIT_PAGE_SIZE),
-        offset: String(offset),
-      });
-      if (appliedOrderId) params.set("order_id", appliedOrderId);
-      const data = await api(`/portal/audit?${params.toString()}`);
-      const entries = data.entries || [];
-      const total = Number(data.total || 0);
-      const page = Math.floor(offset / AUDIT_PAGE_SIZE) + 1;
-      const totalPages = Math.max(1, Math.ceil(total / AUDIT_PAGE_SIZE));
-
-      if (!entries.length) {
-        panel.innerHTML = `<div class="card admin-feature-card"><h3>${esc(t("audit_log_title"))}</h3><div class="alert alert-info">${esc(t("audit_empty"))}</div></div>`;
-        return;
-      }
-
-      panel.innerHTML = `
-        <div class="card admin-feature-card">
-          <h3>${esc(t("audit_log_title"))}</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>${esc(t("audit_col_when"))}</th>
-                <th>${esc(t("audit_col_order"))}</th>
-                <th>${esc(t("audit_col_action"))}</th>
-                <th>${esc(t("audit_col_analyst"))}</th>
-                <th>${esc(t("audit_col_reason"))}</th>
-                <th>${esc(t("audit_col_rule"))}</th>
-                <th>${esc(t("audit_col_comments"))}</th>
-                <th>${esc(t("audit_col_status"))}</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${entries.map((row) => `
-                <tr>
-                  <td>${esc(formatAuditWhen(row.created_at))}</td>
-                  <td>${esc(row.order_id || "—")}</td>
-                  <td>${esc(row.action || "—")}</td>
-                  <td>${esc(row.analyst_name || row.analyst_id || "SYSTEM")}</td>
-                  <td>${esc(row.reason || "—")}</td>
-                  <td>${esc(row.rule_name || "—")}</td>
-                  <td>${esc(row.review_comments || "—")}</td>
-                  <td>${esc(row.order_status || "—")}</td>
-                </tr>`).join("")}
-            </tbody>
-          </table>
-          <div class="row-actions" style="justify-content:space-between;margin-top:1rem">
-            <span class="subtitle">${esc(t("audit_pagination", { page, totalPages, total }))}</span>
-            <div class="row-actions">
-              <button type="button" class="btn btn-secondary" id="audit-prev" ${offset <= 0 ? "disabled" : ""}>${esc(t("audit_prev"))}</button>
-              <button type="button" class="btn btn-secondary" id="audit-next" ${offset + AUDIT_PAGE_SIZE >= total ? "disabled" : ""}>${esc(t("audit_next"))}</button>
-            </div>
-          </div>
-        </div>`;
-
-      document.getElementById("audit-prev")?.addEventListener("click", () => {
-        offset = Math.max(0, offset - AUDIT_PAGE_SIZE);
-        void loadPage();
-      });
-      document.getElementById("audit-next")?.addEventListener("click", () => {
-        offset += AUDIT_PAGE_SIZE;
-        void loadPage();
-      });
-    } catch (ex) {
-      panel.innerHTML = `<div class="alert alert-error">${esc(ex.message || t("audit_load_failed"))}</div>`;
-    }
-  }
-
-  await loadPage();
-}
-
 const RULE_ACTION_COLORS = {
   HOLD: "#0284c8",
   REVIEW: "#d97706",
@@ -3231,6 +3169,13 @@ const CHART_TAB_LABELS = {
 
 const CHART_COLORS = ["#1a237e", "#1976d2", "#00897b", "#fb8c00", "#ec407a", "#5e35b1", "#43a047", "#6d4c41"];
 
+function formatChartValue(value) {
+  if (value == null || Number.isNaN(Number(value))) return String(value ?? "—");
+  const n = Number(value);
+  if (Number.isInteger(n)) return n.toLocaleString();
+  return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
 function renderChartBody(chart, chartType) {
   if (!chart) return "";
   if (chartType === "metric" || chart.type === "metric") {
@@ -3251,7 +3196,7 @@ function renderChartBody(chart, chartType) {
   if (chartType === "table") {
     return `<div class="table-scroll"><table>
       <thead><tr><th>${esc(chart.x_label || "Category")}</th><th>${esc(chart.y_label || "Value")}</th></tr></thead>
-      <tbody>${labels.map((label, i) => `<tr><td>${esc(label)}</td><td>${esc(String(values[i]))}</td></tr>`).join("")}</tbody>
+      <tbody>${labels.map((label, i) => `<tr><td>${esc(label)}</td><td>${esc(formatChartValue(values[i]))}</td></tr>`).join("")}</tbody>
     </table></div>`;
   }
 
@@ -3263,11 +3208,23 @@ function renderChartBody(chart, chartType) {
       cursor += (v / total) * 360;
       return `${CHART_COLORS[i % CHART_COLORS.length]} ${start}deg ${cursor}deg`;
     }).join(", ");
+    // Place percentage labels around the pie at each slice midpoint.
+    const sliceLabels = values.map((v, i) => {
+      const start = values.slice(0, i).reduce((a, b) => a + b, 0);
+      const mid = ((start + v / 2) / total) * 360 - 90; // SVG 0° is east; CSS conic starts north-ish with -90
+      const rad = (mid * Math.PI) / 180;
+      const r = 38; // % from center toward edge
+      const x = 50 + r * Math.cos(rad);
+      const y = 50 + r * Math.sin(rad);
+      const pct = Math.round((v / total) * 100);
+      if (pct < 4) return ""; // skip tiny slices
+      return `<span class="chat-pie-datalabel" style="left:${x}%;top:${y}%">${esc(String(pct))}%</span>`;
+    }).join("");
     const legend = labels.map((label, i) => (
-      `<div class="legend-item"><span class="legend-dot" style="background:${CHART_COLORS[i % CHART_COLORS.length]}"></span>${esc(label)} (${esc(String(values[i]))})</div>`
+      `<div class="legend-item"><span class="legend-dot" style="background:${CHART_COLORS[i % CHART_COLORS.length]}"></span>${esc(label)}: <strong>${esc(formatChartValue(values[i]))}</strong> (${esc(String(Math.round((values[i] / total) * 100)))}%)</div>`
     )).join("");
     return `<div class="chat-pie-wrap">
-      <div class="chat-pie" style="background:conic-gradient(${stops})"></div>
+      <div class="chat-pie" style="background:conic-gradient(${stops})">${sliceLabels}</div>
       <div class="chart-legend">${legend}</div>
     </div>`;
   }
@@ -3276,43 +3233,51 @@ function renderChartBody(chart, chartType) {
     return `<div class="chat-hbars">${labels.map((label, i) => {
       const w = Math.max(6, Math.round((values[i] / max) * 100));
       const color = CHART_COLORS[i % CHART_COLORS.length];
-      return `<div class="chat-hbar-row" title="${esc(label)}: ${esc(String(values[i]))}">
+      return `<div class="chat-hbar-row" title="${esc(label)}: ${esc(formatChartValue(values[i]))}">
         <span class="chat-hbar-label">${esc(label)}</span>
         <div class="chat-hbar-track"><div class="chat-hbar-fill" style="width:${w}%;background:${color}"></div></div>
-        <span class="chat-hbar-value">${esc(String(values[i]))}</span>
+        <span class="chat-hbar-value">${esc(formatChartValue(values[i]))}</span>
       </div>`;
     }).join("")}</div>`;
   }
 
   if (chartType === "line" || chartType === "area") {
     const w = 420;
-    const h = 180;
-    const pad = 16;
+    const h = 200;
+    const padX = 16;
+    const padTop = 28;
+    const padBottom = 16;
     const pts = values.map((v, i) => {
-      const x = pad + (i * (w - pad * 2)) / Math.max(values.length - 1, 1);
-      const y = h - pad - ((v / max) * (h - pad * 2));
+      const x = padX + (i * (w - padX * 2)) / Math.max(values.length - 1, 1);
+      const y = h - padBottom - ((v / max) * (h - padTop - padBottom));
       return [x, y];
     });
     const polyline = pts.map(([x, y]) => `${x},${y}`).join(" ");
-    const areaPath = `M ${pts[0][0]},${h - pad} L ${polyline.replace(/ /g, " L ")} L ${pts[pts.length - 1][0]},${h - pad} Z`;
+    const areaPath = `M ${pts[0][0]},${h - padBottom} L ${polyline.replace(/ /g, " L ")} L ${pts[pts.length - 1][0]},${h - padBottom} Z`;
     const dots = pts.map(([x, y], i) => (
-      `<circle cx="${x}" cy="${y}" r="3.5" fill="${CHART_COLORS[i % CHART_COLORS.length]}"><title>${esc(labels[i])}: ${esc(String(values[i]))}</title></circle>`
+      `<circle cx="${x}" cy="${y}" r="3.5" fill="${CHART_COLORS[i % CHART_COLORS.length]}"><title>${esc(labels[i])}: ${esc(formatChartValue(values[i]))}</title></circle>`
     )).join("");
+    const valueLabels = pts.map(([x, y], i) => {
+      const ty = Math.max(12, y - 10);
+      return `<text class="chat-datalabel" x="${x}" y="${ty}" text-anchor="middle">${esc(formatChartValue(values[i]))}</text>`;
+    }).join("");
     return `<div class="chat-svg-wrap">
       <svg viewBox="0 0 ${w} ${h}" class="chat-line-svg" role="img" aria-label="${esc(chartType)} chart">
         ${chartType === "area" ? `<path d="${areaPath}" fill="rgba(25,118,210,0.18)" stroke="none"></path>` : ""}
         <polyline fill="none" stroke="#1976d2" stroke-width="2.5" points="${polyline}"></polyline>
         ${dots}
+        ${valueLabels}
       </svg>
       <div class="chat-bar-labels">${labels.map((l) => `<span>${esc(l)}</span>`).join("")}</div>
     </div>`;
   }
 
-  // Default: vertical bar
+  // Default: vertical bar — value label above each bar
   const bars = labels.map((label, i) => {
     const h = Math.max(10, Math.round((values[i] / max) * 160));
     const color = CHART_COLORS[i % CHART_COLORS.length];
-    return `<div class="chat-bar-col" title="${esc(label)}: ${esc(String(values[i]))}">
+    return `<div class="chat-bar-col" title="${esc(label)}: ${esc(formatChartValue(values[i]))}">
+      <span class="chat-bar-value">${esc(formatChartValue(values[i]))}</span>
       <div class="chat-bar" style="height:${h}px;background:${color}"></div>
       <span class="chat-bar-label">${esc(label)}</span>
     </div>`;
@@ -3487,22 +3452,40 @@ async function renderChatbot() {
         df: m.rows || m.df || null,
       }));
     const statusId = `chat-status-${Date.now()}`;
+    const thinkingSteps = [
+      "Understanding your question…",
+      "Generating SQL query…",
+      "Running query against the database…",
+      "Summarizing results…",
+      "Preparing insights & recommendations…",
+    ];
+    let thinkingStep = 0;
+    let thinkingTimer = null;
     const log = document.getElementById("chat-log");
     if (log) {
       log.insertAdjacentHTML(
         "beforeend",
         `<div class="gpt-row gpt-row-assistant" id="${statusId}">
           <div class="gpt-avatar gpt-avatar-ai" aria-hidden="true">AI</div>
-          <div class="gpt-bubble gpt-bubble-assistant chat-thinking">Analyzing your question…</div>
+          <div class="gpt-bubble gpt-bubble-assistant chat-thinking">
+            <span class="chat-thinking-dots" aria-hidden="true"></span>
+            <span class="chat-thinking-label">${esc(thinkingSteps[0])}</span>
+          </div>
         </div>`,
       );
       log.scrollTop = log.scrollHeight;
+      thinkingTimer = setInterval(() => {
+        thinkingStep = Math.min(thinkingStep + 1, thinkingSteps.length - 1);
+        const label = document.querySelector(`#${statusId} .chat-thinking-label`);
+        if (label) label.textContent = thinkingSteps[thinkingStep];
+      }, 900);
     }
     try {
       const res = await api("/portal/chat", {
         method: "POST",
         body: JSON.stringify({ message: question, history }),
       });
+      if (thinkingTimer) clearInterval(thinkingTimer);
       document.getElementById(statusId)?.remove();
       chatMessages.push({
         role: "assistant",
@@ -3519,6 +3502,7 @@ async function renderChatbot() {
       });
       paintChat();
     } catch (err) {
+      if (thinkingTimer) clearInterval(thinkingTimer);
       document.getElementById(statusId)?.remove();
       const msg = err instanceof Error ? err.message : String(err);
       chatMessages.push({
@@ -3533,6 +3517,7 @@ async function renderChatbot() {
       });
       paintChat();
     } finally {
+      if (thinkingTimer) clearInterval(thinkingTimer);
       if (form) form.dataset.busy = "0";
       if (sendBtn) sendBtn.disabled = false;
       if (inputEl) {

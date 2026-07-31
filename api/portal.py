@@ -725,8 +725,9 @@ def audit_logs(
     action: str | None = None,
     _: Dict[str, Any] = Depends(require_page(PAGE_ADMIN_PANEL)),
 ):
-    """Recent system audit events from the audit log file (admin only)."""
-    rows = read_audit_logs(limit=limit, action=action)
+    """Recent system audit events from master.system_audit_log (admin only)."""
+    with get_cursor() as (_, cur):
+        rows = read_audit_logs(limit=limit, action=action, cur=cur)
     return {"logs": [_jsonable_dict(r) for r in rows]}
 
 
@@ -752,4 +753,7 @@ def chat(payload: ChatRequest, _: Dict[str, Any] = Depends(require_page(PAGE_AI_
     try:
         return process_chat_message(payload.message.strip(), history)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=500,
+            detail="Chat request failed. Please try again.",
+        ) from exc
