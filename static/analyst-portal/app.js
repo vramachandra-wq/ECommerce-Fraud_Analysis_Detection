@@ -1453,6 +1453,13 @@ const ADMIN_TAB_DEFS = [
     tone: "navy",
     icon: "rules",
   },
+  {
+    id: "audit",
+    labelKey: "tab_audit_log",
+    blurbKey: "admin_tab_blurb_audit",
+    tone: "slate",
+    icon: "audit",
+  },
 ];
 
 function adminTabs() {
@@ -1565,6 +1572,7 @@ async function loadAdminTab(tab) {
     else if (tab === "users") await renderAdminUsers(main);
     else if (tab === "analytics") await renderAdminAnalytics(main);
     else if (tab === "rules") await renderAdminRules(main);
+    else if (tab === "audit") await renderAdminAuditLog(main);
     else main.innerHTML = `<div class="alert alert-error">${esc(t("unknown_tab"))}</div>`;
   } catch (ex) {
     main.innerHTML = `<div class="alert alert-error">${esc(ex.message)}</div>`;
@@ -2816,6 +2824,123 @@ async function renderAdminRules(body) {
 
   document.getElementById("rule-select").addEventListener("change", paintRule);
   paintRule();
+}
+
+const AUDIT_PAGE_SIZE = 50;
+
+function formatAuditWhen(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString();
+}
+
+async function renderAdminAuditLog(body) {
+  let offset = 0;
+  let orderFilter = "";
+  let appliedOrderId = "";
+
+  async function loadPage() {
+    body.innerHTML = `
+      <p class="subtitle" style="margin-bottom:1rem">${esc(t("audit_log_lede"))}</p>
+      <div class="card admin-feature-card" style="margin-bottom:1rem">
+        <h3>${esc(t("audit_filter_order"))}</h3>
+        <form id="audit-filter-form" class="row-actions" style="margin-top:0.75rem;align-items:flex-end">
+          <label class="field" style="margin:0;flex:1;min-width:12rem">
+            <span>${esc(t("audit_filter_order"))}</span>
+            <input id="audit-order-filter" type="text" placeholder="ORD000123" value="${esc(orderFilter)}" />
+          </label>
+          <button type="submit" class="btn btn-secondary">${esc(t("audit_apply_filter"))}</button>
+          ${appliedOrderId ? `<button type="button" class="btn btn-secondary" id="audit-clear-filter">${esc(t("audit_clear_filter"))}</button>` : ""}
+        </form>
+      </div>
+      <div id="audit-log-panel"><div class="admin-loading"><span class="admin-loading-dot"></span> ${esc(t("loading_ellipsis"))}</div></div>`;
+
+    document.getElementById("audit-filter-form")?.addEventListener("submit", (e) => {
+      e.preventDefault();
+      orderFilter = document.getElementById("audit-order-filter")?.value?.trim() || "";
+      appliedOrderId = orderFilter;
+      offset = 0;
+      void loadPage();
+    });
+    document.getElementById("audit-clear-filter")?.addEventListener("click", () => {
+      orderFilter = "";
+      appliedOrderId = "";
+      offset = 0;
+      void loadPage();
+    });
+
+    const panel = document.getElementById("audit-log-panel");
+    try {
+      const params = new URLSearchParams({
+        limit: String(AUDIT_PAGE_SIZE),
+        offset: String(offset),
+      });
+      if (appliedOrderId) params.set("order_id", appliedOrderId);
+      const data = await api(`/portal/audit?${params.toString()}`);
+      const entries = data.entries || [];
+      const total = Number(data.total || 0);
+      const page = Math.floor(offset / AUDIT_PAGE_SIZE) + 1;
+      const totalPages = Math.max(1, Math.ceil(total / AUDIT_PAGE_SIZE));
+
+      if (!entries.length) {
+        panel.innerHTML = `<div class="card admin-feature-card"><h3>${esc(t("audit_log_title"))}</h3><div class="alert alert-info">${esc(t("audit_empty"))}</div></div>`;
+        return;
+      }
+
+      panel.innerHTML = `
+        <div class="card admin-feature-card">
+          <h3>${esc(t("audit_log_title"))}</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>${esc(t("audit_col_when"))}</th>
+                <th>${esc(t("audit_col_order"))}</th>
+                <th>${esc(t("audit_col_action"))}</th>
+                <th>${esc(t("audit_col_analyst"))}</th>
+                <th>${esc(t("audit_col_reason"))}</th>
+                <th>${esc(t("audit_col_rule"))}</th>
+                <th>${esc(t("audit_col_comments"))}</th>
+                <th>${esc(t("audit_col_status"))}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${entries.map((row) => `
+                <tr>
+                  <td>${esc(formatAuditWhen(row.created_at))}</td>
+                  <td>${esc(row.order_id || "—")}</td>
+                  <td>${esc(row.action || "—")}</td>
+                  <td>${esc(row.analyst_name || row.analyst_id || "SYSTEM")}</td>
+                  <td>${esc(row.reason || "—")}</td>
+                  <td>${esc(row.rule_name || "—")}</td>
+                  <td>${esc(row.review_comments || "—")}</td>
+                  <td>${esc(row.order_status || "—")}</td>
+                </tr>`).join("")}
+            </tbody>
+          </table>
+          <div class="row-actions" style="justify-content:space-between;margin-top:1rem">
+            <span class="subtitle">${esc(t("audit_pagination", { page, totalPages, total }))}</span>
+            <div class="row-actions">
+              <button type="button" class="btn btn-secondary" id="audit-prev" ${offset <= 0 ? "disabled" : ""}>${esc(t("audit_prev"))}</button>
+              <button type="button" class="btn btn-secondary" id="audit-next" ${offset + AUDIT_PAGE_SIZE >= total ? "disabled" : ""}>${esc(t("audit_next"))}</button>
+            </div>
+          </div>
+        </div>`;
+
+      document.getElementById("audit-prev")?.addEventListener("click", () => {
+        offset = Math.max(0, offset - AUDIT_PAGE_SIZE);
+        void loadPage();
+      });
+      document.getElementById("audit-next")?.addEventListener("click", () => {
+        offset += AUDIT_PAGE_SIZE;
+        void loadPage();
+      });
+    } catch (ex) {
+      panel.innerHTML = `<div class="alert alert-error">${esc(ex.message || t("audit_load_failed"))}</div>`;
+    }
+  }
+
+  await loadPage();
 }
 
 const RULE_ACTION_COLORS = {

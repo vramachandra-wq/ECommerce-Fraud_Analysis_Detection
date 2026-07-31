@@ -1500,6 +1500,86 @@ export const TRANSLATIONS = {
     "en": "Tune actions, thresholds, windows",
     "th": "ปรับการดำเนินการ เกณฑ์ และช่วงเวลา"
   },
+  "tab_audit_log": {
+    "en": "Audit Log",
+    "th": "บันทึกการตรวจสอบ"
+  },
+  "admin_tab_blurb_audit": {
+    "en": "Order review actions and system auto-approvals",
+    "th": "การตรวจสอบคำสั่งซื้อและการอนุมัติอัตโนมัติของระบบ"
+  },
+  "audit_log_title": {
+    "en": "Review audit log",
+    "th": "บันทึกการตรวจสอบ"
+  },
+  "audit_log_lede": {
+    "en": "Append-only history of analyst and system review actions on orders.",
+    "th": "ประวัติการตรวจสอบคำสั่งซื้อจากนักวิเคราะห์และระบบ"
+  },
+  "audit_filter_order": {
+    "en": "Filter by order ID",
+    "th": "กรองตามรหัสคำสั่งซื้อ"
+  },
+  "audit_apply_filter": {
+    "en": "Apply",
+    "th": "ใช้"
+  },
+  "audit_clear_filter": {
+    "en": "Clear",
+    "th": "ล้าง"
+  },
+  "audit_empty": {
+    "en": "No audit entries found.",
+    "th": "ไม่พบรายการบันทึก"
+  },
+  "audit_load_failed": {
+    "en": "Could not load audit log.",
+    "th": "โหลดบันทึกไม่สำเร็จ"
+  },
+  "audit_col_when": {
+    "en": "When",
+    "th": "เวลา"
+  },
+  "audit_col_order": {
+    "en": "Order",
+    "th": "คำสั่งซื้อ"
+  },
+  "audit_col_action": {
+    "en": "Action",
+    "th": "การดำเนินการ"
+  },
+  "audit_col_analyst": {
+    "en": "Analyst",
+    "th": "นักวิเคราะห์"
+  },
+  "audit_col_reason": {
+    "en": "Reason",
+    "th": "เหตุผล"
+  },
+  "audit_col_rule": {
+    "en": "Rule",
+    "th": "กฎ"
+  },
+  "audit_col_comments": {
+    "en": "Comments",
+    "th": "ความคิดเห็น"
+  },
+  "audit_col_status": {
+    "en": "Order status",
+    "th": "สถานะคำสั่งซื้อ"
+  },
+  "audit_pagination": {
+    "en": "Page {page} of {totalPages} · {total} entries",
+    "th": "หน้า {page} จาก {totalPages} · {total} รายการ"
+  },
+  "audit_prev": {
+    "en": "Previous",
+    "th": "ก่อนหน้า"
+  },
+  "audit_next": {
+    "en": "Next",
+    "th": "ถัดไป"
+  },
   "auto_approved_hold": {
     "en": "{n} order(s) auto-approved after hold window.",
     "th": "อนุมัติอัตโนมัติ {n} รายการหลังครบช่วงระงับ"
