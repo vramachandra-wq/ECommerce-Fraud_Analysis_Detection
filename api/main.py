@@ -20,6 +20,20 @@ SHOP_DIR = Path(__file__).resolve().parent.parent / "static" / "customer-portal"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Ensure multi-item order schema exists on existing databases.
+    try:
+        import psycopg2
+        from config import DB_CONFIG
+        from database.order_items import ensure_order_items_table
+
+        with psycopg2.connect(**DB_CONFIG) as conn:
+            with conn.cursor() as cur:
+                ensure_order_items_table(cur)
+            conn.commit()
+    except Exception:
+        # Startup should not crash if DB is briefly unavailable; place-order also ensures.
+        pass
+
     # Background job: auto-approve backlog orders that exceeded delay_minutes
     start_auto_approval_scheduler(interval_seconds=1800)
     yield

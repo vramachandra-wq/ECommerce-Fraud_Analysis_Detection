@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { useAuth } from "../context/AuthContext";
-import type { OrderDetail, QueueOrder } from "../types";
+import type { OrderDetail, OrderLineItem, QueueOrder } from "../types";
 import { Alert, Button, Card, DataTable, MetricCard, StatusBadge } from "../components/ui";
 import { displayPii } from "../pii";
 
@@ -234,7 +234,14 @@ export function DashboardPage() {
                 },
                 { key: "order_id", label: "Order ID" },
                 { key: "customer_name", label: "Customer" },
-                { key: "product_name", label: "Product" },
+                {
+                  key: "product_name",
+                  label: "Product",
+                  render: (row) =>
+                    Number(row.item_count) > 1
+                      ? `${row.item_count} items · ${row.product_name}`
+                      : String(row.product_name || ""),
+                },
                 {
                   key: "amount",
                   label: "Amount",
@@ -353,9 +360,44 @@ export function DashboardPage() {
                 </div>
                 <div className="rounded-lg bg-slate-50 p-4 text-sm">
                   <p className="mb-2 font-semibold">Order Details</p>
-                  <p>
-                    Product: {String(detail.order.product_name)} x{String(detail.order.quantity)}
-                  </p>
+                  {Array.isArray(detail.order.items) && (detail.order.items as OrderLineItem[]).length > 0 ? (
+                    <div className="mb-3 overflow-auto">
+                      <p className="mb-1 font-medium">
+                        Items: {(detail.order.items as OrderLineItem[]).length}
+                      </p>
+                      <table className="w-full text-left text-xs">
+                        <thead>
+                          <tr className="text-slate-500">
+                            <th className="py-1 pr-2">#</th>
+                            <th className="py-1 pr-2">Product</th>
+                            <th className="py-1 pr-2">Qty</th>
+                            <th className="py-1 pr-2">Unit</th>
+                            <th className="py-1">Line</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(detail.order.items as OrderLineItem[]).map((item) => (
+                            <tr key={`${item.product_id}-${item.line_no}`} className="border-t border-slate-200">
+                              <td className="py-1 pr-2">{item.line_no}</td>
+                              <td className="py-1 pr-2">
+                                <div className="font-medium">{item.product_name}</div>
+                                <div className="text-slate-500">
+                                  {item.category || "—"} · {item.product_id}
+                                </div>
+                              </td>
+                              <td className="py-1 pr-2">{item.quantity}</td>
+                              <td className="py-1 pr-2">₹ {Number(item.unit_price).toLocaleString("en-IN")}</td>
+                              <td className="py-1">₹ {Number(item.line_amount).toLocaleString("en-IN")}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p>
+                      Product: {String(detail.order.product_name)} x{String(detail.order.quantity)}
+                    </p>
+                  )}
                   <p>Amount: ₹ {Number(detail.order.amount).toLocaleString("en-IN")}</p>
                   <p>
                     IP: {displayPii(detail.order.ip_address, "ip", session?.analyst)}

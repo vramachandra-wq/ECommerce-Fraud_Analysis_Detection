@@ -38,6 +38,7 @@ _KNOWN_DIMENSION_TABLES = [
     "customers",
     "products",
     "device_master",
+    "order_items",
     "order_rule_hits",
     "rule_master",
 ]

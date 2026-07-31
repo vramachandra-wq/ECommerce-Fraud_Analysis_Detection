@@ -1,5 +1,10 @@
-from typing import Dict, Any, List, Optional
-from fraud_engine.rules import RULE_CHECKS
+from typing import Dict, Any, List, Optional, Iterable, Set
+
+from fraud_engine.rules import (
+    PRODUCT_SCOPED_RULE_IDS,
+    R001_HOLD_DELAY_MINUTES,
+    RULE_CHECKS,
+)
 from fraud_engine.backlog import DEFAULT_DELAY_MINUTES
 
 STATUS_PRIORITY: Dict[str, int] = {
@@ -29,7 +34,7 @@ RULE_TIER: Dict[str, int] = {
     "R007": 0,  # Blacklisted IP
     "R011": 0,  # Blacklisted phone
     "R012": 0,  # Blacklisted email
-    "R001": 1,  # P2 iPhone 16 rule
+    "R001": 1,  # iPhone 16 product hold
 }
 DEFAULT_RULE_TIER = 2
 
@@ -61,6 +66,9 @@ def _get_rule_metadata(cursor: Any, rule_id: str) -> Dict[str, Any]:
             delay_minutes = int(row[1]) if row[1] is not None else DEFAULT_DELAY_MINUTES
             if delay_minutes <= 0:
                 delay_minutes = DEFAULT_DELAY_MINUTES
+            # Product rule R001 always uses a 180-minute hold window.
+            if rule_id == "R001":
+                delay_minutes = R001_HOLD_DELAY_MINUTES
 
             _RULE_METADATA_CACHE[rule_id] = {
                 "action": DB_ACTION_TO_STATUS.get(action_str, "PENDING_REVIEW"),
@@ -68,27 +76,44 @@ def _get_rule_metadata(cursor: Any, rule_id: str) -> Dict[str, Any]:
             }
         else:
             _RULE_METADATA_CACHE[rule_id] = {
-                "action": "PENDING_REVIEW",
-                "delay_minutes": DEFAULT_DELAY_MINUTES,
+                "action": "PENDING_REVIEW" if rule_id != "R001" else "ON_HOLD",
+                "delay_minutes": (
+                    R001_HOLD_DELAY_MINUTES if rule_id == "R001" else DEFAULT_DELAY_MINUTES
+                ),
             }
 
     return _RULE_METADATA_CACHE[rule_id]
 
 
-def evaluate_order(cursor: Any, ctx: Dict[str, Any]) -> Dict[str, Any]:
-    """Run all rules against the order context and return the resolved disposition."""
+def _collect_triggered_rules(
+    cursor: Any,
+    ctx: Dict[str, Any],
+    *,
+    only_rule_ids: Optional[Set[str]] = None,
+    exclude_rule_ids: Optional[Set[str]] = None,
+) -> List[Dict[str, str]]:
+    """Run selected rule checks and return triggered rule hit dicts."""
     triggered: List[Dict[str, str]] = []
-
     for rule_id, check_fn in RULE_CHECKS:
+        if only_rule_ids is not None and rule_id not in only_rule_ids:
+            continue
+        if exclude_rule_ids is not None and rule_id in exclude_rule_ids:
+            continue
         is_triggered, reason = check_fn(cursor, ctx)
         if is_triggered and reason:
             rule_name = reason.split("—")[0].strip() if "—" in reason else rule_id
-            triggered.append({
-                "rule_id": rule_id,
-                "rule_name": rule_name,
-                "rule_description": reason,
-            })
+            triggered.append(
+                {
+                    "rule_id": rule_id,
+                    "rule_name": rule_name,
+                    "rule_description": reason,
+                }
+            )
+    return triggered
 
+
+def resolve_disposition(cursor: Any, triggered: List[Dict[str, str]]) -> Dict[str, Any]:
+    """Roll triggered rule hits into a single order disposition."""
     if not triggered:
         return {
             "order_status": "APPROVED",
@@ -140,6 +165,93 @@ def evaluate_order(cursor: Any, ctx: Dict[str, Any]) -> Dict[str, Any]:
         "triggered_rules": triggered,
         "is_fraud": is_fraud,
     }
+
+
+def evaluate_order(cursor: Any, ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """Run all rules against a single-product order context (legacy / tests)."""
+    triggered = _collect_triggered_rules(cursor, ctx)
+    return resolve_disposition(cursor, triggered)
+
+
+def evaluate_order_with_items(
+    cursor: Any,
+    base_ctx: Dict[str, Any],
+    lines: Iterable[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Evaluate a multi-item checkout.
+
+    - Product-scoped rules (e.g. R001 iPhone) run **per line item**.
+    - Order-scoped rules (velocity, blacklist, …) run **once** on basket totals.
+    - Hits are merged and rolled up to one order status / flagged_reason.
+    """
+    line_list = [dict(line) for line in (lines or [])]
+    if not line_list:
+        return evaluate_order(cursor, base_ctx)
+
+    total_amount = round(sum(float(line.get("line_amount") or 0) for line in line_list), 2)
+    total_qty = sum(int(line.get("quantity") or 0) for line in line_list)
+    first = line_list[0]
+
+    order_ctx = {
+        **base_ctx,
+        "product_id": first.get("product_id") or base_ctx.get("product_id"),
+        "product_name": first.get("product_name") or base_ctx.get("product_name"),
+        "category": first.get("category") or base_ctx.get("category"),
+        "quantity": total_qty or base_ctx.get("quantity") or 1,
+        "amount": total_amount if total_amount else base_ctx.get("amount"),
+    }
+
+    triggered: List[Dict[str, str]] = _collect_triggered_rules(
+        cursor,
+        order_ctx,
+        exclude_rule_ids=set(PRODUCT_SCOPED_RULE_IDS),
+    )
+
+    item_results: List[Dict[str, Any]] = []
+    for line in line_list:
+        line_ctx = {
+            **base_ctx,
+            "product_id": line.get("product_id"),
+            "product_name": line.get("product_name"),
+            "category": line.get("category"),
+            "quantity": int(line.get("quantity") or 1),
+            "amount": float(line.get("line_amount") or 0),
+        }
+        line_hits = _collect_triggered_rules(
+            cursor,
+            line_ctx,
+            only_rule_ids=set(PRODUCT_SCOPED_RULE_IDS),
+        )
+        annotated: List[Dict[str, str]] = []
+        for hit in line_hits:
+            product_label = line.get("product_name") or line.get("product_id") or "item"
+            annotated.append(
+                {
+                    **hit,
+                    "product_id": str(line.get("product_id") or ""),
+                    "product_name": str(line.get("product_name") or ""),
+                    "rule_description": f"[{product_label}] {hit['rule_description']}",
+                }
+            )
+            triggered.append(annotated[-1])
+
+        line_disposition = resolve_disposition(cursor, line_hits)
+        item_results.append(
+            {
+                "product_id": line.get("product_id"),
+                "product_name": line.get("product_name"),
+                "quantity": int(line.get("quantity") or 1),
+                "line_amount": float(line.get("line_amount") or 0),
+                "order_status": line_disposition["order_status"],
+                "flagged_reason": line_disposition["flagged_reason"],
+                "triggered_rules": annotated,
+            }
+        )
+
+    disposition = resolve_disposition(cursor, triggered)
+    disposition["item_results"] = item_results
+    return disposition
 
 
 def clear_metadata_cache(rule_id: Optional[str] = None):

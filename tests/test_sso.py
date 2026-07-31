@@ -133,6 +133,8 @@ def test_sso_callback_rejects_unknown_local_user():
 
 
 def test_sso_logout_redirects_to_keycloak():
+    # Shared TestClient keeps cookies from earlier SSO callback tests (e.g. id.token).
+    client.cookies.clear()
     with patch("api.portal.sso_is_configured", return_value=True), patch(
         "api.portal.build_logout_url",
         return_value="http://keycloak.test/logout",

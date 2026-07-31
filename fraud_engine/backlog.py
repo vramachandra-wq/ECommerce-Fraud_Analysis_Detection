@@ -29,11 +29,42 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import pandas as pd
 
+from fraud_engine.rules import R001_HOLD_DELAY_MINUTES
+
 DEFAULT_DELAY_MINUTES = 60
 REVIEW_QUEUE_STATUSES = ("ON_HOLD", "PENDING_REVIEW")
 
 # Interpret naive order_timestamp as UTC (matches app + DB session).
 _TAGGED_TS = "(o.order_timestamp AT TIME ZONE 'UTC')"
+
+# Live delay: max of evaluation snapshot and live HOLD/REVIEW rule delays.
+# R001 always contributes 180 so the dashboard cannot show 60 when R001 hit.
+_LIVE_RULE_DELAY = f"""
+COALESCE(
+    NULLIF(
+        GREATEST(
+            COALESCE(NULLIF(o.delay_minutes, 0), 0),
+            COALESCE(
+                (
+                    SELECT MAX(
+                        CASE
+                            WHEN h.rule_id = 'R001' THEN {R001_HOLD_DELAY_MINUTES}
+                            ELSE rm.delay_minutes
+                        END
+                    )
+                    FROM master.order_rule_hits h
+                    JOIN master.rule_master rm ON rm.rule_id = h.rule_id
+                    WHERE h.order_id = o.order_id
+                      AND UPPER(rm.action) IN ('HOLD', 'REVIEW')
+                ),
+                0
+            )
+        ),
+        0
+    ),
+    {DEFAULT_DELAY_MINUTES}
+)
+"""
 
 
 def _utcnow() -> datetime:
@@ -61,26 +92,18 @@ def is_backlog_order(
 
 def get_applicable_delay_minutes(cursor: Any, order_id: str) -> int:
     """
-    Resolve delay_minutes for one order from rule_master (max of HOLD/REVIEW hits).
-    Falls back to orders.delay_minutes, then DEFAULT_DELAY_MINUTES.
+    Resolve delay_minutes for one order.
+
+    Prefers the greater of evaluation snapshot and live HOLD/REVIEW delays
+    (R001 always contributes 180), then default 60.
     """
     cursor.execute(
-        """
-        SELECT COALESCE(
-            (
-                SELECT MAX(rm.delay_minutes)
-                FROM master.order_rule_hits h
-                JOIN master.rule_master rm ON rm.rule_id = h.rule_id
-                WHERE h.order_id = o.order_id
-                  AND UPPER(rm.action) IN ('HOLD', 'REVIEW')
-            ),
-            NULLIF(o.delay_minutes, 0),
-            %s
-        )
+        f"""
+        SELECT {_LIVE_RULE_DELAY.strip()}
         FROM master.orders o
         WHERE o.order_id = %s
         """,
-        (DEFAULT_DELAY_MINUTES, order_id),
+        (order_id,),
     )
     row = cursor.fetchone()
     if not row or row[0] is None:
@@ -111,15 +134,13 @@ def _backlog_select_sql(order_ids: Optional[Sequence[str]] = None) -> str:
                 o.delay_minutes AS order_delay_minutes,
                 COALESCE(
                     (
-                        SELECT MAX(rm.delay_minutes)
-                        FROM master.order_rule_hits h
-                        JOIN master.rule_master rm ON rm.rule_id = h.rule_id
-                        WHERE h.order_id = o.order_id
-                          AND UPPER(rm.action) IN ('HOLD', 'REVIEW')
+                        SELECT COUNT(*)::int
+                        FROM master.order_items oi
+                        WHERE oi.order_id = o.order_id
                     ),
-                    NULLIF(o.delay_minutes, 0),
-                    {DEFAULT_DELAY_MINUTES}
-                ) AS delay_minutes,
+                    0
+                ) AS item_count,
+                {_LIVE_RULE_DELAY.strip()} AS delay_minutes,
                 COALESCE(
                     (
                         SELECT STRING_AGG(DISTINCT rm.rule_name, ', ' ORDER BY rm.rule_name)
@@ -144,6 +165,7 @@ def _backlog_select_sql(order_ids: Optional[Sequence[str]] = None) -> str:
             flagged_reason,
             tagged_timestamp,
             order_delay_minutes,
+            item_count,
             delay_minutes,
             rule_name,
             tagged_timestamp + (delay_minutes * INTERVAL '1 minute') AS review_deadline,

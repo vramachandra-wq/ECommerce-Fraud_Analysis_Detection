@@ -1,5 +1,11 @@
 from typing import Dict, Any, Tuple, Optional, Callable, List
 
+# R001 (iPhone 16) hold window — single source of truth for create + queue/backlog.
+R001_HOLD_DELAY_MINUTES = 180
+
+# Rules that inspect product fields — run once per cart line item.
+PRODUCT_SCOPED_RULE_IDS = frozenset({"R001"})
+
 # In-memory caches to prevent querying master.rule_master repeatedly 
 _INTERVAL_CACHE: Dict[str, str] = {}
 _THRESHOLD_CACHE: Dict[str, float] = {}
@@ -25,6 +31,10 @@ def _get_interval(cursor: Any, rule_id: str) -> str:
 
 def _get_delay_minutes(cursor: Any, rule_id: str) -> int:
     """Fetches review delay_minutes from rule_master (source of truth for timeouts)."""
+    # R001 iPhone hold is fixed at 180 minutes.
+    if rule_id == "R001":
+        _DELAY_CACHE[rule_id] = R001_HOLD_DELAY_MINUTES
+        return R001_HOLD_DELAY_MINUTES
     if rule_id not in _DELAY_CACHE:
         cursor.execute(
             "SELECT delay_minutes FROM master.rule_master WHERE rule_id = %s",
@@ -54,10 +64,11 @@ def _get_threshold(cursor: Any, rule_id: str, fallback_value: float) -> float:
 
 
 def check_r001(cursor: Any, ctx: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
-    """P2 iPhone 16 Rule — review timeout comes from rule_master.delay_minutes."""
-    if ctx["program_id"] == "P2" and "iphone 16" in (ctx.get("product_name") or "").lower():
+    """iPhone 16 product rule — always ON_HOLD for 180 minutes when this fires."""
+    product_name = (ctx.get("product_name") or "").lower()
+    if "iphone 16" in product_name:
         delay = _get_delay_minutes(cursor, "R001")
-        return True, f"R001: iPhone 16 order on P2 track — held for {delay}-minute review window"
+        return True, f"R001: iPhone 16 order — held for {delay}-minute review window"
     return False, None
 
 

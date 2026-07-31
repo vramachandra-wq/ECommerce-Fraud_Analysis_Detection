@@ -1,6 +1,6 @@
 """Fraud engine package — rule evaluation, backlog detection, auto-approval."""
 
-from fraud_engine.engine import evaluate_order, clear_metadata_cache
+from fraud_engine.engine import evaluate_order, evaluate_order_with_items, clear_metadata_cache
 from fraud_engine.auto_approval import sync_expired_holds
 from fraud_engine.backlog import (
     detect_backlog_orders,
@@ -11,6 +11,7 @@ from fraud_engine.backlog import (
 
 __all__ = [
     "evaluate_order",
+    "evaluate_order_with_items",
     "clear_metadata_cache",
     "sync_expired_holds",
     "detect_backlog_orders",

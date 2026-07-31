@@ -106,14 +106,26 @@ Tables:
    - device_type
    - created_at
 
-5. master.order_rule_hits
+5. master.order_items (Line items for multi-product orders)
+   - order_item_id (BIGINT, PK)
+   - order_id (VARCHAR)
+   - line_no (INTEGER)
+   - product_id (VARCHAR)
+   - product_name (VARCHAR)
+   - category (VARCHAR)
+   - quantity (INTEGER)
+   - unit_price (NUMERIC)
+   - line_amount (NUMERIC)
+   - created_at
+
+6. master.order_rule_hits
    - order_id
    - rule_id
    - rule_name
    - rule_description
    - created_at
 
-6. master.rule_master
+7. master.rule_master
    - rule_id (VARCHAR, PK)
    - rule_name
    - rule_description
@@ -132,14 +144,20 @@ orders.product_id = products.product_id
 
 orders.device_id = device_master.device_id
 
+orders.order_id = order_items.order_id
+
+order_items.product_id = products.product_id
+
 orders.order_id = order_rule_hits.order_id
 
 order_rule_hits.rule_id = rule_master.rule_id
 
 BUSINESS RULES
 
-- orders is the primary fact table.
-- Use orders whenever possible.
+- orders is the primary fact table (one row per checkout).
+- order_items holds each product line for that order; prefer joining order_items when listing products in an order.
+- On master.orders, product_id / product_name / quantity / amount are header summaries (amount = sum of line amounts).
+- Use orders whenever possible for order-level metrics.
 - Join other tables only when additional attributes are required.
 - order_status values:
     APPROVED

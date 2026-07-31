@@ -25,6 +25,7 @@ export interface QueueOrder {
   product_name: string;
   category?: string;
   quantity?: number;
+  item_count?: number;
   amount: number;
   order_status: string;
   flagged_reason: string;
@@ -39,8 +40,22 @@ export interface QueueOrder {
   is_overdue?: boolean;
 }
 
+export interface OrderLineItem {
+  order_item_id?: number | null;
+  line_no: number;
+  product_id: string;
+  product_name: string;
+  category?: string;
+  quantity: number;
+  unit_price: number;
+  line_amount: number;
+}
+
 export interface OrderDetail {
-  order: Record<string, unknown>;
+  order: Record<string, unknown> & {
+    items?: OrderLineItem[];
+    item_count?: number;
+  };
   timing?: {
     delay_minutes?: number;
     review_deadline?: string | null;

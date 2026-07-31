@@ -102,6 +102,10 @@ def cleanup_orders(db_conn, db_cursor):
             (order_id,),
         )
         db_cursor.execute(
+            "DELETE FROM master.order_items WHERE order_id = %s",
+            (order_id,),
+        )
+        db_cursor.execute(
             "DELETE FROM master.orders WHERE order_id = %s",
             (order_id,),
         )
@@ -196,6 +200,10 @@ def clean_customer(db_cursor, unique_suffix):
             (order_id,),
         )
         db_cursor.execute(
+            "DELETE FROM master.order_items WHERE order_id = %s",
+            (order_id,),
+        )
+        db_cursor.execute(
             "DELETE FROM master.orders WHERE order_id = %s",
             (order_id,),
         )
@@ -252,6 +260,10 @@ def clean_p2_customer(db_cursor, unique_suffix):
     for (order_id,) in db_cursor.fetchall():
         db_cursor.execute(
             "DELETE FROM master.order_rule_hits WHERE order_id = %s",
+            (order_id,),
+        )
+        db_cursor.execute(
+            "DELETE FROM master.order_items WHERE order_id = %s",
             (order_id,),
         )
         db_cursor.execute(
