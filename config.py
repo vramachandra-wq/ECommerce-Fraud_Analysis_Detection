@@ -24,13 +24,15 @@ def _get_env_str(key: str, default: str = "") -> str:
     return default
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
-GROQ_INTENT_MODEL = _get_env_str("GROQ_INTENT_MODEL", "openai/gpt-oss-20b")
+# Prefer the faster 20B model by default. Override to gpt-oss-120b in .env for max quality.
+GROQ_INTENT_MODEL = _get_env_str("GROQ_INTENT_MODEL", "openai/gpt-oss-120b")
 GROQ_SQL_MODEL = _get_env_str("GROQ_SQL_MODEL", "openai/gpt-oss-120b")
 GROQ_REPAIR_MODEL = _get_env_str("GROQ_REPAIR_MODEL", "openai/gpt-oss-120b")
 GROQ_SUMMARY_MODEL = _get_env_str("GROQ_SUMMARY_MODEL", "openai/gpt-oss-120b")
-# TLS verify for Groq HTTP. Set GROQ_SSL_VERIFY=false only behind SSL-inspecting proxies.
-_groq_ssl = os.environ.get("GROQ_SSL_VERIFY", "true").strip().lower()
-GROQ_SSL_VERIFY = _groq_ssl not in {"0", "false", "no", "off"}
+# TLS verify for Groq HTTP. Default false for SSL-inspecting corporate proxies
+# (Zscaler etc.). Set GROQ_SSL_VERIFY=true when a normal CA chain is available.
+_groq_ssl = os.environ.get("GROQ_SSL_VERIFY", "false").strip().lower()
+GROQ_SSL_VERIFY = _groq_ssl in {"1", "true", "yes", "on"}
 
 _GROQ_KEY_PLACEHOLDERS = {
     "",

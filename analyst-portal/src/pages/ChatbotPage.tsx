@@ -24,6 +24,8 @@ function ChartBlock({ chart }: { chart: NonNullable<ChatResponse["chart"]> }) {
   const labels = chart.labels || [];
   const values = (chart.values || []).map(Number);
   const max = Math.max(...values, 1);
+  const formatValue = (n: number) =>
+    Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 
   return (
     <div className="space-y-2 rounded-xl bg-white p-3 ring-1 ring-border">
@@ -31,7 +33,9 @@ function ChartBlock({ chart }: { chart: NonNullable<ChatResponse["chart"]> }) {
         <div key={`${label}-${idx}`}>
           <div className="mb-1 flex justify-between gap-3 text-xs">
             <span className="truncate font-medium">{label}</span>
-            <span className="tabular-nums text-muted">{values[idx]?.toLocaleString?.() ?? values[idx]}</span>
+            <span className="tabular-nums font-semibold text-slate-800">
+              {formatValue(values[idx] || 0)}
+            </span>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-slate-100">
             <div
@@ -50,10 +54,19 @@ function ChartBlock({ chart }: { chart: NonNullable<ChatResponse["chart"]> }) {
   );
 }
 
+const THINKING_STEPS = [
+  "Understanding your question…",
+  "Generating SQL query…",
+  "Running query against the database…",
+  "Summarizing results…",
+  "Preparing insights & recommendations…",
+];
+
 export function ChatbotPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [thinkingStep, setThinkingStep] = useState(0);
   const [error, setError] = useState("");
   const [groqConfigured, setGroqConfigured] = useState(true);
 
@@ -64,6 +77,18 @@ export function ChatbotPage() {
       setGroqConfigured(true);
     });
   }, []);
+
+  useEffect(() => {
+    if (!loading) {
+      setThinkingStep(0);
+      return;
+    }
+    setThinkingStep(0);
+    const timer = window.setInterval(() => {
+      setThinkingStep((step) => Math.min(step + 1, THINKING_STEPS.length - 1));
+    }, 900);
+    return () => window.clearInterval(timer);
+  }, [loading]);
 
   async function sendMessage(text: string) {
     if (!text.trim() || loading) return;
@@ -195,7 +220,9 @@ export function ChatbotPage() {
               </div>
             ))
           )}
-          {loading ? <p className="text-sm text-muted">Analyzing your question…</p> : null}
+          {loading ? (
+            <p className="text-sm italic text-muted">{THINKING_STEPS[thinkingStep]}</p>
+          ) : null}
         </div>
 
         <form onSubmit={onSubmit} className="flex gap-3">

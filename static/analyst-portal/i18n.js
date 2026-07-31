@@ -476,6 +476,30 @@ export const TRANSLATIONS = {
     "en": "Single Order Investigation",
     "th": "ตรวจสอบคำสั่งซื้อรายการเดียว"
   },
+  "awaiting_decision": {
+    "en": "Awaiting analyst decision",
+    "th": "รอการตัดสินใจของนักวิเคราะห์"
+  },
+  "investigation_kicker": {
+    "en": "Case review",
+    "th": "การตรวจสอบเคส"
+  },
+  "flagged_reason_label": {
+    "en": "Flagged reason",
+    "th": "เหตุผลที่ถูกตั้งค่าสถานะ"
+  },
+  "security_actions": {
+    "en": "Security actions",
+    "th": "การดำเนินการด้านความปลอดภัย"
+  },
+  "review_timing": {
+    "en": "Review timing",
+    "th": "ระยะเวลาตรวจสอบ"
+  },
+  "order_id": {
+    "en": "Order ID",
+    "th": "รหัสคำสั่งซื้อ"
+  },
   "select_order_review": {
     "en": "Select an Order ID to review in detail",
     "th": "เลือกหมายเลขคำสั่งซื้อเพื่อดูรายละเอียด"

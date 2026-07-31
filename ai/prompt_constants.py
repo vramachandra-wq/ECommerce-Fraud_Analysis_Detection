@@ -2,11 +2,11 @@
 
 MAX_HISTORY = 8
 MAX_STORED_MESSAGES = 100
-MARKDOWN_PREVIEW_ROWS = 15
+MARKDOWN_PREVIEW_ROWS = 10
 
 # Summaries were getting cut off mid-sentence at 400 tokens; 8 bullet points
 # of business commentary comfortably needs more headroom than that.
-SUMMARY_MAX_TOKENS = 900
+SUMMARY_MAX_TOKENS = 700
 
 # NOTE ON REASONING MODELS (openai/gpt-oss-20b / gpt-oss-120b via Groq):
 # These models spend part of max_completion_tokens on an internal reasoning
@@ -14,8 +14,8 @@ SUMMARY_MAX_TOKENS = 900
 # the visible content comes back empty/truncated. Every *_MAX_TOKENS value
 # below therefore includes headroom for reasoning, not just the final
 # answer, and every call site pairs its budget with an explicit
-# *_REASONING_EFFORT (kept "low" for mechanical/deterministic tasks to save
-# tokens, "medium" where real business reasoning improves answer quality).
+# *_REASONING_EFFORT. Prefer "low" for latency; raise via env/code only when
+# answer quality clearly needs more deliberation.
 
 # Intent classification returns a single label, but the model still reasons
 # first — 12 tokens left zero room for that reasoning, so the classifier was
@@ -24,24 +24,22 @@ SUMMARY_MAX_TOKENS = 900
 INTENT_MAX_TOKENS = 200
 INTENT_REASONING_EFFORT = "low"
 
-# Advisory answers (GENERAL intent) are prose recommendations/strategy —
-# "medium" effort because grounding strategic or creative advice in the
-# right numbers benefits from real reasoning, not just pattern completion.
-ADVISORY_MAX_TOKENS = 1400
-ADVISORY_REASONING_EFFORT = "medium"
+# Advisory answers (GENERAL intent) are prose recommendations/strategy.
+ADVISORY_MAX_TOKENS = 1000
+ADVISORY_REASONING_EFFORT = "low"
 
 # SQL generation: schema + rules are fully spelled out in the prompt, so
 # this is a mechanical construction task — "low" effort keeps it fast and
 # cheap without hurting correctness. Extra headroom covers reasoning + CTEs.
-SQL_MAX_TOKENS = 1800
+SQL_MAX_TOKENS = 1200
 SQL_REASONING_EFFORT = "low"
 
 # Repair model only needs to output a corrected SQL block, not prose — same
 # reasoning as SQL generation.
-REPAIR_MAX_TOKENS = 1200
+REPAIR_MAX_TOKENS = 900
 REPAIR_REASONING_EFFORT = "low"
 
-SUMMARY_REASONING_EFFORT = "medium"
+SUMMARY_REASONING_EFFORT = "low"
 
 SCHEMA_CONTEXT = """
 Schema: master
@@ -416,8 +414,8 @@ Original SQL
 {sql}
 """
 
-RECOMMENDATION_MAX_TOKENS = 900
-RECOMMENDATION_REASONING_EFFORT = "medium"
+RECOMMENDATION_MAX_TOKENS = 700
+RECOMMENDATION_REASONING_EFFORT = "low"
 
 AI_RECOMMENDATION_PROMPT = """
 You are an analytics assistant for an e-commerce fraud detection platform.

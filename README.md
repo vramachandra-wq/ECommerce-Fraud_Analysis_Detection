@@ -70,7 +70,7 @@ Regenerate with:
   - **HOLD / REVIEW**: Delay editable; threshold/interval follow rule type
 - IP / email / phone blacklist management (including blacklist-from-order)
 - KPI, rule analytics, and auto-approval scheduler status
-- System audit log viewer
+- System audit events stored in PostgreSQL (no Admin UI viewer)
 
 ## AI chatbot
 
@@ -334,7 +334,7 @@ Integration tests (require live PostgreSQL):
 - Manage analysts and page permissions
 - Configure rules (action-aware field locking) and delay minutes
 - Manage blacklists
-- View scheduler status and system audit logs
+- View scheduler status
 - Full portal access including unmasked PII
 
 ---
@@ -380,5 +380,5 @@ Integration tests (require live PostgreSQL):
 - Signed analyst portal session cookies / tokens (`PORTAL_SECRET`)
 - Optional Keycloak OIDC SSO for analysts (maps IdP username → `master.analyst_users`; local password login unchanged)
 - Password change syncs to Keycloak when admin API credentials are set; otherwise local change still applies
-- **System audit in PostgreSQL** (`master.system_audit_log`) for logins, order create/approve/reject, blacklist, permissions, rule updates, and auto-approval — viewable under Admin → Audit Logs (`GET /portal/audit-logs`). Optional JSONL file backup via `SYSTEM_AUDIT_FILE_BACKUP` / `SYSTEM_AUDIT_LOG_PATH`.
+- **System audit in PostgreSQL** (`master.system_audit_log`) for logins, order create/approve/reject, blacklist, permissions, rule updates, and auto-approval (API: `GET /portal/audit-logs`). Optional JSONL file backup via `SYSTEM_AUDIT_FILE_BACKUP` / `SYSTEM_AUDIT_LOG_PATH`.
 - Order review audit (`master.order_review_audit`) and chatbot logs (`master.ai_chat_logs`)

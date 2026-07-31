@@ -14,10 +14,10 @@ def get_groq_client():
         if not is_groq_api_key_configured():
             return None
 
-        # verify defaults to True; set GROQ_SSL_VERIFY=false only for SSL-inspecting proxies.
+        # Default verify=False for SSL-inspecting proxies; set GROQ_SSL_VERIFY=true when possible.
         custom_http_client = httpx.Client(
             verify=GROQ_SSL_VERIFY,
-            timeout=60.0,
+            timeout=45.0,
         )
 
         _client = Groq(
@@ -28,7 +28,7 @@ def get_groq_client():
     return _client
 
 
-def create_chat_completion(client, *, max_retries: int = 3, backoff_factor: float = 1.0, stream: bool = False, **kwargs):
+def create_chat_completion(client, *, max_retries: int = 2, backoff_factor: float = 0.6, stream: bool = False, **kwargs):
     """Call `client.chat.completions.create` with retries on connection/timeouts."""
     
     if client is None:
