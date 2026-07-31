@@ -22,27 +22,39 @@ def test_get_groq_client_returns_none_without_api_key(_mock_configured):
     assert get_groq_client() is None
 
 
-@patch("ai.groq_client.Groq")
-@patch("ai.groq_client.httpx.Client")
-@patch("ai.groq_client.is_groq_api_key_configured", return_value=True)
-@patch("ai.groq_client.GROQ_API_KEY", "test-key")
-def test_get_groq_client_creates_singleton(
-    _mock_configured, mock_httpx_client, mock_groq
-):
+def test_get_groq_client_creates_singleton():
     from ai.groq_client import get_groq_client
 
     mock_instance = MagicMock()
-    mock_groq.return_value = mock_instance
-
-    first = get_groq_client()
-    second = get_groq_client()
+    with patch("ai.groq_client.is_groq_api_key_configured", return_value=True), patch(
+        "ai.groq_client.GROQ_API_KEY", "test-key"
+    ), patch("ai.groq_client.GROQ_SSL_VERIFY", True), patch(
+        "ai.groq_client.httpx.Client"
+    ) as mock_httpx_client, patch("ai.groq_client.Groq") as mock_groq:
+        mock_groq.return_value = mock_instance
+        first = get_groq_client()
+        second = get_groq_client()
 
     assert first is mock_instance
     assert second is mock_instance
     mock_groq.assert_called_once()
     kwargs = mock_httpx_client.call_args.kwargs
-    assert kwargs["verify"] is False
+    assert kwargs["verify"] is True
     assert kwargs["timeout"] == 60.0
+
+
+def test_get_groq_client_respects_ssl_verify_false():
+    from ai.groq_client import get_groq_client
+
+    with patch("ai.groq_client.is_groq_api_key_configured", return_value=True), patch(
+        "ai.groq_client.GROQ_API_KEY", "test-key"
+    ), patch("ai.groq_client.GROQ_SSL_VERIFY", False), patch(
+        "ai.groq_client.httpx.Client"
+    ) as mock_httpx_client, patch("ai.groq_client.Groq") as mock_groq:
+        mock_groq.return_value = MagicMock()
+        get_groq_client()
+
+    assert mock_httpx_client.call_args.kwargs["verify"] is False
 
 
 def test_create_chat_completion_raises_when_client_is_none():

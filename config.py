@@ -28,6 +28,9 @@ GROQ_INTENT_MODEL = _get_env_str("GROQ_INTENT_MODEL", "openai/gpt-oss-20b")
 GROQ_SQL_MODEL = _get_env_str("GROQ_SQL_MODEL", "openai/gpt-oss-120b")
 GROQ_REPAIR_MODEL = _get_env_str("GROQ_REPAIR_MODEL", "openai/gpt-oss-120b")
 GROQ_SUMMARY_MODEL = _get_env_str("GROQ_SUMMARY_MODEL", "openai/gpt-oss-120b")
+# TLS verify for Groq HTTP. Set GROQ_SSL_VERIFY=false only behind SSL-inspecting proxies.
+_groq_ssl = os.environ.get("GROQ_SSL_VERIFY", "true").strip().lower()
+GROQ_SSL_VERIFY = _groq_ssl not in {"0", "false", "no", "off"}
 
 _GROQ_KEY_PLACEHOLDERS = {
     "",

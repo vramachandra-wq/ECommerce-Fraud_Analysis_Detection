@@ -447,10 +447,11 @@ def update_rule(
                             status_code=400,
                             detail="R001 requires a positive delay_minutes value.",
                         )
+                    # R001 is always HOLD — only delay_minutes is editable.
                     cur.execute(
                         """
                         UPDATE master.rule_master
-                        SET action = %s,
+                        SET action = 'HOLD',
                             threshold_value = %s,
                             time_interval_value = NULL,
                             time_interval_unit = NULL,
@@ -458,7 +459,6 @@ def update_rule(
                         WHERE rule_id = %s
                         """,
                         (
-                            data.action,
                             data.threshold_value,
                             data.delay_minutes,
                             data.rule_id,

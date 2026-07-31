@@ -99,7 +99,7 @@ function cartCount() {
 
 function addToCart(product, qty = 1) {
   const items = loadCart();
-  const q = Math.max(1, Number(qty) || 1);
+  const q = Math.max(1, Math.floor(Number(qty) || 1));
   const existing = items.find((i) => i.product_id === product.product_id);
   if (existing) {
     existing.quantity += q;
@@ -124,7 +124,7 @@ function setCartItemQty(productId, qty) {
   const items = loadCart();
   const row = items.find((i) => i.product_id === productId);
   if (!row) return;
-  row.quantity = Math.max(1, Number(qty) || 1);
+  row.quantity = Math.max(1, Math.floor(Number(qty) || 1));
   saveCart(items);
 }
 

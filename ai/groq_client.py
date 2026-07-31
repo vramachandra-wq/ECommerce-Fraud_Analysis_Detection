@@ -3,7 +3,7 @@ import time
 import logging
 import httpx
 from groq import Groq, APIConnectionError, APITimeoutError, RateLimitError
-from config import GROQ_API_KEY, is_groq_api_key_configured
+from config import GROQ_API_KEY, GROQ_SSL_VERIFY, is_groq_api_key_configured
 
 _client = None
 
@@ -14,13 +14,12 @@ def get_groq_client():
         if not is_groq_api_key_configured():
             return None
 
-        # Create a custom HTTP client tailored for corporate networks/VPNs
+        # verify defaults to True; set GROQ_SSL_VERIFY=false only for SSL-inspecting proxies.
         custom_http_client = httpx.Client(
-            verify=False,  # Bypasses corporate SSL interception (Zscaler, etc.)
-            timeout=60.0   # Increases timeout to account for proxy routing
+            verify=GROQ_SSL_VERIFY,
+            timeout=60.0,
         )
 
-        # Initialize Groq with the custom client
         _client = Groq(
             api_key=GROQ_API_KEY,
             http_client=custom_http_client
