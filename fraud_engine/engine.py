@@ -28,13 +28,13 @@ _RULE_METADATA_CACHE: Dict[str, Dict[str, Any]] = {}
 
 # Priority tiers for conflict resolution. Lower number = decided first.
 # Tier 0: blacklist rules always win regardless of any other rule's configured action.
-# Tier 1: iPhone/program rule is next.
+# Tier 1: P2 iPhone rule is next.
 # Tier 2 (default): every other rule — resolved amongst themselves as before.
 RULE_TIER: Dict[str, int] = {
     "R007": 0,  # Blacklisted IP
     "R011": 0,  # Blacklisted phone
     "R012": 0,  # Blacklisted email
-    "R001": 1,  # iPhone 16 product hold
+    "R001": 1,  # P2 + iPhone 16 product hold
 }
 DEFAULT_RULE_TIER = 2
 
@@ -182,7 +182,7 @@ def evaluate_order_with_items(
     """
     Evaluate a multi-item checkout.
 
-    - Product-scoped rules (e.g. R001 iPhone) run **per line item**.
+    - Product-scoped rules (e.g. R001 P2 iPhone) run **per line item**.
     - Order-scoped rules (velocity, blacklist, …) run **once** on basket totals.
     - Hits are merged and rolled up to one order status / flagged_reason.
     """

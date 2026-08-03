@@ -64,11 +64,12 @@ def _get_threshold(cursor: Any, rule_id: str, fallback_value: float) -> float:
 
 
 def check_r001(cursor: Any, ctx: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
-    """iPhone 16 product rule — always ON_HOLD for 180 minutes when this fires."""
+    """P2 + iPhone 16 product rule — ON_HOLD for 180 minutes when both match."""
+    program_id = (ctx.get("program_id") or "").strip().upper()
     product_name = (ctx.get("product_name") or "").lower()
-    if "iphone 16" in product_name:
+    if program_id == "P2" and "iphone 16" in product_name:
         delay = _get_delay_minutes(cursor, "R001")
-        return True, f"R001: iPhone 16 order — held for {delay}-minute review window"
+        return True, f"R001: P2 iPhone 16 order — held for {delay}-minute review window"
     return False, None
 
 
