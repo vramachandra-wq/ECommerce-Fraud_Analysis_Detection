@@ -137,8 +137,8 @@ export const TRANSLATIONS = {
     "th": "กำลังดำเนินการสั่งซื้อจากเมโทรคาร์ท..."
   },
   "order_summary": {
-    "en": "Order Summary — Metro Cart",
-    "th": "สรุปคำสั่งซื้อ — เมโทรคาร์ท"
+    "en": "Order summary",
+    "th": "สรุปคำสั่งซื้อ"
   },
   "confirm_place_order": {
     "en": "Confirm Order",
@@ -271,6 +271,70 @@ export const TRANSLATIONS = {
   "search_results_count": {
     "en": "Showing {shown} of {total}",
     "th": "แสดง {shown} จาก {total}"
+  },
+  "all_categories": {
+    "en": "All",
+    "th": "ทั้งหมด"
+  },
+  "filter_by_category": {
+    "en": "Category",
+    "th": "หมวดหมู่"
+  },
+  "shop_cat_electronics": {
+    "en": "Electronics",
+    "th": "อิเล็กทรอนิกส์"
+  },
+  "shop_cat_appliances": {
+    "en": "Appliances",
+    "th": "เครื่องใช้ไฟฟ้า"
+  },
+  "shop_cat_furniture": {
+    "en": "Furniture",
+    "th": "เฟอร์นิเจอร์"
+  },
+  "shop_cat_vouchers": {
+    "en": "Vouchers",
+    "th": "บัตรของขวัญ"
+  },
+  "shop_categories_label": {
+    "en": "Categories",
+    "th": "หมวดหมู่"
+  },
+  "shop_vouchers_label": {
+    "en": "Vouchers",
+    "th": "บัตรของขวัญ"
+  },
+  "shop_products_heading": {
+    "en": "Products",
+    "th": "สินค้า"
+  },
+  "shop_vouchers": {
+    "en": "Gift credit",
+    "th": "เครดิตของขวัญ"
+  },
+  "shop_vouchers_kicker": {
+    "en": "Digital rewards",
+    "th": "รางวัลดิจิทัล"
+  },
+  "shop_vouchers_lede": {
+    "en": "Prepaid gift credit kept separate from physical products.",
+    "th": "เครดิตของขวัญแบบเติมเงิน แยกจากสินค้าทั่วไป"
+  },
+  "shop_voucher_note": {
+    "en": "Digital gift credit — delivered after order approval.",
+    "th": "เครดิตของขวัญดิจิทัล — ส่งมอบหลังอนุมัติคำสั่งซื้อ"
+  },
+  "pagination_page": {
+    "en": "Page {page} of {pages}",
+    "th": "หน้า {page} จาก {pages}"
+  },
+  "pagination_prev": {
+    "en": "Previous",
+    "th": "ก่อนหน้า"
+  },
+  "pagination_next": {
+    "en": "Next",
+    "th": "ถัดไป"
   },
   "shop_cart": {
     "en": "Cart",

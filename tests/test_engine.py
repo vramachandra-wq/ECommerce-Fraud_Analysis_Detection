@@ -55,8 +55,8 @@ def test_r007_rejected():
     assert result["is_fraud"] is True
 
 
-def test_blacklist_tier_beats_hold_rule():
-    """Tier 0 blacklist (R007) decides status even when R001 also triggers."""
+def test_r001_hold_beats_other_flagged_rules():
+    """P2 iPhone (R001) forces ON_HOLD for 180 mins even when a blacklist also fires."""
 
     def r001(cursor, ctx):
         return True, "R001: Hold"
@@ -65,14 +65,44 @@ def test_blacklist_tier_beats_hold_rule():
         return True, "R007: Blacklisted"
 
     cursor = MagicMock()
-    # Only R007 is in deciding tier 0 for status; delay uses max of all rules
-    # but REJECTED forces delay to 0.
-    cursor.fetchone.return_value = ("REJECTED", 60)
+    cursor.fetchone.return_value = ("HOLD", 180)
 
     with patch(
         "fraud_engine.engine.RULE_CHECKS",
         [
             ("R001", r001),
+            ("R007", r007),
+        ],
+    ):
+        result = evaluate_order(cursor, {})
+
+    assert result["order_status"] == "ON_HOLD"
+    assert result["delay_minutes"] == 180
+    assert result["is_fraud"] is False
+    assert len(result["triggered_rules"]) == 2
+    assert "R001" in result["flagged_reason"]
+    assert "R007" in result["flagged_reason"]
+
+
+def test_blacklist_still_rejects_without_r001():
+    """Without R001, tier-0 blacklist rejection still wins over review rules."""
+
+    def r002(cursor, ctx):
+        return True, "R002: Email Velocity"
+
+    def r007(cursor, ctx):
+        return True, "R007: Blacklisted"
+
+    cursor = MagicMock()
+    cursor.fetchone.side_effect = [
+        ("REJECTED", 60),  # R007 deciding tier
+        ("REVIEW", 60),    # R002 delay metadata (ignored for REJECTED)
+    ]
+
+    with patch(
+        "fraud_engine.engine.RULE_CHECKS",
+        [
+            ("R002", r002),
             ("R007", r007),
         ],
     ):
@@ -179,7 +209,7 @@ def test_pass_rule_delay_does_not_inflate_hold_timeout():
         return True, "R001: Hold"
 
     cursor = MagicMock()
-    # R001 is tier 1 so it alone decides status; R002 (PASS) is only read in the delay loop.
+    # R001 hard-overrides status to ON_HOLD @ 180; PASS sibling delay must not apply.
     # R001 hold window is fixed at 180 minutes regardless of the DB row value.
     cursor.fetchone.side_effect = [
         ("HOLD", 60),   # R001 status/delay metadata (forced to 180)

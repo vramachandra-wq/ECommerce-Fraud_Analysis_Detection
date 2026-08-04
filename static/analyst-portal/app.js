@@ -3,7 +3,7 @@ import {
   curSym,
   languageToggleHtml,
   bindLanguageToggle,
-} from "./i18n.js?v=61";
+} from "./i18n.js?v=63";
 
 const PAGE_LABEL_KEYS = {
   ADMIN_PANEL: "nav_admin_panel",
@@ -443,17 +443,12 @@ function investigationTimingHtml(timing, order) {
 
 function investigationStreamlitMetricsHtml(timing, order) {
   const tm = timing || {};
-  const delay = tm.delay_minutes ?? order?.delay_minutes ?? "—";
   const remainingRaw = tm.minutes_remaining_display ?? tm.minutes_remaining;
   const remaining = tm.is_overdue ? "0 min" : formatMinutes(remainingRaw);
   const overdue = tm.is_overdue ? formatMinutes(tm.minutes_overdue) : "—";
   const overdueClass = tm.is_overdue ? "inv-metric-card inv-metric-overdue" : "inv-metric-card";
   return `
     <div class="inv-metrics" role="group" aria-label="${esc(t("review_timing") || "Review timing")}">
-      <div class="inv-metric-card">
-        <div class="inv-metric-kicker">${esc(t("delay_minutes"))}</div>
-        <div class="inv-metric-value">${esc(delay)}<span class="inv-metric-unit">m</span></div>
-      </div>
       <div class="${overdueClass}">
         <div class="inv-metric-kicker">${esc(t("remaining_review"))}</div>
         <div class="inv-metric-value">${esc(remaining)}</div>
@@ -596,24 +591,56 @@ function orderInvestigationHtml({
   selectedId = "",
 }) {
   const bl = blacklists || {};
-  const inReview = ["ON_HOLD", "PENDING_REVIEW"].includes(String(order.order_status || ""));
+  const status = String(order.order_status || "").trim().toUpperCase();
+  const inReview = ["ON_HOLD", "PENDING_REVIEW"].includes(status);
   const selectHtml = orderOptions?.length
     ? `<div class="field inv-select-field">
         <label>${esc(t("select_order_review"))}</label>
-        <select id="${prefix}-order-select">
-          ${orderOptions
-            .map(
-              (o) =>
-                `<option value="${esc(o.order_id)}" ${o.order_id === selectedId ? "selected" : ""}>${esc(o.order_id)}${o.is_overdue ? " · OVERDUE" : ""}</option>`,
-            )
-            .join("")}
-        </select>
+        <div class="inv-select-row">
+          <select id="${prefix}-order-select">
+            ${orderOptions
+              .map(
+                (o) =>
+                  `<option value="${esc(o.order_id)}" ${o.order_id === selectedId ? "selected" : ""}>${esc(o.order_id)}${o.is_overdue ? " · OVERDUE" : ""}</option>`,
+              )
+              .join("")}
+          </select>
+          ${inReview ? `<span class="inv-status-hint">${esc(t("awaiting_decision") || "Awaiting analyst decision")}</span>` : ""}
+        </div>
       </div>`
     : "";
 
   const emailVal = `${esc(displayPii(order.email, "email") || "—")}${bl.email ? ` <span class="inv-bl-tag">${esc(t("blacklisted_suffix"))}</span>` : ""}`;
   const phoneVal = `${esc(displayPii(order.phone_number, "phone") || "—")}${bl.phone ? ` <span class="inv-bl-tag">${esc(t("blacklisted_suffix"))}</span>` : ""}`;
   const ipVal = `${esc(displayPii(order.ip_address, "ip") || "—")}${bl.ip ? ` <span class="inv-bl-tag">${esc(t("blacklisted_suffix"))}</span>` : ""}`;
+
+  const flaggedHtml = order.flagged_reason
+    ? `<div class="inv-flagged" role="status">
+        <div class="inv-flagged-label">${esc(t("flagged_reason_label") || "Flagged reason")}</div>
+        <div class="inv-flagged-text">${esc(order.flagged_reason)}</div>
+      </div>`
+    : "";
+
+  const decisionHtml = inReview
+    ? `<section class="inv-decision-bar" aria-label="${esc(t("analyst_decision"))}">
+        <div class="inv-decision-inner">
+          <div class="inv-decision-copy">
+            <h3 class="inv-decision-title">${esc(t("analyst_decision"))}</h3>
+            <p class="inv-decision-sub">${esc(t("decision_hint") || "Add comments, then decide")}</p>
+          </div>
+          <div class="field inv-comments-field">
+            <label for="${prefix}-comments">${esc(t("review_comments"))}</label>
+            <textarea id="${prefix}-comments" rows="3" placeholder="${esc(t("review_comments_placeholder") || "Enter review comments…")}">${esc(comments)}</textarea>
+          </div>
+          <div class="inv-decision-actions">
+            <button type="button" class="btn btn-primary inv-btn-approve" id="${prefix}-approve">${esc(t("approve_order"))}</button>
+            <button type="button" class="btn btn-secondary inv-btn-reject" id="${prefix}-reject">${esc(t("reject_order"))}</button>
+            <button type="button" class="btn btn-fraud inv-btn-fraud" id="${prefix}-fraud">${esc(t("reject_order_fraud"))}</button>
+          </div>
+          <div id="${prefix}-status" class="inv-decision-status"></div>
+        </div>
+      </section>`
+    : `<div class="alert alert-info inv-closed-note">${esc(t("order_not_in_review") || "This order is not in the review queue (already approved/rejected). Line items are shown above.")}</div>`;
 
   return `
     <div class="card inv-panel">
@@ -622,21 +649,22 @@ function orderInvestigationHtml({
           <p class="inv-kicker">${esc(t("investigation_kicker") || "Case review")}</p>
           <h2 class="inv-title">${esc(t("single_order_investigation"))}</h2>
         </div>
-        ${inReview ? `<span class="inv-status-hint">${esc(t("awaiting_decision") || "Awaiting analyst decision")}</span>` : ""}
       </div>
+      <div class="inv-panel-body">
       ${selectHtml}
       <div class="inv-hero">
         <div class="inv-hero-main">
           <span class="inv-hero-label">${esc(t("order_id") || "Order ID")}</span>
           <div class="inv-hero-id">${esc(order.order_id)}</div>
+          <div class="inv-hero-meta">
+            ${badge(order.order_status)}
+            ${order.program_id ? `<span class="inv-chip">${esc(order.program_id)}</span>` : ""}
+            <span class="inv-chip inv-chip-muted">${esc(formatUtc(order.order_timestamp))}</span>
+          </div>
         </div>
-        <div class="inv-hero-meta">
-          ${badge(order.order_status)}
-          ${order.program_id ? `<span class="inv-chip">${esc(order.program_id)}</span>` : ""}
-          <span class="inv-chip inv-chip-muted">${esc(formatUtc(order.order_timestamp))}</span>
-        </div>
+        ${investigationStreamlitMetricsHtml(timing, order)}
       </div>
-      ${investigationStreamlitMetricsHtml(timing, order)}
+      ${flaggedHtml}
       <div class="inv-details-grid">
         <section class="inv-section">
           <h4 class="inv-section-title">${esc(t("customer_details"))}</h4>
@@ -658,14 +686,6 @@ function orderInvestigationHtml({
           </dl>
         </section>
       </div>
-      ${
-        order.flagged_reason
-          ? `<div class="inv-flagged" role="status">
-              <div class="inv-flagged-label">${esc(t("flagged_reason_label") || "Flagged reason")}</div>
-              <div class="inv-flagged-text">${esc(order.flagged_reason)}</div>
-            </div>`
-          : ""
-      }
       <section class="inv-section inv-section-security">
         <h4 class="inv-section-title">${esc(t("security_actions") || "Security actions")}</h4>
         <div class="inv-security-list">
@@ -674,25 +694,8 @@ function orderInvestigationHtml({
           ${blacklistSecurityHtml("email", order.email, bl.email, prefix)}
         </div>
       </section>
-      ${
-        inReview
-          ? `<section class="inv-section inv-section-decision">
-        <h3 class="inv-decision-title">${esc(t("analyst_decision"))}</h3>
-        <div class="inv-decision">
-          <div class="field">
-            <label>${esc(t("review_comments"))}</label>
-            <textarea id="${prefix}-comments" rows="4" placeholder="${esc(t("review_comments"))}">${esc(comments)}</textarea>
-          </div>
-          <div class="row-actions inv-decision-actions">
-            <button type="button" class="btn btn-primary" id="${prefix}-approve">${esc(t("approve_order"))}</button>
-            <button type="button" class="btn btn-secondary" id="${prefix}-reject">${esc(t("reject_order"))}</button>
-            <button type="button" class="btn btn-fraud" id="${prefix}-fraud">${esc(t("reject_order_fraud"))}</button>
-          </div>
-          <div id="${prefix}-status"></div>
-        </div>
-      </section>`
-          : `<div class="alert alert-info inv-closed-note">${esc(t("order_not_in_review") || "This order is not in the review queue (already approved/rejected). Line items are shown above.")}</div>`
-      }
+      ${decisionHtml}
+      </div>
     </div>`;
 }
 
@@ -1333,8 +1336,12 @@ async function renderDashboard() {
           onSelectOrder: async (id) => {
             activeId = id;
             dashReviewComments = "";
-            detail = await api(`/portal/orders/${encodeURIComponent(activeId)}`);
-            paint();
+            try {
+              detail = await api(`/portal/orders/${encodeURIComponent(activeId)}`);
+              paint();
+            } catch (ex) {
+              showDashError(ex.message || "Failed to load order");
+            }
           },
           onRefresh: reload,
           statusFn: (msg, kind) => {
@@ -1963,15 +1970,25 @@ async function renderAdminQueue(body) {
       if (detailEl) detailEl.innerHTML = "";
       return;
     }
-    detailEl.innerHTML = `<p class="subtitle">${esc(t("loading_order", { id: activeId }))}</p>`;
+    const loadId = activeId;
+    detailEl.dataset.loadingOrderId = loadId;
+    detailEl.innerHTML = `<p class="subtitle">${esc(t("loading_order", { id: loadId }))}</p>`;
     try {
-      const detail = await api(`/portal/orders/${encodeURIComponent(activeId)}`);
+      const detail = await api(`/portal/orders/${encodeURIComponent(loadId)}`);
+      if (detailEl.dataset.loadingOrderId !== loadId || activeId !== loadId) return;
       const order = detail.order;
       const bl = detail.blacklists || {};
-      const timing = detail.timing || orders.find((o) => o.order_id === activeId) || {};
-      const optionSource = orders.length
-        ? orders
-        : recent.map((r) => ({ order_id: r.order_id, is_overdue: false }));
+      const timing = detail.timing || orders.find((o) => o.order_id === loadId) || {};
+      // Keep both queue + recent in the dropdown so switching IDs never drops the active order.
+      const byId = new Map();
+      for (const o of orders) byId.set(o.order_id, { order_id: o.order_id, is_overdue: !!o.is_overdue });
+      for (const r of recent) {
+        if (!byId.has(r.order_id)) byId.set(r.order_id, { order_id: r.order_id, is_overdue: false });
+      }
+      if (loadId && !byId.has(loadId)) {
+        byId.set(loadId, { order_id: loadId, is_overdue: false });
+      }
+      const optionSource = [...byId.values()];
       detailEl.innerHTML = orderInvestigationHtml({
         order,
         blacklists: bl,
@@ -1979,22 +1996,27 @@ async function renderAdminQueue(body) {
         comments: reviewComments,
         prefix: "aq",
         orderOptions: optionSource,
-        selectedId: activeId,
+        selectedId: loadId,
       });
       await bindOrderInvestigation({
         prefix: "aq",
         order,
         getComments: () => reviewComments,
         setComments: (v) => { reviewComments = v; },
-        onSelectOrder: (id) => {
+        onSelectOrder: async (id) => {
           activeId = id;
           reviewComments = "";
-          loadDetail();
+          try {
+            await loadDetail();
+          } catch (ex) {
+            adminStatus(ex.message || "Failed to load order", "error");
+          }
         },
         onRefresh: refresh,
         statusFn: (msg, kind) => adminStatus(msg, kind === "error" ? "error" : "success"),
       });
     } catch (ex) {
+      if (detailEl.dataset.loadingOrderId !== loadId || activeId !== loadId) return;
       detailEl.innerHTML = `<div class="alert alert-error">${esc(ex.message)}</div>`;
     }
   }
