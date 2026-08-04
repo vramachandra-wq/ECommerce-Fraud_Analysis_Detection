@@ -55,6 +55,23 @@ def verify_session_token(token: str) -> Optional[str]:
         return None
 
 
+def decode_session_token(token: str) -> Optional[Dict[str, Any]]:
+    """Return the signed session payload (``sub``, ``exp``) or ``None`` if invalid."""
+    try:
+        decoded = base64.urlsafe_b64decode(token.encode()).decode()
+        body, signature = decoded.rsplit(".", 1)
+        if not hmac.compare_digest(_sign(body), signature):
+            return None
+        payload = json.loads(body)
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("exp", 0) < time.time():
+            return None
+        return payload
+    except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+
+
 def authenticate_credentials(username: str, password: str) -> Optional[Dict[str, Any]]:
     with psycopg2.connect(**DB_CONFIG) as conn:
         with conn.cursor() as cur:

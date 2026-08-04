@@ -7,7 +7,7 @@ import {
   curSym,
   languageToggleHtml,
   bindLanguageToggle,
-} from "./i18n.js?v=28";
+} from "./i18n.js?v=34";
 
 const NAV = [
   { route: "order", labelKey: "shop_browse", icon: "order" },
@@ -25,6 +25,7 @@ const NAV_ICONS = {
 let session = loadSession();
 let lastOrder = loadLastOrder();
 let catalogCache = null;
+let catalogHasVouchers = false;
 
 function loadSession() {
   try {
@@ -44,6 +45,7 @@ function clearSession() {
   session = null;
   lastOrder = null;
   catalogCache = null;
+  catalogHasVouchers = false;
   localStorage.removeItem("metro_cart_customer");
   localStorage.removeItem("metro_cart_customer_token");
   localStorage.removeItem("metro_cart_last_order");
@@ -195,7 +197,7 @@ function formatUtc(value) {
 }
 
 function money(n) {
-  return `${curSym()}${Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
+  return `${curSym()}${Number(n).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`;
 }
 
 function initials(name) {
@@ -221,6 +223,7 @@ function confirmAction(opts) {
   const {
     title = t("confirm"),
     message,
+    bodyHtml,
     confirmLabel = t("confirm"),
     cancelLabel = t("cancel"),
   } = opts || {};
@@ -229,10 +232,14 @@ function confirmAction(opts) {
     const overlay = document.createElement("div");
     overlay.id = "confirm-modal";
     overlay.className = "confirm-overlay";
+    const body =
+      bodyHtml != null
+        ? `<div class="confirm-body">${bodyHtml}</div>`
+        : `<p class="confirm-message">${esc(message || "")}</p>`;
     overlay.innerHTML = `
-      <div class="confirm-dialog" role="dialog" aria-modal="true">
-        <h3>${esc(title)}</h3>
-        <p>${esc(message)}</p>
+      <div class="confirm-dialog confirm-dialog--order" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+        <h3 id="confirm-title">${esc(title)}</h3>
+        ${body}
         <div class="confirm-actions">
           <button type="button" class="btn btn-secondary" data-confirm="no">${esc(cancelLabel)}</button>
           <button type="button" class="btn btn-primary" data-confirm="yes">${esc(confirmLabel)}</button>
@@ -249,6 +256,37 @@ function confirmAction(opts) {
       if (e.target === overlay) finish(false);
     });
   });
+}
+
+function orderConfirmBodyHtml(items, amount, addressLine, ip) {
+  const rows = (items || [])
+    .map(
+      (i) => `
+      <li class="confirm-order-item">
+        <span class="confirm-order-name">${esc(i.product_name)} × ${esc(i.quantity)}</span>
+        <strong class="confirm-order-price">${esc(money(i.price * i.quantity))}</strong>
+      </li>`,
+    )
+    .join("");
+  return `
+    <div class="confirm-order">
+      <p class="confirm-order-heading">${esc(t("order_summary"))}</p>
+      <ul class="confirm-order-items">${rows}</ul>
+      <div class="confirm-order-total">
+        <span>${esc(t("label_amount") || t("total_price"))}</span>
+        <strong>${esc(money(amount))}</strong>
+      </div>
+      <dl class="confirm-order-meta">
+        <div class="confirm-order-meta-row">
+          <dt>${esc(t("label_delivery_address"))}</dt>
+          <dd>${esc(addressLine)}</dd>
+        </div>
+        <div class="confirm-order-meta-row">
+          <dt>${esc(t("label_ip"))}</dt>
+          <dd>${esc(ip)}</dd>
+        </div>
+      </dl>
+    </div>`;
 }
 
 function shell(content, route) {
@@ -311,20 +349,26 @@ function shell(content, route) {
 
 function bindShell() {
   bindLanguageToggle("lang-select", () => render());
-  document.getElementById("logout-btn")?.addEventListener("click", () => {
+  document.getElementById("logout-btn")?.addEventListener("click", async () => {
+    try {
+      await api("/shop/auth/logout", { method: "POST" });
+    } catch {
+      /* still clear local session */
+    }
     clearSession();
     navigate("login");
   });
 }
 
-function pageHead(title, subtitle) {
+function pageHead(title, subtitle, trailing = "") {
   return `
-    <div class="section-head" style="margin-bottom:1.25rem">
-      <div>
+    <div class="section-head shop-section-head">
+      <div class="shop-section-copy">
         <p class="section-kicker" style="margin:0 0 0.35rem">${esc(t("customer_app_title"))}</p>
         <h1 class="page-title">${esc(title)}</h1>
         ${subtitle ? `<p class="subtitle" style="margin:0.35rem 0 0">${esc(subtitle)}</p>` : ""}
       </div>
+      ${trailing ? `<div class="shop-section-actions">${trailing}</div>` : ""}
     </div>`;
 }
 
@@ -459,6 +503,7 @@ async function renderLogin(mode = "login") {
 async function ensureCatalog() {
   if (catalogCache) return catalogCache;
   catalogCache = await api("/shop/catalog");
+  catalogHasVouchers = (catalogCache.products || []).some((p) => isVoucherProduct(p));
   return catalogCache;
 }
 
@@ -477,15 +522,68 @@ function step(num, title, sub, body) {
 }
 
 /** Shop browse — add products to cart */
+const SHOP_PAGE_SIZE = 12;
 let shopSearchQuery = sessionStorage.getItem("metro_cart_shop_search") || "";
+let shopCategory = sessionStorage.getItem("metro_cart_shop_category") || "all";
+let shopPage = Math.max(1, Number(sessionStorage.getItem("metro_cart_shop_page")) || 1);
 
-function filterProducts(products, query) {
+const SHOP_CATEGORY_ORDER = ["Electronics", "Appliances", "Furniture"];
+
+/** Map DB categories for shop display (Peripherals roll into Electronics). */
+function shopDisplayCategory(category) {
+  const raw = String(category || "").trim();
+  if (!raw) return "Other";
+  if (raw.toLowerCase() === "peripherals") return "Electronics";
+  return raw;
+}
+
+function isVoucherProduct(product) {
+  return shopDisplayCategory(product?.category).toLowerCase() === "vouchers";
+}
+
+function shopCategoryLabel(category) {
+  if (category === "Electronics") return t("shop_cat_electronics") || "Electronics";
+  if (category === "Appliances") return t("shop_cat_appliances") || "Appliances";
+  if (category === "Furniture") return t("shop_cat_furniture") || "Furniture";
+  if (category === "Vouchers") return t("shop_cat_vouchers") || "Gift vouchers";
+  return category;
+}
+
+function uniqueCategories(products) {
+  // Vouchers use a dedicated top-right button — not a category chip.
+  const cats = [
+    ...new Set(
+      (products || [])
+        .map((p) => shopDisplayCategory(p.category))
+        .filter((c) => c && c !== "Other" && c.toLowerCase() !== "vouchers"),
+    ),
+  ];
+  return cats.sort((a, b) => {
+    const ia = SHOP_CATEGORY_ORDER.indexOf(a);
+    const ib = SHOP_CATEGORY_ORDER.indexOf(b);
+    if (ia !== -1 || ib !== -1) return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+    return a.localeCompare(b);
+  });
+}
+
+function filterProducts(products, query, category = "all") {
+  let list = products || [];
+  if (category === "Vouchers") {
+    list = list.filter((p) => isVoucherProduct(p));
+  } else {
+    list = list.filter((p) => !isVoucherProduct(p));
+    if (category && category !== "all") {
+      list = list.filter((p) => shopDisplayCategory(p.category) === category);
+    }
+  }
   const q = String(query || "").trim().toLowerCase();
-  if (!q) return products;
-  return products.filter((p) => {
+  if (!q) return list;
+  return list.filter((p) => {
+    const displayCat = shopDisplayCategory(p.category);
     const hay = [
       p.product_name,
       p.category,
+      displayCat,
       p.product_id,
       String(p.price ?? ""),
     ]
@@ -495,16 +593,87 @@ function filterProducts(products, query) {
   });
 }
 
+function paginateProducts(products, page, pageSize = SHOP_PAGE_SIZE) {
+  const total = products.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize) || 1);
+  const safePage = Math.min(Math.max(1, Number(page) || 1), totalPages);
+  const start = (safePage - 1) * pageSize;
+  return {
+    items: products.slice(start, start + pageSize),
+    page: safePage,
+    totalPages,
+    total,
+    shown: Math.min(pageSize, Math.max(0, total - start)),
+  };
+}
+
+function categoryChipsHtml(categories, active) {
+  const chips = [
+    { id: "all", label: t("all_categories") },
+    ...categories.map((c) => ({ id: c, label: shopCategoryLabel(c) })),
+  ];
+  return chips
+    .map(
+      (c) => `
+        <button
+          type="button"
+          class="category-chip ${active === c.id ? "active" : ""}"
+          data-category="${esc(c.id)}"
+          role="tab"
+          aria-selected="${active === c.id ? "true" : "false"}"
+        >${esc(c.label)}</button>`,
+    )
+    .join("");
+}
+
+function shopFilterRowHtml(categories, active) {
+  return `
+      <section class="filter-panel filter-panel-categories" aria-label="${esc(t("filter_by_category"))}">
+        <p class="filter-panel-label">${esc(t("shop_categories_label") || "Categories")}</p>
+        <div class="category-filter" role="tablist">${categoryChipsHtml(
+          categories,
+          active === "Vouchers" ? "" : active,
+        )}</div>
+      </section>`;
+}
+
+function shopVouchersButtonHtml(active) {
+  const isActive = active === "Vouchers";
+  return `<button
+      type="button"
+      id="shop-vouchers-btn"
+      class="shop-vouchers-btn ${isActive ? "active" : ""}"
+      data-category="Vouchers"
+      aria-pressed="${isActive ? "true" : "false"}"
+      title="${esc(t("shop_cat_vouchers") || "Vouchers")}"
+    >${esc(t("shop_cat_vouchers") || "Vouchers")}</button>`;
+}
+
+function paginationHtml(page, totalPages) {
+  if (totalPages <= 1) return "";
+  return `
+    <nav class="shop-pagination" aria-label="Pagination">
+      <button type="button" class="btn btn-secondary" id="shop-page-prev" ${
+        page <= 1 ? "disabled" : ""
+      }>${esc(t("pagination_prev"))}</button>
+      <span class="shop-page-label">${esc(t("pagination_page", { page, pages: totalPages }))}</span>
+      <button type="button" class="btn btn-secondary" id="shop-page-next" ${
+        page >= totalPages ? "disabled" : ""
+      }>${esc(t("pagination_next"))}</button>
+    </nav>`;
+}
+
 function productCardsHtml(products) {
   if (!products.length) {
     return `<div class="card"><p class="subtitle" style="margin:0">${esc(t("search_no_results"))}</p></div>`;
   }
   return products
-    .map(
-      (p) => `
+    .map((p) => {
+      const displayCat = shopDisplayCategory(p.category);
+      return `
       <article class="product-card" data-product-id="${esc(p.product_id)}">
         <div class="product-card-body">
-          <p class="product-cat">${esc(p.category || "—")}</p>
+          <p class="product-cat">${esc(shopCategoryLabel(displayCat))}</p>
           <h3 class="product-name">${esc(p.product_name)}</h3>
           <p class="product-price">${esc(money(p.price))}</p>
         </div>
@@ -515,8 +684,8 @@ function productCardsHtml(products) {
           </label>
           <button type="button" class="btn btn-primary btn-add-cart">${esc(t("add_to_cart"))}</button>
         </div>
-      </article>`,
-    )
+      </article>`;
+    })
     .join("");
 }
 
@@ -531,58 +700,120 @@ async function renderOrder() {
   try {
     const catalog = await ensureCatalog();
     const products = catalog.products || [];
-    const filtered = filterProducts(products, shopSearchQuery);
+    const categories = uniqueCategories(products);
+    const hasVouchers = products.some((p) => isVoucherProduct(p));
+    // Migrate old chip selections (e.g. Peripherals) to display categories.
+    if (shopCategory && shopCategory !== "all" && shopCategory !== "Vouchers") {
+      shopCategory = shopDisplayCategory(shopCategory);
+    }
+    if (
+      shopCategory !== "all" &&
+      shopCategory !== "Vouchers" &&
+      !categories.includes(shopCategory)
+    ) {
+      shopCategory = "all";
+      sessionStorage.setItem("metro_cart_shop_category", shopCategory);
+    }
+    if (shopCategory === "Vouchers" && !hasVouchers) {
+      shopCategory = "all";
+      sessionStorage.setItem("metro_cart_shop_category", shopCategory);
+    }
+
+    const filtered = filterProducts(products, shopSearchQuery, shopCategory);
+    const pageData = paginateProducts(filtered, shopPage);
+    shopPage = pageData.page;
+    sessionStorage.setItem("metro_cart_shop_page", String(shopPage));
 
     const main = `
-      ${pageHead(t("shop_browse"), t("shop_browse_lede"))}
-      <div class="shop-toolbar">
-        <form class="shop-search" id="shop-search-form" role="search">
-          <label class="sr-only" for="shop-search-input">${esc(t("search_products"))}</label>
-          <input
-            id="shop-search-input"
-            type="search"
-            placeholder="${esc(t("search_products_placeholder"))}"
-            value="${esc(shopSearchQuery)}"
-            autocomplete="off"
-          />
-          <button type="submit" class="btn btn-primary">${esc(t("search"))}</button>
-          ${
-            shopSearchQuery
-              ? `<button type="button" class="btn btn-secondary" id="shop-search-clear">${esc(t("clear_search"))}</button>`
-              : ""
-          }
-        </form>
-        <div class="shop-toolbar-right">
-          <p class="subtitle" style="margin:0">${esc(
-            t("search_results_count", {
-              shown: filtered.length,
-              total: products.length,
-            }),
-          )} · ${esc(t("shop_cart_hint", { count: cartCount() }))}</p>
-          <a class="btn btn-secondary" href="#/cart">${esc(t("view_cart"))}</a>
+      ${pageHead(
+        t("shop_browse"),
+        t("shop_browse_lede"),
+        hasVouchers ? shopVouchersButtonHtml(shopCategory) : "",
+      )}
+      <div class="shop-top">
+        <div class="shop-top-bar">
+          <form class="shop-search" id="shop-search-form" role="search">
+            <label class="sr-only" for="shop-search-input">${esc(t("search_products"))}</label>
+            <input
+              id="shop-search-input"
+              type="search"
+              placeholder="${esc(t("search_products_placeholder"))}"
+              value="${esc(shopSearchQuery)}"
+              autocomplete="off"
+            />
+            <button type="submit" class="btn btn-primary">${esc(t("search"))}</button>
+            ${
+              shopSearchQuery
+                ? `<button type="button" class="btn btn-secondary" id="shop-search-clear">${esc(t("clear_search"))}</button>`
+                : ""
+            }
+          </form>
+        </div>
+        <p class="shop-results-count" id="shop-results-count">${esc(
+          t("search_results_count", {
+            shown: pageData.shown,
+            total: pageData.total,
+          }),
+        )}</p>
+        <div class="shop-filter-row">
+          ${shopFilterRowHtml(categories, shopCategory)}
         </div>
       </div>
       <div id="shop-toast"></div>
-      <div class="product-grid" id="product-grid">${productCardsHtml(filtered)}</div>`;
+      <p class="shop-products-heading">${esc(t("shop_products_heading") || "Products")}</p>
+      <div class="product-grid" id="product-grid">${productCardsHtml(pageData.items)}</div>
+      <div id="shop-pagination">${paginationHtml(pageData.page, pageData.totalPages)}</div>`;
 
     document.getElementById("app").innerHTML = shell(main, "order");
     bindShell();
 
     const searchInput = document.getElementById("shop-search-input");
     const grid = document.getElementById("product-grid");
+    const pagerHost = document.getElementById("shop-pagination");
 
-    function applySearch(nextQuery, { refocus = false } = {}) {
-      shopSearchQuery = String(nextQuery || "");
-      sessionStorage.setItem("metro_cart_shop_search", shopSearchQuery);
-      const next = filterProducts(products, shopSearchQuery);
-      if (grid) grid.innerHTML = productCardsHtml(next);
-      const countEl = document.querySelector(".shop-toolbar-right .subtitle");
-      if (countEl) {
-        countEl.textContent = `${t("search_results_count", {
-          shown: next.length,
-          total: products.length,
-        })} · ${t("shop_cart_hint", { count: cartCount() })}`;
+    function syncCategoryChips() {
+      document.querySelectorAll(".category-chip").forEach((chip) => {
+        const active = chip.dataset.category === shopCategory;
+        chip.classList.toggle("active", active);
+        chip.setAttribute("aria-selected", active ? "true" : "false");
+      });
+      const voucherBtn = document.getElementById("shop-vouchers-btn");
+      if (voucherBtn) {
+        const active = shopCategory === "Vouchers";
+        voucherBtn.classList.toggle("active", active);
+        voucherBtn.setAttribute("aria-pressed", active ? "true" : "false");
       }
+    }
+
+    function onVoucherClick() {
+      shopCategory = shopCategory === "Vouchers" ? "all" : "Vouchers";
+      refreshProductView({ resetPage: true });
+    }
+    document.getElementById("shop-vouchers-btn")?.addEventListener("click", onVoucherClick);
+
+    function refreshProductView({ resetPage = false } = {}) {
+      if (resetPage) shopPage = 1;
+      const nextFiltered = filterProducts(products, shopSearchQuery, shopCategory);
+      const nextPage = paginateProducts(nextFiltered, shopPage);
+      shopPage = nextPage.page;
+      sessionStorage.setItem("metro_cart_shop_search", shopSearchQuery);
+      sessionStorage.setItem("metro_cart_shop_category", shopCategory);
+      sessionStorage.setItem("metro_cart_shop_page", String(shopPage));
+
+      if (grid) grid.innerHTML = productCardsHtml(nextPage.items);
+      if (pagerHost) pagerHost.innerHTML = paginationHtml(nextPage.page, nextPage.totalPages);
+      bindPagination();
+
+      const countEl = document.getElementById("shop-results-count");
+      if (countEl) {
+        countEl.textContent = t("search_results_count", {
+          shown: nextPage.shown,
+          total: nextPage.total,
+        });
+      }
+
+      syncCategoryChips();
+
       const clearBtn = document.getElementById("shop-search-clear");
       const form = document.getElementById("shop-search-form");
       if (shopSearchQuery && !clearBtn && form) {
@@ -600,7 +831,26 @@ async function renderOrder() {
         clearBtn.remove();
       }
       bindProductCards(products);
+    }
+
+    function applySearch(nextQuery, { refocus = false } = {}) {
+      shopSearchQuery = String(nextQuery || "");
+      refreshProductView({ resetPage: true });
       if (refocus) searchInput?.focus();
+    }
+
+    function bindPagination() {
+      document.getElementById("shop-page-prev")?.addEventListener("click", () => {
+        if (shopPage <= 1) return;
+        shopPage -= 1;
+        refreshProductView();
+        grid?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+      document.getElementById("shop-page-next")?.addEventListener("click", () => {
+        shopPage += 1;
+        refreshProductView();
+        grid?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
     }
 
     function bindProductCards(allProducts) {
@@ -624,7 +874,6 @@ async function renderOrder() {
       applySearch(searchInput?.value || "");
     });
 
-    // Live filter as the user types (short debounce)
     let searchTimer = null;
     searchInput?.addEventListener("input", () => {
       clearTimeout(searchTimer);
@@ -636,6 +885,16 @@ async function renderOrder() {
       applySearch("", { refocus: true });
     });
 
+    document.querySelectorAll(".category-chip").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        const next = chip.dataset.category || "all";
+        if (next === shopCategory) return;
+        shopCategory = next;
+        refreshProductView({ resetPage: true });
+      });
+    });
+
+    bindPagination();
     bindProductCards(products);
 
     const toastMsg = sessionStorage.getItem("metro_cart_shop_toast");
@@ -686,14 +945,14 @@ async function renderCart() {
           </td>
           <td>
             <div class="cart-item-name">${esc(item.product_name)}</div>
-            <div class="cart-item-meta">${esc(item.category || "—")} · ${esc(item.product_id)}</div>
+            <div class="cart-item-meta">${esc(shopCategoryLabel(shopDisplayCategory(item.category)) || "—")} · ${esc(item.product_id)}</div>
           </td>
-          <td class="cart-price">${esc(money(item.price))}</td>
-          <td>
+          <td class="cart-num cart-price">${esc(money(item.price))}</td>
+          <td class="cart-qty-col">
             <input type="number" class="cart-qty" min="1" step="1" value="${esc(item.quantity)}" ${item.selected ? "" : "disabled"} />
           </td>
-          <td class="cart-line">${esc(money(item.price * item.quantity))}</td>
-          <td>
+          <td class="cart-num cart-line">${esc(money(item.price * item.quantity))}</td>
+          <td class="cart-actions">
             <button type="button" class="btn btn-secondary btn-sm cart-remove">${esc(t("remove"))}</button>
           </td>
         </tr>`,
@@ -703,16 +962,16 @@ async function renderCart() {
 
     const cartTable = cart.length
       ? `
-      <div class="table-scroll">
+      <div class="cart-table-wrap">
         <table class="cart-table">
           <thead>
             <tr>
-              <th>${esc(t("include_in_order"))}</th>
+              <th class="cart-check">${esc(t("include_in_order"))}</th>
               <th>${esc(t("product"))}</th>
-              <th>${esc(t("unit_price"))}</th>
-              <th>${esc(t("quantity"))}</th>
-              <th>${esc(t("line_total"))}</th>
-              <th></th>
+              <th class="cart-num">${esc(t("unit_price"))}</th>
+              <th class="cart-qty-col">${esc(t("quantity"))}</th>
+              <th class="cart-num">${esc(t("line_total"))}</th>
+              <th class="cart-actions"></th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
@@ -898,19 +1157,14 @@ async function renderCart() {
         return;
       }
 
-      const itemLines = toOrder
-        .map((i) => `• ${i.product_name} × ${i.quantity} — ${money(i.price * i.quantity)}`)
-        .join("\n");
-
       const ok = await confirmAction({
         title: t("confirm_place_order"),
-        message: [
-          t("order_summary"),
-          itemLines,
-          `${t("label_amount")}: ${money(amount)}`,
-          `${t("label_delivery_address")}: ${street}, ${city}, ${state} ${zip}`,
-          `${t("label_ip")}: ${ip}`,
-        ].join("\n"),
+        bodyHtml: orderConfirmBodyHtml(
+          toOrder,
+          amount,
+          `${street}, ${city}, ${state} ${zip}`,
+          ip,
+        ),
         confirmLabel: t("confirm_purchase"),
         cancelLabel: t("cancel"),
       });
@@ -1085,6 +1339,11 @@ async function render() {
     return renderLogin();
   }
   if (route === "login") return navigate("order");
+  try {
+    await ensureCatalog();
+  } catch {
+    /* catalog optional for shell vouchers button */
+  }
   if (route === "success") return renderSuccess();
   if (route === "account") return renderAccount();
   if (route === "cart") return renderCart();

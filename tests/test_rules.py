@@ -31,7 +31,7 @@ def _cursor(*fetch_results):
 # ---------------- R001 ----------------
 
 def test_r001_should_trigger():
-    # R001 forces 180-minute hold for any iPhone 16 (any program track)
+    # R001 forces 180-minute hold for P2 + iPhone 16 only
     cursor = _cursor()
 
     ctx = {
@@ -46,8 +46,8 @@ def test_r001_should_trigger():
     assert "180-minute" in reason
 
 
-def test_r001_triggers_on_p1():
-    """iPhone 16 must HOLD on P1 as well — not only P2."""
+def test_r001_does_not_trigger_on_p1():
+    """iPhone 16 on non-P2 tracks must not fire R001."""
     cursor = _cursor()
 
     ctx = {
@@ -57,9 +57,8 @@ def test_r001_triggers_on_p1():
 
     triggered, reason = check_r001(cursor, ctx)
 
-    assert triggered is True
-    assert "R001" in reason
-    assert "180-minute" in reason
+    assert triggered is False
+    assert reason is None
 
 
 def test_r001_wrong_product():

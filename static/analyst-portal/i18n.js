@@ -500,6 +500,10 @@ export const TRANSLATIONS = {
     "en": "Order ID",
     "th": "รหัสคำสั่งซื้อ"
   },
+  "refresh": {
+    "en": "Refresh",
+    "th": "รีเฟรช"
+  },
   "select_order_review": {
     "en": "Select an Order ID to review in detail",
     "th": "เลือกหมายเลขคำสั่งซื้อเพื่อดูรายละเอียด"
@@ -524,9 +528,17 @@ export const TRANSLATIONS = {
     "en": "Analyst Decision",
     "th": "การตัดสินใจของนักวิเคราะห์"
   },
+  "decision_hint": {
+    "en": "Add comments, then decide",
+    "th": "เพิ่มความคิดเห็น แล้วตัดสินใจ"
+  },
   "review_comments": {
     "en": "Review Comments (required)",
     "th": "ความคิดเห็นการตรวจสอบ (จำเป็น)"
+  },
+  "review_comments_placeholder": {
+    "en": "Enter review comments…",
+    "th": "ใส่ความคิดเห็นการตรวจสอบ…"
   },
   "approve_order": {
     "en": "Approve Order",

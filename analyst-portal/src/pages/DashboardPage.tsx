@@ -66,9 +66,21 @@ export function DashboardPage() {
   useEffect(() => {
     if (!activeOrderId) {
       setDetail(null);
+      setAiSummary(null);
       return;
     }
-    api.orderDetail(activeOrderId).then(setDetail).catch(() => setDetail(null));
+    let cancelled = false;
+    api
+      .orderDetail(activeOrderId)
+      .then((data) => {
+        if (!cancelled) setDetail(data);
+      })
+      .catch(() => {
+        if (!cancelled) setDetail(null);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [activeOrderId]);
 
   const allSelected = useMemo(
@@ -558,10 +570,11 @@ export function DashboardPage() {
                 </div>
               ) : null}
 
-              <div className="rounded-lg border border-border p-4">
-                <p className="mb-2 text-sm font-medium">Analyst Decision</p>
+              <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4 shadow-sm">
+                <p className="mb-1 text-sm font-bold text-slate-900">Analyst Decision</p>
+                <p className="mb-3 text-xs text-slate-600">Add comments, then decide</p>
                 <textarea
-                  className="mb-3 w-full rounded-lg border border-border px-3 py-2 text-sm"
+                  className="mb-3 w-full rounded-lg border border-border bg-white px-3 py-2 text-sm"
                   value={comments}
                   onChange={(e) => setComments(e.target.value)}
                   placeholder="Review comments (required for rejection / fraud)"

@@ -2209,9 +2209,19 @@ tr.row-overdue td { background: rgba(220, 38, 38, 0.06); }
 }
 
 /* Single Order Investigation */
+.card.inv-panel,
 .inv-panel {
   padding: 0;
-  overflow: hidden;
+  overflow: visible;
+}
+.inv-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem 1.35rem 1.25rem;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 .inv-panel-header {
   display: flex;
@@ -2247,20 +2257,32 @@ tr.row-overdue td { background: rgba(220, 38, 38, 0.06); }
   font-weight: 700;
 }
 .inv-select-field {
-  margin: 1rem 1.35rem 0;
+  margin: 0;
 }
-.inv-hero {
+.inv-select-row {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 0.85rem 1.25rem;
-  margin: 1rem 1.35rem;
+  align-items: center;
+  gap: 0.75rem 1rem;
+}
+.inv-select-row select {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+.inv-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 1rem 1.25rem;
+  align-items: stretch;
+  margin: 0;
   padding: 1rem 1.15rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--card);
   box-shadow: var(--shadow);
+}
+.inv-hero-main {
+  min-width: 0;
 }
 .inv-hero-label {
   display: block;
@@ -2277,6 +2299,7 @@ tr.row-overdue td { background: rgba(220, 38, 38, 0.06); }
   color: var(--text-strong);
   letter-spacing: 0.01em;
   font-variant-numeric: tabular-nums;
+  margin-bottom: 0.55rem;
 }
 .inv-hero-meta {
   display: flex;
@@ -2301,9 +2324,10 @@ tr.row-overdue td { background: rgba(220, 38, 38, 0.06); }
 }
 .inv-metrics {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
-  margin: 0 1.35rem 1.15rem;
+  margin: 0;
+  align-content: center;
 }
 .inv-metric-card {
   border: 1px solid var(--border);
@@ -2342,7 +2366,7 @@ tr.row-overdue td { background: rgba(220, 38, 38, 0.06); }
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1rem;
-  margin: 0 1.35rem 1rem;
+  margin: 0;
 }
 .inv-section {
   border: 1px solid var(--border);
@@ -2408,7 +2432,10 @@ tr.row-overdue td { background: rgba(220, 38, 38, 0.06); }
   font-weight: 700;
 }
 .inv-flagged {
-  margin: 0 1.35rem 1rem;
+  margin: 0;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   background: #fff5f5;
   color: #b71c1c;
   border: 1px solid #ffcdd2;
@@ -2576,9 +2603,49 @@ tr.row-overdue td { background: rgba(220, 38, 38, 0.06); }
 tr.row-active td {
   background: rgba(25, 118, 210, 0.08);
 }
-.inv-section-security,
-.inv-section-decision {
-  margin: 0 1.35rem 1.15rem;
+.inv-section-security {
+  margin: 0;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+.inv-decision-bar {
+  margin: 0;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  border: 1px solid #b7d3f5;
+  border-radius: 14px;
+  background: #f4f8ff;
+}
+.inv-decision-inner {
+  padding: 1rem 1.15rem 1.15rem;
+}
+.inv-decision-copy {
+  margin-bottom: 0.35rem;
+}
+.inv-decision-sub {
+  margin: 0 0 0.75rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.inv-comments-field {
+  margin-bottom: 0.85rem;
+}
+.inv-comments-field textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+.inv-decision-status {
+  margin-top: 0.75rem;
+}
+.inv-closed-note {
+  margin: 0;
+}
+.inv-decision-actions .btn {
+  min-width: 140px;
+  padding: 0.7rem 1.15rem;
+  font-weight: 700;
 }
 .inv-security-list {
   display: grid;
@@ -2630,28 +2697,19 @@ tr.row-active td {
   padding-top: 0.85rem;
 }
 .inv-decision-title {
-  margin: 0 0 0.75rem;
-  font-size: 0.82rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+  font-weight: 800;
   color: var(--text-strong);
-}
-.inv-decision {
-  border: 1px solid #bbdefb;
-  border-radius: 12px;
-  padding: 1rem 1.1rem;
-  background: #f8fbff;
 }
 .inv-decision-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.65rem;
-}
-.inv-closed-note {
-  margin: 0 1.35rem 1.25rem;
+  align-items: center;
 }
 @media (max-width: 720px) {
+  .inv-hero,
   .inv-metrics,
   .inv-details-grid { grid-template-columns: 1fr; }
   .inv-dl-row { grid-template-columns: 1fr; gap: 0.15rem; }
