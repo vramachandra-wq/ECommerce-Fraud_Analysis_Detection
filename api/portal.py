@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from api.auth import (
     authenticate_credentials,
+    decode_session_token,
     get_analyst_by_id,
     get_current_session,
     get_session_by_username,
@@ -436,12 +437,35 @@ def sso_complete(
 def sso_logout(
     return_to: Optional[str] = Query(None),
     metro_cart_kc_id: Optional[str] = Cookie(None, alias=KC_ID_COOKIE),
+    portal_session: Optional[str] = Cookie(None, alias=PORTAL_SESSION_COOKIE),
+    authorization: Optional[str] = Header(None),
 ):
     """
     End the Keycloak SSO session (if any), then return to the portal login page.
-    Local app session must be cleared by the browser before calling this.
+    Also bumps auth_version so existing bearer/cookie tokens are rejected.
     """
     destination = normalize_return_to(return_to or SSO_DEFAULT_RETURN_TO)
+
+    token = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.removeprefix("Bearer ").strip()
+    elif portal_session:
+        token = portal_session.strip()
+    if token:
+        payload = decode_session_token(token)
+        subject = (payload or {}).get("sub")
+        if subject and not str(subject).startswith("customer:"):
+            try:
+                import psycopg2
+                from database.auth_version import bump_analyst_auth_version, ensure_auth_version_columns
+
+                with psycopg2.connect(**DB_CONFIG) as conn:
+                    with conn.cursor() as cur:
+                        ensure_auth_version_columns(cur)
+                        bump_analyst_auth_version(cur, str(subject))
+                    conn.commit()
+            except Exception:
+                pass
 
     if not sso_is_configured() or not metro_cart_kc_id:
         response = RedirectResponse(url=destination, status_code=302)
@@ -557,23 +581,53 @@ def recent_orders_list(
 @router.get("/portal/orders/{order_id}")
 def order_detail(
     order_id: str,
+    refresh_summary: bool = Query(False),
     session: Dict[str, Any] = Depends(require_page(PAGE_FRAUD_DASHBOARD)),
 ):
+    from ai.order_review_summary import (
+        attach_review_actions_to_order,
+        cached_order_ai_summary,
+        get_or_create_order_ai_summary,
+    )
+
     analyst = session.get("analyst") or {}
-    with get_cursor() as (_, cur):
+    with get_cursor(commit=True) as (_, cur):
         order = get_order_detail(cur, order_id)
         if not order:
             raise HTTPException(status_code=404, detail="Order not found")
+        attach_review_actions_to_order(cur, order)
         # Lookups must use raw PII from DB before any masking for the client.
         ip_bl = get_active_blacklist_entry(cur, order["ip_address"])
         phone_bl = get_active_phone_blacklist_entry(cur, order.get("phone_number") or "")
         email_bl = get_active_email_blacklist_entry(cur, order.get("email") or "")
         timing = _order_timing(cur, order)
+        ai_summary = None
+        # AI briefs only for orders that triggered at least one fraud rule.
+        # Default path is cache-only so order selection stays snappy; generation
+        # (Groq/heuristic) runs only when refresh_summary=true.
+        triggered = order.get("triggered_rules") or []
+        if triggered:
+            try:
+                if refresh_summary:
+                    ai_summary = get_or_create_order_ai_summary(
+                        cur, order_id, force_refresh=True
+                    )
+                else:
+                    ai_summary = cached_order_ai_summary(cur, order_id)
+            except Exception:
+                ai_summary = None
+        else:
+            ai_summary = None
 
     safe_order = sanitize_pii_record(order, analyst)
     return {
         "order": _jsonable_dict(safe_order or {}),
         "timing": _jsonable_dict(timing),
+        "review_actions": _jsonable_dict(
+            (order or {}).get("review_actions")
+            or {"approve": True, "reject": True, "mark_fraud": True, "full_review": True}
+        ),
+        "ai_summary": _jsonable_dict(ai_summary or {}) if ai_summary else None,
         "blacklists": {
             "ip": _jsonable_dict(sanitize_pii_record(ip_bl, analyst) or {}) if ip_bl else None,
             "phone": (

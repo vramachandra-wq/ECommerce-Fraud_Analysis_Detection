@@ -3,7 +3,7 @@ import {
   curSym,
   languageToggleHtml,
   bindLanguageToggle,
-} from "./i18n.js?v=61";
+} from "./i18n.js?v=75";
 
 const PAGE_LABEL_KEYS = {
   ADMIN_PANEL: "nav_admin_panel",
@@ -295,15 +295,18 @@ function badge(status) {
 }
 
 function money(n) {
-  return `${curSym()} ${Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
+  return `${curSym()} ${Number(n).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`;
 }
 
 function formatMinutes(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
-  const mins = Math.abs(Number(value));
-  if (mins < 60) return t("minutes_short", { n: Math.round(mins) });
-  const hours = Math.floor(mins / 60);
-  const rem = Math.round(mins % 60);
+  if (value === null || value === undefined || value === "") return "—";
+  const n = Number(value);
+  if (!Number.isFinite(n) || Number.isNaN(n)) return "—";
+  // Round total minutes first so we never show "2h 60m".
+  const total = Math.max(0, Math.round(Math.abs(n)));
+  if (total < 60) return t("minutes_short", { n: total });
+  const hours = Math.floor(total / 60);
+  const rem = total % 60;
   return rem
     ? t("hours_mins_short", { h: hours, m: rem })
     : t("hours_short", { h: hours });
@@ -320,7 +323,7 @@ function queueHeadersHtml() {
   return `<tr>
     <th style="width:42px"><input type="checkbox" class="q-select-all" title="${esc(t("select_all_page"))}" /></th>
     <th>${esc(t("col_order_short"))}</th><th>${esc(t("col_customer"))}</th><th>${esc(t("col_product"))}</th><th>${esc(t("col_amount"))}</th><th>${esc(t("col_status"))}</th>
-    <th>${esc(t("col_delay_short"))}</th><th>${esc(t("col_remaining"))}</th><th>${esc(t("col_rule_short"))}</th><th>${esc(t("col_placed_short"))}</th>
+    <th>${esc(t("col_remaining"))}</th><th>${esc(t("col_rule_short"))}</th><th>${esc(t("col_placed_short"))}</th>
   </tr>`;
 }
 
@@ -381,7 +384,6 @@ function queueRowHtml(o, { selected, pickable }) {
       ${productCell}
       <td>${money(o.amount)}</td>
       <td>${badge(o.order_status)}</td>
-      <td>${esc(o.delay_minutes ?? "—")}m</td>
       <td>${remainingCell(o)}</td>
       <td title="${esc(o.flagged_reason || "")}">${esc(o.rule_name || "—")}</td>
       <td>${esc(placed)}</td>
@@ -409,7 +411,7 @@ function backlogCardHtml(orders, metrics) {
       </div>
       <table>
         <thead>
-          <tr><th>${esc(t("col_order_short"))}</th><th>${esc(t("col_status"))}</th><th>${esc(t("col_rule_short"))}</th><th>${esc(t("col_overdue"))}</th><th>${esc(t("col_delay_short"))}</th></tr>
+          <tr><th>${esc(t("col_order_short"))}</th><th>${esc(t("col_status"))}</th><th>${esc(t("col_rule_short"))}</th><th>${esc(t("col_overdue"))}</th></tr>
         </thead>
         <tbody>
           ${preview.map((o) => `
@@ -418,7 +420,6 @@ function backlogCardHtml(orders, metrics) {
               <td>${badge(o.order_status)}</td>
               <td>${esc(o.rule_name || "—")}</td>
               <td class="timing timing-overdue">${formatMinutes(o.minutes_overdue)}</td>
-              <td>${esc(o.delay_minutes ?? "—")}m</td>
             </tr>`).join("")}
         </tbody>
       </table>
@@ -428,14 +429,12 @@ function backlogCardHtml(orders, metrics) {
 
 function investigationTimingHtml(timing, order) {
   const tm = timing || {};
-  const delay = tm.delay_minutes ?? order?.delay_minutes;
   const remaining = tm.is_overdue
     ? `<span class="timing timing-overdue">${t("overdue_with_time", { mins: formatMinutes(tm.minutes_overdue) })}</span>`
     : `<span class="timing timing-ok">${formatMinutes(tm.minutes_remaining_display ?? tm.minutes_remaining)}</span>`;
   const ruleName = tm.rule_name || order?.flagged_reason || "—";
   return `
-    <div class="overview-grid" style="margin:1rem 0;grid-template-columns:repeat(3,minmax(0,1fr))">
-      <div class="stat-card"><div><div class="stat-value" style="font-size:1.25rem">${esc(delay ?? "—")}m</div><div class="stat-label">${esc(t("review_delay"))}</div></div></div>
+    <div class="overview-grid" style="margin:1rem 0;grid-template-columns:repeat(2,minmax(0,1fr))">
       <div class="stat-card"><div><div class="stat-value" style="font-size:1.25rem">${remaining}</div><div class="stat-label">${esc(t("time_left"))}</div></div></div>
       <div class="stat-card"><div><div class="stat-value triggered-rule-value">${esc(ruleName)}</div><div class="stat-label">${esc(t("triggered_rule"))}</div></div></div>
     </div>`;
@@ -443,24 +442,19 @@ function investigationTimingHtml(timing, order) {
 
 function investigationStreamlitMetricsHtml(timing, order) {
   const tm = timing || {};
-  const delay = tm.delay_minutes ?? order?.delay_minutes ?? "—";
   const remainingRaw = tm.minutes_remaining_display ?? tm.minutes_remaining;
-  const remaining = tm.is_overdue ? "0 min" : formatMinutes(remainingRaw);
+  const remaining = tm.is_overdue ? "0m" : formatMinutes(remainingRaw);
   const overdue = tm.is_overdue ? formatMinutes(tm.minutes_overdue) : "—";
-  const overdueClass = tm.is_overdue ? "inv-metric-card inv-metric-overdue" : "inv-metric-card";
+  const overdueClass = tm.is_overdue ? "inv-metric inv-metric-overdue" : "inv-metric";
   return `
-    <div class="inv-metrics" role="group" aria-label="${esc(t("review_timing") || "Review timing")}">
-      <div class="inv-metric-card">
-        <div class="inv-metric-kicker">${esc(t("delay_minutes"))}</div>
-        <div class="inv-metric-value">${esc(delay)}<span class="inv-metric-unit">m</span></div>
+    <div class="inv-metrics inv-metrics-2" role="group" aria-label="${esc(t("review_timing") || "Review timing")}">
+      <div class="${overdueClass}">
+        <span class="inv-metric-kicker">${esc(t("remaining_review"))}</span>
+        <span class="inv-metric-value">${esc(remaining)}</span>
       </div>
       <div class="${overdueClass}">
-        <div class="inv-metric-kicker">${esc(t("remaining_review"))}</div>
-        <div class="inv-metric-value">${esc(remaining)}</div>
-      </div>
-      <div class="${overdueClass}">
-        <div class="inv-metric-kicker">${esc(t("time_overdue"))}</div>
-        <div class="inv-metric-value ${tm.is_overdue ? "timing-overdue" : ""}">${esc(overdue)}</div>
+        <span class="inv-metric-kicker">${esc(t("time_overdue"))}</span>
+        <span class="inv-metric-value ${tm.is_overdue ? "timing-overdue" : ""}">${esc(overdue)}</span>
       </div>
     </div>`;
 }
@@ -586,6 +580,147 @@ function orderItemsHtml(order) {
     ${rulesHtml}`;
 }
 
+function aiSummarySectionHtml(aiSummary, { prefix = "inv", pending = false } = {}) {
+  if (pending) {
+    return `<section class="inv-ai inv-ai-pending" id="${prefix}-ai-slot" role="status" aria-busy="true">
+        <div class="inv-ai-head">
+          <span class="inv-ai-badge">${esc(t("ai_order_summary") || "AI order summary")}</span>
+          <span class="inv-ai-meta">${esc(t("ai_summary_loading") || "Generating…")}</span>
+        </div>
+        <p class="inv-ai-text inv-muted">${esc(t("ai_summary_loading_hint") || "Preparing an AI brief for this order. You can continue reviewing while it loads.")}</p>
+        <p class="inv-ai-disclaimer hidden" hidden></p>
+      </section>`;
+  }
+  if (!aiSummary?.summary) return "";
+  const rec = aiSummary.recommendation || null;
+  const recHtml = rec
+    ? `<div class="inv-ai-rec">
+        <div class="inv-ai-rec-label">${esc(t("ai_recommendation") || "Recommended action")}</div>
+        <div class="inv-ai-rec-row">
+          <span class="inv-ai-rec-action">${esc(rec.action || "—")}</span>
+          <span class="inv-ai-rec-text">${esc(rec.rationale || "")}</span>
+        </div>
+      </div>`
+    : "";
+  return `<section class="inv-ai" id="${prefix}-ai-slot" data-ai-ready="1" role="status">
+        <div class="inv-ai-head">
+          <span class="inv-ai-badge">${esc(t("ai_order_summary") || "AI order summary")}</span>
+          <span class="inv-ai-meta">
+            ${esc(
+              (aiSummary.source === "groq" || (aiSummary.source === "cache" && aiSummary.model_name))
+                ? (t("ai_summary_source_groq") || "Generated with AI")
+                : (t("ai_summary_source_heuristic") || "Heuristic brief"),
+            )}
+            ${aiSummary.cached ? ` · ${esc(t("ai_summary_cached") || "Cached")}` : ""}
+          </span>
+        </div>
+        <p class="inv-ai-text">${esc(aiSummary.summary)}</p>
+        ${recHtml}
+        <p class="inv-ai-disclaimer">${esc(
+          t("ai_recommendation_advisory") ||
+            t("ai_summary_disclaimer") ||
+            "Advisory only — AI suggestion does not replace analyst judgment. You make the final decision.",
+        )}</p>
+      </section>`;
+}
+
+function applyAiSummaryToSlot(slot, aiSummary) {
+  if (!slot || !aiSummary?.summary) return;
+  const meta = slot.querySelector(".inv-ai-meta");
+  const text = slot.querySelector(".inv-ai-text");
+  let disclaimer = slot.querySelector(".inv-ai-disclaimer");
+  const sourceLabel =
+    aiSummary.source === "groq" || (aiSummary.source === "cache" && aiSummary.model_name)
+      ? (t("ai_summary_source_groq") || "Generated with AI")
+      : (t("ai_summary_source_heuristic") || "Heuristic brief");
+  if (meta) {
+    meta.textContent = `${sourceLabel}${aiSummary.cached ? ` · ${t("ai_summary_cached") || "Cached"}` : ""}`;
+  }
+  if (text) {
+    text.textContent = aiSummary.summary;
+    text.classList.remove("inv-muted");
+  }
+  let recEl = slot.querySelector(".inv-ai-rec");
+  const rec = aiSummary.recommendation || null;
+  if (rec) {
+    if (!recEl) {
+      recEl = document.createElement("div");
+      recEl.className = "inv-ai-rec";
+      const insertBefore = disclaimer || null;
+      if (insertBefore) slot.insertBefore(recEl, insertBefore);
+      else slot.appendChild(recEl);
+    }
+    recEl.innerHTML = `
+      <div class="inv-ai-rec-label">${esc(t("ai_recommendation") || "Recommended action")}</div>
+      <div class="inv-ai-rec-row">
+        <span class="inv-ai-rec-action">${esc(rec.action || "—")}</span>
+        <span class="inv-ai-rec-text">${esc(rec.rationale || "")}</span>
+      </div>`;
+  } else if (recEl) {
+    recEl.remove();
+  }
+  if (!disclaimer) {
+    disclaimer = document.createElement("p");
+    disclaimer.className = "inv-ai-disclaimer";
+    slot.appendChild(disclaimer);
+  }
+  disclaimer.hidden = false;
+  disclaimer.classList.remove("hidden");
+  disclaimer.textContent =
+    t("ai_recommendation_advisory") ||
+    t("ai_summary_disclaimer") ||
+    "Advisory only — AI suggestion does not replace analyst judgment. You make the final decision.";
+  slot.classList.remove("inv-ai-pending");
+  slot.removeAttribute("aria-busy");
+  slot.dataset.aiReady = "1";
+}
+
+async function hydrateAiSummaryIfNeeded({ prefix, orderId, needsSummary, requestId, onReady }) {
+  if (!needsSummary || !orderId) return;
+
+  const run = async () => {
+    if (requestId != null && requestId !== window.__invAiRequestId) return;
+    const slot = document.getElementById(`${prefix}-ai-slot`);
+    if (slot?.dataset?.aiReady === "1") return;
+    try {
+      const res = await api(
+        `/portal/orders/${encodeURIComponent(orderId)}?refresh_summary=true`,
+      );
+      if (requestId != null && requestId !== window.__invAiRequestId) return;
+      const current = document.getElementById(`${prefix}-ai-slot`);
+      if (!current) return;
+      if (res?.ai_summary?.summary) {
+        // In-place update avoids tearing out the decision bar / forcing a full reflow.
+        applyAiSummaryToSlot(current, res.ai_summary);
+        try {
+          onReady?.(res.ai_summary);
+        } catch {
+          /* ignore state sync errors */
+        }
+      } else {
+        current.remove();
+      }
+    } catch {
+      if (requestId != null && requestId !== window.__invAiRequestId) return;
+      const current = document.getElementById(`${prefix}-ai-slot`);
+      if (current?.classList.contains("inv-ai-pending")) {
+        const meta = current.querySelector(".inv-ai-meta");
+        if (meta) meta.textContent = t("ai_summary_source_heuristic") || "Unavailable";
+        const text = current.querySelector(".inv-ai-text");
+        if (text) text.textContent = t("ai_summary_loading_hint") || "AI brief unavailable.";
+        current.removeAttribute("aria-busy");
+      }
+    }
+  };
+
+  // Let the investigation UI (esp. Approve / Reject / Fraud) paint and become interactive first.
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(() => { void run(); }, { timeout: 1200 });
+  } else {
+    setTimeout(() => { void run(); }, 120);
+  }
+}
+
 function orderInvestigationHtml({
   order,
   blacklists = {},
@@ -594,13 +729,24 @@ function orderInvestigationHtml({
   prefix = "inv",
   orderOptions = null,
   selectedId = "",
+  reviewActions = null,
+  aiSummary = null,
 }) {
   const bl = blacklists || {};
   const inReview = ["ON_HOLD", "PENDING_REVIEW"].includes(String(order.order_status || ""));
+  const actions = reviewActions || order.review_actions || {
+    approve: true,
+    reject: true,
+    mark_fraud: true,
+    full_review: true,
+  };
+  const canReject = actions.reject !== false;
+  const canFraud = actions.mark_fraud !== false;
+
   const selectHtml = orderOptions?.length
-    ? `<div class="field inv-select-field">
-        <label>${esc(t("select_order_review"))}</label>
-        <select id="${prefix}-order-select">
+    ? `<div class="inv-toolbar">
+        <label class="inv-toolbar-label" for="${prefix}-order-select">${esc(t("select_order_review"))}</label>
+        <select id="${prefix}-order-select" class="inv-order-select">
           ${orderOptions
             .map(
               (o) =>
@@ -608,6 +754,7 @@ function orderInvestigationHtml({
             )
             .join("")}
         </select>
+        ${inReview ? `<span class="inv-pill inv-pill-live">${esc(t("awaiting_decision") || "Awaiting decision")}</span>` : ""}
       </div>`
     : "";
 
@@ -615,28 +762,60 @@ function orderInvestigationHtml({
   const phoneVal = `${esc(displayPii(order.phone_number, "phone") || "—")}${bl.phone ? ` <span class="inv-bl-tag">${esc(t("blacklisted_suffix"))}</span>` : ""}`;
   const ipVal = `${esc(displayPii(order.ip_address, "ip") || "—")}${bl.ip ? ` <span class="inv-bl-tag">${esc(t("blacklisted_suffix"))}</span>` : ""}`;
 
+  const hasRuleHits = !!(
+    (Array.isArray(order.triggered_rules) && order.triggered_rules.length) ||
+    order.flagged_reason
+  );
+  const aiHtml = aiSummary?.summary
+    ? aiSummarySectionHtml(aiSummary, { prefix })
+    : hasRuleHits
+      ? aiSummarySectionHtml(null, { prefix, pending: true })
+      : "";
+
+  const placedAt = formatUtc(order.order_timestamp || order.tagged_timestamp) || "—";
+  const decisionHtml = inReview
+    ? `<section class="inv-decision-bar" aria-label="${esc(t("analyst_decision"))}">
+        <div class="inv-decision-inner">
+          <div class="inv-decision-copy">
+            <h3 class="inv-decision-title">${esc(t("analyst_decision"))}</h3>
+            <p class="inv-decision-sub">${esc(t("review_comments") || "Add comments, then decide")}</p>
+          </div>
+          <div class="field inv-comments-field">
+            <label for="${prefix}-comments">${esc(t("review_comments"))}</label>
+            <textarea id="${prefix}-comments" rows="2" placeholder="${esc(t("review_comments"))}">${esc(comments)}</textarea>
+          </div>
+          <div class="inv-decision-actions">
+            <button type="button" class="btn btn-primary inv-btn-approve" id="${prefix}-approve">${esc(t("approve_order"))}</button>
+            <button type="button" class="btn btn-secondary inv-btn-reject" id="${prefix}-reject" ${canReject ? "" : "disabled"}>${esc(t("reject_order"))}</button>
+            <button type="button" class="btn btn-fraud inv-btn-fraud" id="${prefix}-fraud" ${canFraud ? "" : "disabled"}>${esc(t("reject_order_fraud"))}</button>
+          </div>
+          <div id="${prefix}-status" class="inv-decision-status"></div>
+        </div>
+      </section>`
+    : `<div class="alert alert-info inv-closed-note">${esc(t("order_not_in_review") || "This order is not in the review queue (already approved/rejected). Line items are shown above.")}</div>`;
+
   return `
     <div class="card inv-panel">
-      <div class="inv-panel-header">
+      <header class="inv-panel-header">
         <div>
           <p class="inv-kicker">${esc(t("investigation_kicker") || "Case review")}</p>
           <h2 class="inv-title">${esc(t("single_order_investigation"))}</h2>
         </div>
-        ${inReview ? `<span class="inv-status-hint">${esc(t("awaiting_decision") || "Awaiting analyst decision")}</span>` : ""}
-      </div>
+      </header>
       ${selectHtml}
       <div class="inv-hero">
         <div class="inv-hero-main">
           <span class="inv-hero-label">${esc(t("order_id") || "Order ID")}</span>
           <div class="inv-hero-id">${esc(order.order_id)}</div>
+          <div class="inv-hero-meta">
+            ${badge(order.order_status)}
+            ${order.program_id ? `<span class="inv-chip">${esc(order.program_id)}</span>` : ""}
+            <span class="inv-chip inv-chip-muted">${esc(placedAt)}</span>
+          </div>
         </div>
-        <div class="inv-hero-meta">
-          ${badge(order.order_status)}
-          ${order.program_id ? `<span class="inv-chip">${esc(order.program_id)}</span>` : ""}
-          <span class="inv-chip inv-chip-muted">${esc(formatUtc(order.order_timestamp))}</span>
-        </div>
+        ${investigationStreamlitMetricsHtml(timing, order)}
       </div>
-      ${investigationStreamlitMetricsHtml(timing, order)}
+      ${aiHtml}
       <div class="inv-details-grid">
         <section class="inv-section">
           <h4 class="inv-section-title">${esc(t("customer_details"))}</h4>
@@ -654,7 +833,7 @@ function orderInvestigationHtml({
             ${invDlRow(t("label_amount") || "Amount", `<strong class="inv-amount">${money(order.amount)}</strong>`)}
             ${invDlRow(t("ip_address") || "IP Address", ipVal, { warn: !!bl.ip })}
             ${invDlRow(t("label_device") || "Device", esc(order.device_id || "—"))}
-            ${invDlRow(t("label_placed_at") || "Placed At", esc(formatUtc(order.order_timestamp)))}
+            ${invDlRow(t("label_placed_at") || "Placed At", esc(placedAt))}
           </dl>
         </section>
       </div>
@@ -674,25 +853,7 @@ function orderInvestigationHtml({
           ${blacklistSecurityHtml("email", order.email, bl.email, prefix)}
         </div>
       </section>
-      ${
-        inReview
-          ? `<section class="inv-section inv-section-decision">
-        <h3 class="inv-decision-title">${esc(t("analyst_decision"))}</h3>
-        <div class="inv-decision">
-          <div class="field">
-            <label>${esc(t("review_comments"))}</label>
-            <textarea id="${prefix}-comments" rows="4" placeholder="${esc(t("review_comments"))}">${esc(comments)}</textarea>
-          </div>
-          <div class="row-actions inv-decision-actions">
-            <button type="button" class="btn btn-primary" id="${prefix}-approve">${esc(t("approve_order"))}</button>
-            <button type="button" class="btn btn-secondary" id="${prefix}-reject">${esc(t("reject_order"))}</button>
-            <button type="button" class="btn btn-fraud" id="${prefix}-fraud">${esc(t("reject_order_fraud"))}</button>
-          </div>
-          <div id="${prefix}-status"></div>
-        </div>
-      </section>`
-          : `<div class="alert alert-info inv-closed-note">${esc(t("order_not_in_review") || "This order is not in the review queue (already approved/rejected). Line items are shown above.")}</div>`
-      }
+      ${decisionHtml}
     </div>`;
 }
 
@@ -838,8 +999,14 @@ function currentRoute() {
 }
 
 function navigate(route) {
-  location.hash = `#/${route}`;
-  render();
+  const next = `#/${route}`;
+  // Rely on hashchange for render — avoids double full-route renders.
+  // If hash is unchanged (e.g. already on route), render once explicitly.
+  if (location.hash === next) {
+    render();
+    return;
+  }
+  location.hash = next;
 }
 
 function hasPage(page) {
@@ -1183,20 +1350,33 @@ async function renderDashboard() {
   `, "dashboard");
   bindShell();
 
+  const mainEl = () => document.querySelector("main.content");
+
   try {
-    const sync = await api("/portal/sync-holds", { method: "POST" });
+    // Sync holds in background — don't block first paint.
+    const syncPromise = api("/portal/sync-holds", { method: "POST" }).catch(() => ({ auto_approved: 0 }));
     const data = await api("/portal/queue");
     let orders = data.orders || [];
     const m = data.metrics || { total: 0, pending_review: 0, on_hold: 0 };
     let selectedIds = new Set();
     let activeId = orders[0]?.order_id || "";
-    let detail = activeId ? await api(`/portal/orders/${encodeURIComponent(activeId)}`) : null;
     let queuePage = 1;
     let dashPeriod = "month";
     let chartFilterKey = "";
     let chartFilterLabel = "";
     let dashReviewComments = "";
-    let stats = await api(`/portal/dashboard/statistics?period=${encodeURIComponent(dashPeriod)}`);
+    let sync = { auto_approved: 0 };
+    let detail = null;
+    let stats = { buckets: [], totals: {}, granularity: "day" };
+
+    const [detailRes, statsRes, syncRes] = await Promise.all([
+      activeId ? api(`/portal/orders/${encodeURIComponent(activeId)}`) : Promise.resolve(null),
+      api(`/portal/dashboard/statistics?period=${encodeURIComponent(dashPeriod)}`),
+      syncPromise,
+    ]);
+    detail = detailRes;
+    stats = statsRes || stats;
+    sync = syncRes || sync;
 
     function visibleOrders() {
       if (!chartFilterKey) return orders;
@@ -1207,14 +1387,188 @@ async function renderDashboard() {
       });
     }
 
-    function paint() {
+    function investigationHtml() {
       const order = detail?.order;
+      if (!(orders.length && order)) return `<div id="dash-investigation"></div>`;
       const bl = detail?.blacklists || {};
       const timing = detail?.timing || orders.find((o) => o.order_id === activeId) || {};
+      return `<div id="dash-investigation">${orderInvestigationHtml({
+        order,
+        blacklists: bl,
+        timing,
+        comments: dashReviewComments,
+        prefix: "dq",
+        orderOptions: orders,
+        selectedId: activeId,
+        reviewActions: detail?.review_actions || order.review_actions,
+        aiSummary: detail?.ai_summary,
+      })}</div>`;
+    }
+
+    function bindInvestigation() {
+      const order = detail?.order;
+      if (!(orders.length && order)) return;
+      bindOrderInvestigation({
+        prefix: "dq",
+        order,
+        setComments: (v) => { dashReviewComments = v; },
+        onSelectOrder: async (id) => {
+          activeId = id;
+          dashReviewComments = "";
+          await loadInvestigation();
+        },
+        onRefresh: reload,
+        statusFn: (msg, kind) => {
+          if (kind === "error") showDashError(msg);
+          else {
+            const el = document.getElementById("dq-status");
+            if (el) el.innerHTML = `<div class="alert alert-success">${esc(msg)}</div>`;
+          }
+        },
+      });
+    }
+
+    async function loadInvestigation() {
+      const host = document.getElementById("dash-investigation");
+      if (!host) {
+        paint();
+        return;
+      }
+      if (!activeId) {
+        host.innerHTML = "";
+        return;
+      }
+      const requestId = (window.__invDetailRequestId = (window.__invDetailRequestId || 0) + 1);
+      const selectedAtStart = activeId;
+      host.innerHTML = `<p class="subtitle">${esc(t("loading_order", { id: activeId }) || `Loading ${activeId}…`)}</p>`;
+      let nextDetail;
+      try {
+        nextDetail = await api(`/portal/orders/${encodeURIComponent(selectedAtStart)}`);
+      } catch (ex) {
+        if (requestId !== window.__invDetailRequestId || activeId !== selectedAtStart) return;
+        host.innerHTML = `<div class="alert alert-error">${esc(ex.message)}</div>`;
+        return;
+      }
+      if (requestId !== window.__invDetailRequestId || activeId !== selectedAtStart) return;
+      detail = nextDetail;
+      const wrap = document.createElement("div");
+      wrap.innerHTML = investigationHtml();
+      const nextHost = document.getElementById("dash-investigation");
+      if (!nextHost || requestId !== window.__invDetailRequestId) return;
+      nextHost.replaceWith(wrap.firstElementChild);
+      bindInvestigation();
+      const order = detail?.order;
+      window.__invAiRequestId = (window.__invAiRequestId || 0) + 1;
+      hydrateAiSummaryIfNeeded({
+        prefix: "dq",
+        orderId: selectedAtStart,
+        needsSummary: !detail?.ai_summary?.summary && !!(
+          (Array.isArray(order?.triggered_rules) && order.triggered_rules.length) ||
+          order?.flagged_reason
+        ),
+        requestId: window.__invAiRequestId,
+        onReady: (summary) => {
+          if (activeId !== selectedAtStart || !detail) return;
+          detail.ai_summary = summary;
+        },
+      });
+    }
+
+    function currentPageIds() {
       const filteredOrders = visibleOrders();
       const pageInfo = queuePageSlice(filteredOrders, queuePage);
+      return {
+        filteredOrders,
+        pageInfo,
+        pageRows: pageInfo.rows,
+        pageIds: pageInfo.rows.map((o) => o.order_id),
+      };
+    }
+
+    function syncChecks() {
+      const { pageIds } = currentPageIds();
+      const allOnPage = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
+      const someOnPage = pageIds.some((id) => selectedIds.has(id));
+      const selectAll = document.getElementById("dq-select-all");
+      if (selectAll) {
+        selectAll.checked = allOnPage;
+        selectAll.indeterminate = someOnPage && !allOnPage;
+      }
+      document.querySelectorAll("#dq-tbody .q-check").forEach((cb) => {
+        cb.checked = selectedIds.has(cb.dataset.id);
+      });
+      const batch = document.getElementById("batch-card");
+      const title = document.getElementById("dq-batch-title");
+      const hint = document.getElementById("dq-batch-hint");
+      if (batch) batch.classList.toggle("hidden", selectedIds.size === 0);
+      if (title) title.textContent = t("batch_actions", { n: selectedIds.size });
+      if (hint) {
+        const onPage = pageIds.filter((id) => selectedIds.has(id)).length;
+        hint.textContent = onPage
+          ? `${onPage} selected on this page · ${selectedIds.size} total selected`
+          : "Selections are kept across pages";
+      }
+    }
+
+    function bindQueuePageControls() {
+      const selectAll = document.getElementById("dq-select-all");
+      if (selectAll) {
+        selectAll.onchange = (e) => {
+          const { pageIds } = currentPageIds();
+          if (e.target.checked) pageIds.forEach((id) => selectedIds.add(id));
+          else pageIds.forEach((id) => selectedIds.delete(id));
+          syncChecks();
+        };
+      }
+      document.querySelectorAll("#dq-tbody .q-check").forEach((cb) => {
+        cb.onchange = () => {
+          const id = cb.dataset.id;
+          if (cb.checked) selectedIds.add(id); else selectedIds.delete(id);
+          syncChecks();
+        };
+      });
+      document.querySelectorAll("#dq-pager .pager-btn").forEach((btn) => {
+        btn.onclick = () => {
+          const { pageInfo } = currentPageIds();
+          const next = Number(btn.dataset.page);
+          if (!next || next < 1 || next > pageInfo.totalPages || next === queuePage) return;
+          queuePage = next;
+          paintQueuePage();
+        };
+      });
+    }
+
+    function paintQueuePage() {
+      const tbody = document.getElementById("dq-tbody");
+      if (!tbody) {
+        paint();
+        return;
+      }
+      const { filteredOrders, pageInfo, pageRows } = currentPageIds();
       queuePage = pageInfo.page;
-      const pageRows = pageInfo.rows;
+      tbody.innerHTML = pageRows.map((o) => queueRowHtml(o, { selected: selectedIds, pickable: false })).join("");
+      const pager = document.getElementById("dq-pager");
+      const nextPager = pagerHtml({ ...pageInfo, total: filteredOrders.length, prefix: "dq" });
+      if (pager) {
+        if (nextPager) pager.outerHTML = nextPager;
+        else pager.remove();
+      } else if (nextPager) {
+        tbody.closest("table")?.insertAdjacentHTML("afterend", nextPager);
+      }
+      const subtitle = document.querySelector("#dash-queue-card .subtitle");
+      if (subtitle) {
+        subtitle.textContent = `${filteredOrders.length}${chartFilterKey ? " filtered" : " total"} · ${QUEUE_PAGE_SIZE} rows per page · R001 delay 180m · other rules 30m review window`;
+      }
+      bindQueuePageControls();
+      syncChecks();
+    }
+
+    function paint() {
+      const contentEl = mainEl();
+      if (!contentEl) return;
+      const scrollTop = contentEl.scrollTop;
+      const { filteredOrders, pageInfo, pageRows } = currentPageIds();
+      queuePage = pageInfo.page;
       const pageIds = pageRows.map((o) => o.order_id);
       const pageSelectedCount = pageIds.filter((id) => selectedIds.has(id)).length;
       const filterBanner = chartFilterKey
@@ -1224,7 +1578,7 @@ async function renderDashboard() {
           </div>`
         : "";
 
-      const content = `
+      contentEl.innerHTML = `
         <div class="section-head">
           <h1 class="page-title">${esc(t("overview"))}</h1>
           <select class="select-pill" id="dash-period">${periodOptionHtml(dashPeriod)}</select>
@@ -1262,7 +1616,7 @@ async function renderDashboard() {
           </div>
         </div>
 
-        <div class="card">
+        <div class="card" id="dash-stats-card">
           <div class="stats-card-head">
             <div>
               <p class="section-kicker" style="margin:0">${esc(t("statistics"))}</p>
@@ -1276,10 +1630,10 @@ async function renderDashboard() {
 
         ${filterBanner}
 
-        <div class="card">
+        <div class="card" id="dash-queue-card">
           <div class="section-head" style="margin-bottom:0.75rem">
             <h3 style="margin:0">${esc(t("review_queue"))}</h3>
-            <p class="subtitle" style="margin:0">${filteredOrders.length}${chartFilterKey ? " filtered" : " total"} · ${QUEUE_PAGE_SIZE} rows per page · delay from rule_master</p>
+            <p class="subtitle" style="margin:0">${filteredOrders.length}${chartFilterKey ? " filtered" : " total"} · ${QUEUE_PAGE_SIZE} rows per page · R001 delay 180m · other rules 30m review window</p>
           </div>
           ${filteredOrders.length ? `
             <table>
@@ -1287,7 +1641,7 @@ async function renderDashboard() {
                 <tr>
                   <th style="width:42px"><input type="checkbox" id="dq-select-all" title="Select all on this page" /></th>
                   <th>Order</th><th>Customer</th><th>Product</th><th>Amount</th><th>Status</th>
-                  <th>Delay</th><th>Remaining</th><th>Rule</th><th>Placed</th>
+                  <th>Remaining</th><th>Rule</th><th>Placed</th>
                 </tr>
               </thead>
               <tbody id="dq-tbody">
@@ -1310,39 +1664,28 @@ async function renderDashboard() {
           </div>
         </div>
 
-        ${orders.length && order ? orderInvestigationHtml({
-          order,
-          blacklists: bl,
-          timing,
-          comments: dashReviewComments,
-          prefix: "dq",
-          orderOptions: orders,
-          selectedId: activeId,
-        }) : ""}
+        ${investigationHtml()}
         <div id="dash-error"></div>
       `;
+      contentEl.scrollTop = scrollTop;
 
-      document.getElementById("app").innerHTML = shell(content, "dashboard");
-      bindShell();
-
-      if (orders.length && order) {
-        bindOrderInvestigation({
+      bindInvestigation();
+      bindQueuePageControls();
+      {
+        const order = detail?.order;
+        const paintOrderId = activeId;
+        window.__invAiRequestId = (window.__invAiRequestId || 0) + 1;
+        hydrateAiSummaryIfNeeded({
           prefix: "dq",
-          order,
-          setComments: (v) => { dashReviewComments = v; },
-          onSelectOrder: async (id) => {
-            activeId = id;
-            dashReviewComments = "";
-            detail = await api(`/portal/orders/${encodeURIComponent(activeId)}`);
-            paint();
-          },
-          onRefresh: reload,
-          statusFn: (msg, kind) => {
-            if (kind === "error") showDashError(msg);
-            else {
-              const el = document.getElementById("dq-status");
-              if (el) el.innerHTML = `<div class="alert alert-success">${esc(msg)}</div>`;
-            }
+          orderId: paintOrderId,
+          needsSummary: !detail?.ai_summary?.summary && !!(
+            (Array.isArray(order?.triggered_rules) && order.triggered_rules.length) ||
+            order?.flagged_reason
+          ),
+          requestId: window.__invAiRequestId,
+          onReady: (summary) => {
+            if (activeId !== paintOrderId || !detail) return;
+            detail.ai_summary = summary;
           },
         });
       }
@@ -1379,52 +1722,6 @@ async function renderDashboard() {
         chartFilterLabel = "";
         queuePage = 1;
         paint();
-      });
-
-      function syncChecks() {
-        const allOnPage = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
-        const someOnPage = pageIds.some((id) => selectedIds.has(id));
-        const selectAll = document.getElementById("dq-select-all");
-        if (selectAll) {
-          selectAll.checked = allOnPage;
-          selectAll.indeterminate = someOnPage && !allOnPage;
-        }
-        document.querySelectorAll("#dq-tbody .q-check").forEach((cb) => {
-          cb.checked = selectedIds.has(cb.dataset.id);
-        });
-        const batch = document.getElementById("batch-card");
-        const title = document.getElementById("dq-batch-title");
-        const hint = document.getElementById("dq-batch-hint");
-        if (batch) batch.classList.toggle("hidden", selectedIds.size === 0);
-        if (title) title.textContent = t("batch_actions", { n: selectedIds.size });
-        if (hint) {
-          const onPage = pageIds.filter((id) => selectedIds.has(id)).length;
-          hint.textContent = onPage
-            ? `${onPage} selected on this page · ${selectedIds.size} total selected`
-            : "Selections are kept across pages";
-        }
-      }
-
-      document.getElementById("dq-select-all")?.addEventListener("change", (e) => {
-        if (e.target.checked) pageIds.forEach((id) => selectedIds.add(id));
-        else pageIds.forEach((id) => selectedIds.delete(id));
-        syncChecks();
-      });
-      document.querySelectorAll("#dq-tbody .q-check").forEach((cb) => {
-        cb.addEventListener("change", () => {
-          const id = cb.dataset.id;
-          if (cb.checked) selectedIds.add(id); else selectedIds.delete(id);
-          syncChecks();
-        });
-      });
-
-      document.querySelectorAll('#dq-pager .pager-btn').forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const next = Number(btn.dataset.page);
-          if (!next || next < 1 || next > pageInfo.totalPages || next === queuePage) return;
-          queuePage = next;
-          paint();
-        });
       });
 
       document.getElementById("batch-approve")?.addEventListener("click", async () => {
@@ -1509,16 +1806,16 @@ async function renderDashboard() {
     }
 
     async function reload() {
-      const fresh = await api("/portal/queue");
+      const [fresh, nextStats] = await Promise.all([
+        api("/portal/queue"),
+        api(`/portal/dashboard/statistics?period=${encodeURIComponent(dashPeriod)}`).catch(() => stats),
+      ]);
       orders = fresh.orders || [];
       Object.assign(m, fresh.metrics || {});
+      stats = nextStats || stats;
       if (!orders.find((o) => o.order_id === activeId)) activeId = orders[0]?.order_id || "";
-      // Keep page in range after delete/approve
       queuePage = Math.min(queuePage, queuePageCount(visibleOrders().length));
       detail = activeId ? await api(`/portal/orders/${encodeURIComponent(activeId)}`) : null;
-      try {
-        stats = await api(`/portal/dashboard/statistics?period=${encodeURIComponent(dashPeriod)}`);
-      } catch {}
       paint();
     }
 
@@ -1693,17 +1990,15 @@ async function loadAdminTab(tab) {
 }
 
 async function renderAdminQueue(body) {
-  const sync = await api("/portal/sync-holds", { method: "POST" });
-  const data = await api("/portal/queue");
+  const syncPromise = api("/portal/sync-holds", { method: "POST" }).catch(() => ({ auto_approved: 0 }));
+  const [data, recentRes, sync] = await Promise.all([
+    api("/portal/queue"),
+    api("/portal/orders/recent?limit=50").catch(() => ({ orders: [] })),
+    syncPromise,
+  ]);
   let orders = data.orders || [];
   const m = data.metrics || {};
-  let recent = [];
-  try {
-    const recentRes = await api("/portal/orders/recent?limit=50");
-    recent = recentRes.orders || [];
-  } catch {
-    recent = [];
-  }
+  let recent = recentRes.orders || [];
   let selected = new Set();
   let activeId = orders[0]?.order_id || recent[0]?.order_id || "";
   let reviewComments = "";
@@ -1740,7 +2035,7 @@ async function renderAdminQueue(body) {
                 <th>Order</th><th>Customer</th><th>Product</th><th>Items</th><th>Amount</th><th>Status</th><th>Placed</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody id="ao-latest-tbody">
               ${recentPageInfo.rows
                 .map((r) => {
                   const itemCount = Number(r.item_count || 0);
@@ -1778,7 +2073,7 @@ async function renderAdminQueue(body) {
               <tr>
                 <th style="width:42px"><input type="checkbox" id="aq-select-all" title="Select all on this page" /></th>
                 <th>Order</th><th>Customer</th><th>Product</th><th>Amount</th><th>Status</th>
-                <th>Delay</th><th>Remaining</th><th>Rule</th><th>Placed</th>
+                <th>Remaining</th><th>Rule</th><th>Placed</th>
               </tr>
             </thead>
             <tbody id="aq-tbody">
@@ -1861,7 +2156,7 @@ async function renderAdminQueue(body) {
         const next = Number(btn.dataset.page);
         if (!next || next < 1 || next > pageInfo.totalPages || next === queuePage) return;
         queuePage = next;
-        paintQueue();
+        paintAdminQueuePageOnly();
       });
     });
 
@@ -1870,10 +2165,86 @@ async function renderAdminQueue(body) {
         const next = Number(btn.dataset.page);
         if (!next || next < 1 || next > recentPageInfo.totalPages || next === recentPage) return;
         recentPage = next;
-        paintQueue();
+        paintAdminRecentPageOnly();
       });
     });
 
+    function paintAdminQueuePageOnly() {
+      const info = queuePageSlice(orders, queuePage);
+      queuePage = info.page;
+      const tbody = document.getElementById("aq-tbody");
+      const pager = document.getElementById("aq-pager");
+      if (!tbody) {
+        paintQueue();
+        return;
+      }
+      tbody.innerHTML = info.rows.map((o) => queueRowHtml(o, { selected, pickable: true })).join("");
+      if (pager) pager.outerHTML = pagerHtml({ ...info, total: orders.length, prefix: "aq" });
+      pageIds.length = 0;
+      pageIds.push(...info.rows.map((o) => o.order_id));
+      Object.assign(pageInfo, info);
+      body.querySelectorAll("#aq-tbody .q-check").forEach((cb) => {
+        cb.onchange = () => {
+          const id = cb.dataset.id;
+          if (cb.checked) selected.add(id); else selected.delete(id);
+          syncSelectionUI();
+        };
+      });
+      body.querySelectorAll("#aq-tbody .aq-pick").forEach((btn) => {
+        btn.onclick = () => pickOrder(btn.dataset.id);
+      });
+      document.querySelectorAll("#aq-pager .pager-btn").forEach((btn) => {
+        btn.onclick = () => {
+          const next = Number(btn.dataset.page);
+          if (!next || next < 1 || next > pageInfo.totalPages || next === queuePage) return;
+          queuePage = next;
+          paintAdminQueuePageOnly();
+        };
+      });
+      syncSelectionUI();
+    }
+
+    function paintAdminRecentPageOnly() {
+      const info = queuePageSlice(recent, recentPage);
+      recentPage = info.page;
+      const table = document.getElementById("ao-latest-tbody");
+      const pager = document.getElementById("ao-latest-pager");
+      if (!table || !pager) {
+        paintQueue();
+        return;
+      }
+      table.innerHTML = info.rows
+        .map((r) => {
+          const itemCount = Number(r.item_count || 0);
+          const productCell =
+            itemCount > 1
+              ? `<span class="item-count-pill">${esc(itemCount)} items</span> ${esc(r.product_name)}`
+              : esc(r.product_name);
+          return `<tr class="${r.order_id === activeId ? "row-active" : ""}">
+            <td><button type="button" class="btn btn-ghost ao-pick" data-id="${esc(r.order_id)}" style="padding:0;color:var(--accent)">${esc(r.order_id)}</button></td>
+            <td>${esc(r.customer_name)}</td>
+            <td>${productCell}</td>
+            <td>${esc(itemCount || r.quantity || "—")}</td>
+            <td>${money(r.amount)}</td>
+            <td>${badge(r.order_status)}</td>
+            <td>${esc(formatUtc(r.order_timestamp))}</td>
+          </tr>`;
+        })
+        .join("");
+      pager.outerHTML = pagerHtml({ ...info, total: recent.length, prefix: "ao-latest" });
+      body.querySelectorAll(".ao-pick").forEach((btn) => {
+        btn.onclick = () => pickOrder(btn.dataset.id);
+      });
+      document.querySelectorAll("#ao-latest-pager .pager-btn").forEach((btn) => {
+        btn.onclick = () => {
+          const next = Number(btn.dataset.page);
+          if (!next || next < 1 || next > info.totalPages || next === recentPage) return;
+          recentPage = next;
+          paintAdminRecentPageOnly();
+        };
+      });
+      Object.assign(recentPageInfo, info);
+    }
     document.getElementById("aq-batch-clear")?.addEventListener("click", () => {
       selected = new Set();
       syncSelectionUI();
@@ -1963,23 +2334,30 @@ async function renderAdminQueue(body) {
       if (detailEl) detailEl.innerHTML = "";
       return;
     }
+    const requestId = (window.__aqDetailRequestId = (window.__aqDetailRequestId || 0) + 1);
+    const selectedAtStart = activeId;
     detailEl.innerHTML = `<p class="subtitle">${esc(t("loading_order", { id: activeId }))}</p>`;
     try {
-      const detail = await api(`/portal/orders/${encodeURIComponent(activeId)}`);
+      const detail = await api(`/portal/orders/${encodeURIComponent(selectedAtStart)}`);
+      if (requestId !== window.__aqDetailRequestId || activeId !== selectedAtStart) return;
       const order = detail.order;
       const bl = detail.blacklists || {};
-      const timing = detail.timing || orders.find((o) => o.order_id === activeId) || {};
+      const timing = detail.timing || orders.find((o) => o.order_id === selectedAtStart) || {};
       const optionSource = orders.length
         ? orders
         : recent.map((r) => ({ order_id: r.order_id, is_overdue: false }));
-      detailEl.innerHTML = orderInvestigationHtml({
+      const host = document.getElementById("aq-detail");
+      if (!host || requestId !== window.__aqDetailRequestId) return;
+      host.innerHTML = orderInvestigationHtml({
         order,
         blacklists: bl,
         timing,
         comments: reviewComments,
         prefix: "aq",
         orderOptions: optionSource,
-        selectedId: activeId,
+        selectedId: selectedAtStart,
+        reviewActions: detail.review_actions || order.review_actions,
+        aiSummary: detail.ai_summary,
       });
       await bindOrderInvestigation({
         prefix: "aq",
@@ -1994,8 +2372,24 @@ async function renderAdminQueue(body) {
         onRefresh: refresh,
         statusFn: (msg, kind) => adminStatus(msg, kind === "error" ? "error" : "success"),
       });
+      if (requestId !== window.__aqDetailRequestId || activeId !== selectedAtStart) return;
+      window.__invAiRequestId = (window.__invAiRequestId || 0) + 1;
+      hydrateAiSummaryIfNeeded({
+        prefix: "aq",
+        orderId: selectedAtStart,
+        needsSummary: !detail?.ai_summary?.summary && !!(
+          (Array.isArray(order?.triggered_rules) && order.triggered_rules.length) ||
+          order?.flagged_reason
+        ),
+        requestId: window.__invAiRequestId,
+        onReady: (summary) => {
+          detail.ai_summary = summary;
+        },
+      });
     } catch (ex) {
-      detailEl.innerHTML = `<div class="alert alert-error">${esc(ex.message)}</div>`;
+      if (requestId !== window.__aqDetailRequestId || activeId !== selectedAtStart) return;
+      const host = document.getElementById("aq-detail");
+      if (host) host.innerHTML = `<div class="alert alert-error">${esc(ex.message)}</div>`;
     }
   }
 
@@ -2757,7 +3151,6 @@ function ruleFieldEditability(rule, selectedAction) {
     ["VELOCITY", "BEHAVIORAL", "LINKAGE"].includes(rule.rule_type) && !isBlacklist && !isR001;
   const supportsInterval =
     ["VELOCITY", "BEHAVIORAL"].includes(rule.rule_type) && !isBlacklist && !isR001;
-  const actionUsesDelay = action === "HOLD" || action === "REVIEW";
 
   return {
     isR001,
@@ -2766,7 +3159,6 @@ function ruleFieldEditability(rule, selectedAction) {
     canEditAction: !isR001 && !isBlacklist,
     canEditThreshold: supportsThreshold && action !== "PASS",
     canEditInterval: supportsInterval && action !== "PASS",
-    canEditDelay: isR001 ? true : !isBlacklist && actionUsesDelay,
     supportsThreshold,
     supportsInterval,
   };
@@ -2839,19 +3231,16 @@ async function renderAdminRules(body) {
     const flags = ruleFieldEditability(r, currentAction);
     const {
       isR001,
+      isBlacklist,
       action: lockedAction,
       canEditAction,
       canEditThreshold,
       canEditInterval,
-      canEditDelay,
       supportsThreshold: requiresThreshold,
       supportsInterval: requiresInterval,
     } = flags;
     const locked = !canEditAction;
-    const delayMinutes = Number(r.delay_minutes ?? (isR001 ? 180 : 60));
-    const delayHelp = canEditDelay
-      ? (t("delay_minutes_help") || "Review timeout before automatic approval (read by fraud engine from rule_master).")
-      : "Delay applies only to HOLD/REVIEW actions.";
+    const delayMinutes = Number(r.delay_minutes ?? (isR001 ? 180 : 30));
 
     document.getElementById("rule-form").innerHTML = `
       <p id="rule-live-desc"><strong>Description:</strong> ${esc(describeRuleConfig({
@@ -2860,7 +3249,8 @@ async function renderAdminRules(body) {
       }))}</p>
       <p><strong>Detection Type:</strong> <code>${esc(r.rule_type)}</code></p>
       ${locked ? `<div class="alert alert-info">Action is locked to <strong>${esc(lockedAction)}</strong> for this rule.</div>` : ""}
-      ${isR001 ? `<div class="alert alert-info">${esc(t("delay_minutes_help") || "R001 uses Delay Minutes as the hold window (interval fields do not apply).")}</div>` : ""}
+      ${isR001 ? `<div class="alert alert-info">${esc(t("interval_disabled_r001") || "Time Interval is disabled for R001.")}</div>` : ""}
+      ${!isR001 && !isBlacklist ? `<div class="alert alert-info">${esc(t("delay_minutes_fixed_30") || "Non-R001 rules stay in review until order_timestamp + 30 minutes, then the scheduler may auto-approve.")}</div>` : ""}
       <div class="field">
         <label>Rule Action</label>
         <select id="rule-action" ${locked ? "disabled" : ""}>
@@ -2891,11 +3281,6 @@ async function renderAdminRules(body) {
             : `<p class="subtitle">N/A</p>`}
         </div>
       </div>
-      <div class="field">
-        <label>${esc(t("delay_minutes"))}</label>
-        <input id="rule-delay" type="number" min="1" step="1" value="${delayMinutes}" ${canEditDelay ? "" : "disabled"} />
-        <p class="subtitle" id="rule-delay-help">${esc(delayHelp)}</p>
-      </div>
       <button type="button" class="btn btn-primary" id="rule-save">Save Rule Changes</button>`;
 
     function readFormState() {
@@ -2905,7 +3290,6 @@ async function renderAdminRules(body) {
       const thresholdEl = document.getElementById("rule-threshold");
       const intervalEl = document.getElementById("rule-interval");
       const unitEl = document.getElementById("rule-unit");
-      const delayEl = document.getElementById("rule-delay");
       return {
         ...r,
         action,
@@ -2918,7 +3302,7 @@ async function renderAdminRules(body) {
         time_interval_unit: requiresInterval && unitEl
           ? unitEl.value
           : r.time_interval_unit,
-        delay_minutes: delayEl ? Number(delayEl.value) : delayMinutes,
+        delay_minutes: delayMinutes,
       };
     }
 
@@ -2927,17 +3311,9 @@ async function renderAdminRules(body) {
       const thresholdEl = document.getElementById("rule-threshold");
       const intervalEl = document.getElementById("rule-interval");
       const unitEl = document.getElementById("rule-unit");
-      const delayEl = document.getElementById("rule-delay");
-      const delayHelpEl = document.getElementById("rule-delay-help");
       if (thresholdEl) thresholdEl.disabled = !next.canEditThreshold;
       if (intervalEl) intervalEl.disabled = !next.canEditInterval;
       if (unitEl) unitEl.disabled = !next.canEditInterval;
-      if (delayEl) delayEl.disabled = !next.canEditDelay;
-      if (delayHelpEl) {
-        delayHelpEl.textContent = next.canEditDelay
-          ? (t("delay_minutes_help") || "Review timeout before automatic approval (read by fraud engine from rule_master).")
-          : "Delay applies only to HOLD/REVIEW actions.";
-      }
       return next;
     }
 
@@ -2957,7 +3333,7 @@ async function renderAdminRules(body) {
 
     const actionEl = document.getElementById("rule-action");
     if (actionEl && !locked) actionEl.addEventListener("change", syncActionUi);
-    ["rule-threshold", "rule-interval", "rule-unit", "rule-delay"].forEach((fid) => {
+    ["rule-threshold", "rule-interval", "rule-unit"].forEach((fid) => {
       const el = document.getElementById(fid);
       if (el) el.addEventListener("input", syncActionUi);
       if (el) el.addEventListener("change", syncActionUi);
@@ -2972,17 +3348,14 @@ async function renderAdminRules(body) {
       if (edit.canEditInterval && !(state.time_interval_value >= 1)) {
         return adminStatus("Time interval must be at least 1.", "error");
       }
-      if (edit.canEditDelay && !(state.delay_minutes >= 1)) {
-        return adminStatus("Delay minutes must be at least 1.", "error");
-      }
 
       const payload = {
         rule_id: r.rule_id,
         action: edit.action,
-        threshold_value: requiresThreshold ? state.threshold_value : null,
-        time_interval_value: requiresInterval ? state.time_interval_value : null,
-        time_interval_unit: requiresInterval ? state.time_interval_unit : null,
-        delay_minutes: state.delay_minutes,
+        threshold_value: edit.canEditThreshold ? state.threshold_value : null,
+        time_interval_value: edit.canEditInterval ? state.time_interval_value : null,
+        time_interval_unit: edit.canEditInterval ? state.time_interval_unit : null,
+        delay_minutes: delayMinutes,
       };
 
       const confirmed = await confirmAction({
@@ -2990,8 +3363,7 @@ async function renderAdminRules(body) {
         message:
           `Apply action ${payload.action} to ${r.rule_name}.\n\n` +
           `${RULE_ACTION_HELP[payload.action]}\n\n` +
-          describeRuleConfig({ ...state, action: edit.action }) +
-          `\n\nDelay minutes: ${payload.delay_minutes}`,
+          describeRuleConfig({ ...state, action: edit.action }),
         confirmLabel: "Yes, update rule",
       });
       if (!confirmed) return;
@@ -3591,6 +3963,10 @@ window.addEventListener("hashchange", render);
 (async () => {
   await consumeSsoParamsFromUrl();
   await restoreSessionFromCookie();
-  if (!location.hash) location.hash = session ? "#/dashboard" : "#/login";
+  if (!location.hash) {
+    // Setting hash triggers hashchange → render once (avoid double paint).
+    location.hash = session ? "#/dashboard" : "#/login";
+    return;
+  }
   render();
 })();

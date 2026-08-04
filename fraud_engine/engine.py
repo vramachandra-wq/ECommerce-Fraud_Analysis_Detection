@@ -27,16 +27,18 @@ DB_ACTION_TO_STATUS: Dict[str, str] = {
 _RULE_METADATA_CACHE: Dict[str, Dict[str, Any]] = {}
 
 # Priority tiers for conflict resolution. Lower number = decided first.
-# Tier 0: blacklist rules always win regardless of any other rule's configured action.
-# Tier 1: iPhone/program rule is next.
-# Tier 2 (default): every other rule — resolved amongst themselves as before.
+# Tier 0: blacklist rules win among non-R001 hits.
+# Tier 1 (default): every other rule — resolved amongst themselves as before.
+# R001 (P2 + iPhone) is handled as a hard override in resolve_disposition:
+# when it triggers, status is always ON_HOLD for 180 minutes regardless of
+# other flagged rules (blacklists included). Those other hits are still recorded.
 RULE_TIER: Dict[str, int] = {
     "R007": 0,  # Blacklisted IP
     "R011": 0,  # Blacklisted phone
     "R012": 0,  # Blacklisted email
-    "R001": 1,  # iPhone 16 product hold
 }
-DEFAULT_RULE_TIER = 2
+DEFAULT_RULE_TIER = 1
+R001_RULE_ID = "R001"
 
 
 def _tier_for(rule_id: str) -> int:
@@ -124,12 +126,26 @@ def resolve_disposition(cursor: Any, triggered: List[Dict[str, str]]) -> Dict[st
             "is_fraud": False,
         }
 
+    combined_reason = "; ".join(rule["rule_description"] for rule in triggered)
+    r001_hit = any(rule["rule_id"] == R001_RULE_ID for rule in triggered)
+
+    # P2 iPhone (R001): always ON_HOLD for 180 minutes, no matter which other
+    # rules also flagged. Other hits remain in flagged_reason / triggered_rules.
+    if r001_hit:
+        _get_rule_metadata(cursor, R001_RULE_ID)  # warm cache / enforce HOLD meta
+        return {
+            "order_status": "ON_HOLD",
+            "delay_minutes": R001_HOLD_DELAY_MINUTES,
+            "flagged_reason": combined_reason,
+            "triggered_rules": triggered,
+            "is_fraud": False,
+        }
+
     final_status = "APPROVED"
-    delay_minutes = 0
 
     # Every triggered rule is recorded and contributes to the combined reason,
     # but only the highest-priority TIER decides the final status.
-    # Tier 0 (blacklists) beats tier 1 (iPhone rule) beats tier 2 (everything else).
+    # Tier 0 (blacklists) beats tier 1 (everything else).
     min_tier = min(_tier_for(rule["rule_id"]) for rule in triggered)
     deciding_rules = [rule for rule in triggered if _tier_for(rule["rule_id"]) == min_tier]
 
@@ -141,22 +157,9 @@ def resolve_disposition(cursor: Any, triggered: List[Dict[str, str]]) -> Dict[st
         if STATUS_PRIORITY[action] > STATUS_PRIORITY[final_status]:
             final_status = action
 
-    # Review timeout: MAX delay_minutes across triggered rules whose configured
-    # action is HOLD or REVIEW only. PASS / REJECTED do not use a review window,
-    # so their stored delay_minutes must not inflate multi-hit timeouts.
-    for rule in triggered:
-        meta = _get_rule_metadata(cursor, rule["rule_id"])
-        if meta["action"] in ("ON_HOLD", "PENDING_REVIEW"):
-            delay_minutes = max(delay_minutes, int(meta["delay_minutes"] or 0))
-
-    if final_status == "REJECTED":
-        delay_minutes = 0
-    elif final_status in ("ON_HOLD", "PENDING_REVIEW") and delay_minutes <= 0:
-        delay_minutes = DEFAULT_DELAY_MINUTES
-    elif final_status == "APPROVED":
-        delay_minutes = 0
-
-    combined_reason = "; ".join(rule["rule_description"] for rule in triggered)
+    # Non-R001: orders.delay_minutes stays 0; backlog/scheduler uses the fixed
+    # DEFAULT_DELAY_MINUTES window from order_timestamp.
+    delay_minutes = 0
     is_fraud = final_status == "REJECTED"
 
     return {
@@ -182,7 +185,7 @@ def evaluate_order_with_items(
     """
     Evaluate a multi-item checkout.
 
-    - Product-scoped rules (e.g. R001 iPhone) run **per line item**.
+    - Product-scoped rules (e.g. R001 P2 iPhone) run **per line item**.
     - Order-scoped rules (velocity, blacklist, …) run **once** on basket totals.
     - Hits are merged and rolled up to one order status / flagged_reason.
     """

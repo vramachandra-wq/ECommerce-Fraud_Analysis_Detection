@@ -10,15 +10,13 @@ module. Do not reimplement backlog detection elsewhere.
 Business rules
 --------------
 1. Candidate orders have status ON_HOLD or PENDING_REVIEW.
-2. Applicable delay_minutes is read from master.rule_master via
-   order_rule_hits — NEVER hardcoded.
-3. When an order is associated with multiple rules, use the MAXIMUM
-   delay_minutes among triggered rules whose action is HOLD or REVIEW
-   (PASS / REJECTED delays are ignored for timeout calculation).
-4. Fallback: if an order has no HOLD/REVIEW rule hits, use orders.delay_minutes
-   (snapshot written at evaluation time), then default 60.
+2. Only R001 writes delay_minutes onto master.orders (iPhone hold).
+3. Non-R001 review holds leave orders.delay_minutes = 0; the scheduler
+   uses a fixed DEFAULT_DELAY_MINUTES (30) window from order_timestamp.
+4. When R001 fires (alone or with other rules), status is ON_HOLD and
+   delay is the R001 hold window (180); other flagged rules are still recorded.
 5. An order is backlog when:
-       current_timestamp >= tagged_timestamp + delay_minutes
+       current_timestamp >= tagged_timestamp + applicable_delay
    where tagged_timestamp is orders.order_timestamp (UTC wall clock).
 """
 
@@ -29,41 +27,33 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import pandas as pd
 
-from fraud_engine.rules import R001_HOLD_DELAY_MINUTES
+from fraud_engine.rules import DEFAULT_REVIEW_TIMEOUT_MINUTES, R001_HOLD_DELAY_MINUTES
 
-DEFAULT_DELAY_MINUTES = 60
+# Alias kept for existing imports (engine, tests, auto-approval docs).
+DEFAULT_DELAY_MINUTES = DEFAULT_REVIEW_TIMEOUT_MINUTES
 REVIEW_QUEUE_STATUSES = ("ON_HOLD", "PENDING_REVIEW")
 
 # Interpret naive order_timestamp as UTC (matches app + DB session).
 _TAGGED_TS = "(o.order_timestamp AT TIME ZONE 'UTC')"
 
-# Live delay: max of evaluation snapshot and live HOLD/REVIEW rule delays.
-# R001 always contributes 180 so the dashboard cannot show 60 when R001 hit.
+# Live delay: R001 → rule_master.delay_minutes (fallback 180); others → fixed 30.
 _LIVE_RULE_DELAY = f"""
-COALESCE(
-    NULLIF(
-        GREATEST(
-            COALESCE(NULLIF(o.delay_minutes, 0), 0),
-            COALESCE(
-                (
-                    SELECT MAX(
-                        CASE
-                            WHEN h.rule_id = 'R001' THEN {R001_HOLD_DELAY_MINUTES}
-                            ELSE rm.delay_minutes
-                        END
-                    )
-                    FROM master.order_rule_hits h
-                    JOIN master.rule_master rm ON rm.rule_id = h.rule_id
-                    WHERE h.order_id = o.order_id
-                      AND UPPER(rm.action) IN ('HOLD', 'REVIEW')
-                ),
-                0
-            )
+CASE
+    WHEN EXISTS (
+        SELECT 1
+        FROM master.order_rule_hits h
+        WHERE h.order_id = o.order_id
+          AND h.rule_id = 'R001'
+    ) THEN COALESCE(
+        (
+            SELECT NULLIF(rm.delay_minutes, 0)
+            FROM master.rule_master rm
+            WHERE rm.rule_id = 'R001'
         ),
-        0
-    ),
-    {DEFAULT_DELAY_MINUTES}
-)
+        {R001_HOLD_DELAY_MINUTES}
+    )
+    ELSE {DEFAULT_DELAY_MINUTES}
+END
 """
 
 
@@ -92,10 +82,10 @@ def is_backlog_order(
 
 def get_applicable_delay_minutes(cursor: Any, order_id: str) -> int:
     """
-    Resolve delay_minutes for one order.
+    Resolve review window for one order.
 
-    Prefers the greater of evaluation snapshot and live HOLD/REVIEW delays
-    (R001 always contributes 180), then default 60.
+    R001 holds use the iPhone delay; all other review queue orders use the
+    fixed DEFAULT_DELAY_MINUTES (30) window.
     """
     cursor.execute(
         f"""
@@ -150,6 +140,12 @@ def _backlog_select_sql(order_ids: Optional[Sequence[str]] = None) -> str:
                     ),
                     COALESCE(o.flagged_reason, 'Unknown')
                 ) AS rule_name,
+                EXISTS (
+                    SELECT 1
+                    FROM master.order_rule_hits h
+                    WHERE h.order_id = o.order_id
+                      AND h.rule_id = 'R001'
+                ) AS allows_full_review,
                 {_TAGGED_TS} AS tagged_tstz
             FROM master.orders o
             WHERE o.order_status IN ('ON_HOLD', 'PENDING_REVIEW')
@@ -168,6 +164,7 @@ def _backlog_select_sql(order_ids: Optional[Sequence[str]] = None) -> str:
             item_count,
             delay_minutes,
             rule_name,
+            allows_full_review,
             tagged_timestamp + (delay_minutes * INTERVAL '1 minute') AS review_deadline,
             EXTRACT(EPOCH FROM (
                 (tagged_tstz + (delay_minutes * INTERVAL '1 minute')) - NOW()

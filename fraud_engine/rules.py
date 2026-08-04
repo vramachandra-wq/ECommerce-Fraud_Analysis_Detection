@@ -1,7 +1,11 @@
 from typing import Dict, Any, Tuple, Optional, Callable, List
 
-# R001 (iPhone 16) hold window — single source of truth for create + queue/backlog.
+# R001 (iPhone 16) hold window — only rule with a dedicated order delay.
 R001_HOLD_DELAY_MINUTES = 180
+
+# Fixed review window for all other HOLD/REVIEW rules (order_timestamp + 30 min
+# before the scheduler may auto-approve). Not a per-rule configurable delay.
+DEFAULT_REVIEW_TIMEOUT_MINUTES = 30
 
 # Rules that inspect product fields — run once per cart line item.
 PRODUCT_SCOPED_RULE_IDS = frozenset({"R001"})
@@ -30,22 +34,27 @@ def _get_interval(cursor: Any, rule_id: str) -> str:
 
 
 def _get_delay_minutes(cursor: Any, rule_id: str) -> int:
-    """Fetches review delay_minutes from rule_master (source of truth for timeouts)."""
-    # R001 iPhone hold is fixed at 180 minutes.
+    """Resolve review-window minutes. Only R001 reads a configurable hold delay from DB."""
+    if rule_id in _DELAY_CACHE:
+        return _DELAY_CACHE[rule_id]
+
     if rule_id == "R001":
-        _DELAY_CACHE[rule_id] = R001_HOLD_DELAY_MINUTES
-        return R001_HOLD_DELAY_MINUTES
-    if rule_id not in _DELAY_CACHE:
         cursor.execute(
             "SELECT delay_minutes FROM master.rule_master WHERE rule_id = %s",
             (rule_id,),
         )
         row = cursor.fetchone()
-        if row and row[0] is not None and int(row[0]) > 0:
-            _DELAY_CACHE[rule_id] = int(row[0])
-        else:
-            _DELAY_CACHE[rule_id] = 60
-    return _DELAY_CACHE[rule_id]
+        try:
+            delay = int(row[0]) if row and row[0] is not None else R001_HOLD_DELAY_MINUTES
+        except (TypeError, ValueError):
+            delay = R001_HOLD_DELAY_MINUTES
+        if delay <= 0:
+            delay = R001_HOLD_DELAY_MINUTES
+        _DELAY_CACHE[rule_id] = delay
+        return delay
+
+    _DELAY_CACHE[rule_id] = DEFAULT_REVIEW_TIMEOUT_MINUTES
+    return DEFAULT_REVIEW_TIMEOUT_MINUTES
 
 def _get_threshold(cursor: Any, rule_id: str, fallback_value: float) -> float:
     """Fetches and caches the threshold value from master.rule_master."""
@@ -63,12 +72,18 @@ def _get_threshold(cursor: Any, rule_id: str, fallback_value: float) -> float:
     return _THRESHOLD_CACHE[rule_id]
 
 
+# Postgres treats untyped string - interval as interval arithmetic. Always cast
+# the order timestamp explicitly so string payloads from the API work in CI.
+_WINDOW_START = "CAST(%s AS TIMESTAMP) - CAST(%s AS INTERVAL)"
+
+
 def check_r001(cursor: Any, ctx: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
-    """iPhone 16 product rule — always ON_HOLD for 180 minutes when this fires."""
+    """P2 iPhone 16 product rule — ON_HOLD only when program is P2 and product is iPhone 16."""
+    program_id = str(ctx.get("program_id") or "").strip().upper()
     product_name = (ctx.get("product_name") or "").lower()
-    if "iphone 16" in product_name:
+    if program_id == "P2" and "iphone 16" in product_name:
         delay = _get_delay_minutes(cursor, "R001")
-        return True, f"R001: iPhone 16 order — held for {delay}-minute review window"
+        return True, f"R001: P2 iPhone 16 order — held for {delay}-minute review window"
     return False, None
 
 
@@ -77,7 +92,7 @@ def check_r002(cursor: Any, ctx: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     interval = _get_interval(cursor, "R002")
     threshold = _get_threshold(cursor, "R002", 3.0)
     cursor.execute(
-        "SELECT COUNT(*) FROM master.orders WHERE email = %s AND order_timestamp >= %s - CAST(%s AS INTERVAL)",
+        f"SELECT COUNT(*) FROM master.orders WHERE email = %s AND order_timestamp >= {_WINDOW_START}",
         (ctx["email"], ctx["order_timestamp"], interval),
     )
     prior = cursor.fetchone()[0]
@@ -91,7 +106,7 @@ def check_r003(cursor: Any, ctx: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     interval = _get_interval(cursor, "R003")
     threshold = _get_threshold(cursor, "R003", 5.0)
     cursor.execute(
-        "SELECT COUNT(*) FROM master.orders WHERE ip_address = %s AND order_timestamp >= %s - CAST(%s AS INTERVAL)",
+        f"SELECT COUNT(*) FROM master.orders WHERE ip_address = %s AND order_timestamp >= {_WINDOW_START}",
         (ctx["ip_address"], ctx["order_timestamp"], interval),
     )
     prior = cursor.fetchone()[0]
@@ -105,7 +120,7 @@ def check_r004(cursor: Any, ctx: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     interval = _get_interval(cursor, "R004")
     threshold = _get_threshold(cursor, "R004", 4.0)
     cursor.execute(
-        "SELECT COUNT(*) FROM master.orders WHERE device_id = %s AND order_timestamp >= %s - CAST(%s AS INTERVAL)",
+        f"SELECT COUNT(*) FROM master.orders WHERE device_id = %s AND order_timestamp >= {_WINDOW_START}",
         (ctx["device_id"], ctx["order_timestamp"], interval),
     )
     prior = cursor.fetchone()[0]
@@ -119,7 +134,7 @@ def check_r005(cursor: Any, ctx: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     interval = _get_interval(cursor, "R005")
     threshold = _get_threshold(cursor, "R005", 200000.0)
     cursor.execute(
-        "SELECT COALESCE(SUM(amount), 0) FROM master.orders WHERE user_id = %s AND order_timestamp >= %s - CAST(%s AS INTERVAL)",
+        f"SELECT COALESCE(SUM(amount), 0) FROM master.orders WHERE user_id = %s AND order_timestamp >= {_WINDOW_START}",
         (ctx["user_id"], ctx["order_timestamp"], interval),
     )
     prior_spend = float(cursor.fetchone()[0])
@@ -160,7 +175,7 @@ def check_r008(cursor: Any, ctx: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     interval = _get_interval(cursor, "R008")
     threshold = _get_threshold(cursor, "R008", 3.0)
     cursor.execute(
-        "SELECT COUNT(*) FROM master.orders WHERE user_id = %s AND order_timestamp >= %s - CAST(%s AS INTERVAL)",
+        f"SELECT COUNT(*) FROM master.orders WHERE user_id = %s AND order_timestamp >= {_WINDOW_START}",
         (ctx["user_id"], ctx["order_timestamp"], interval),
     )
     prior = cursor.fetchone()[0]
@@ -174,7 +189,7 @@ def check_r009(cursor: Any, ctx: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     interval = _get_interval(cursor, "R009")
     threshold = _get_threshold(cursor, "R009", 5.0)
     cursor.execute(
-        "SELECT COUNT(*) FROM master.orders WHERE address = %s AND order_timestamp >= %s - CAST(%s AS INTERVAL)",
+        f"SELECT COUNT(*) FROM master.orders WHERE address = %s AND order_timestamp >= {_WINDOW_START}",
         (ctx["address"], ctx["order_timestamp"], interval),
     )
     prior = cursor.fetchone()[0]
@@ -188,12 +203,12 @@ def check_r010(cursor: Any, ctx: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     interval = _get_interval(cursor, "R010")
     threshold = _get_threshold(cursor, "R010", 2.0)
     cursor.execute(
-        "SELECT COUNT(DISTINCT device_id) FROM master.orders WHERE user_id = %s AND order_timestamp >= %s - CAST(%s AS INTERVAL)",
+        f"SELECT COUNT(DISTINCT device_id) FROM master.orders WHERE user_id = %s AND order_timestamp >= {_WINDOW_START}",
         (ctx["user_id"], ctx["order_timestamp"], interval),
     )
     prior_distinct = cursor.fetchone()[0]
     cursor.execute(
-        "SELECT COUNT(*) FROM master.orders WHERE user_id = %s AND order_timestamp >= %s - CAST(%s AS INTERVAL) AND device_id = %s",
+        f"SELECT COUNT(*) FROM master.orders WHERE user_id = %s AND order_timestamp >= {_WINDOW_START} AND device_id = %s",
         (ctx["user_id"], ctx["order_timestamp"], interval, ctx["device_id"]),
     )
     used_same = cursor.fetchone()[0] > 0

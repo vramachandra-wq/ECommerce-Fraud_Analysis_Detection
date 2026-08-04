@@ -524,6 +524,46 @@ export const TRANSLATIONS = {
     "en": "Analyst Decision",
     "th": "การตัดสินใจของนักวิเคราะห์"
   },
+  "ai_order_summary": {
+    "en": "AI order summary",
+    "th": "สรุปคำสั่งซื้อด้วย AI"
+  },
+  "ai_summary_source_groq": {
+    "en": "Generated with AI",
+    "th": "สร้างด้วย AI"
+  },
+  "ai_summary_source_heuristic": {
+    "en": "Heuristic brief",
+    "th": "สรุปโดยระบบ"
+  },
+  "ai_summary_cached": {
+    "en": "Cached",
+    "th": "แคชไว้"
+  },
+  "ai_summary_loading": {
+    "en": "Generating…",
+    "th": "กำลังสร้าง…"
+  },
+  "ai_summary_loading_hint": {
+    "en": "Preparing an AI brief for this order. You can continue reviewing while it loads.",
+    "th": "กำลังเตรียมสรุปด้วย AI สำหรับคำสั่งซื้อนี้ คุณสามารถตรวจสอบต่อได้ระหว่างรอ"
+  },
+  "ai_summary_disclaimer": {
+    "en": "Advisory only — AI suggestion does not replace analyst judgment. You make the final decision.",
+    "th": "คำแนะนำเท่านั้น — ข้อเสนอจาก AI ไม่ทดแทนดุลยพินิจของนักวิเคราะห์ คุณเป็นผู้ตัดสินใจขั้นสุดท้าย"
+  },
+  "ai_recommendation": {
+    "en": "Recommended action",
+    "th": "คำแนะนำการดำเนินการ"
+  },
+  "ai_recommendation_advisory": {
+    "en": "Advisory only — AI suggestion does not replace analyst judgment. You make the final decision.",
+    "th": "คำแนะนำเท่านั้น — ข้อเสนอจาก AI ไม่ทดแทนดุลยพินิจของนักวิเคราะห์ คุณเป็นผู้ตัดสินใจขั้นสุดท้าย"
+  },
+  "approve_only_hint": {
+    "en": "Approve, Reject, and Mark as Fraud are available for all flagged review-queue orders.",
+    "th": "อนุมัติ ปฏิเสธ และทำเครื่องหมายเป็นฉ้อโกงใช้ได้กับคำสั่งซื้อที่ถูกตั้งค่าสถานะทั้งหมดในคิว"
+  },
   "review_comments": {
     "en": "Review Comments (required)",
     "th": "ความคิดเห็นการตรวจสอบ (จำเป็น)"
@@ -1037,12 +1077,20 @@ export const TRANSLATIONS = {
     "th": "ปิดการใช้ช่วงเวลาสำหรับ R001 — ใช้ค่านาทีที่หน่วงแทน"
   },
   "delay_minutes": {
-    "en": "Delay Minutes",
-    "th": "นาทีที่หน่วง"
+    "en": "Hold delay (R001)",
+    "th": "หน่วงการพัก (R001)"
+  },
+  "review_window": {
+    "en": "Review window",
+    "th": "หน้าต่างตรวจสอบ"
   },
   "delay_minutes_help": {
-    "en": "Review timeout before automatic approval (read by fraud engine from rule_master).",
-    "th": "ระยะเวลารอตรวจสอบก่อนอนุมัติอัตโนมัติ (ระบบอ่านจากตาราง rule_master)"
+    "en": "R001 hold window (minutes) before automatic approval. Only R001 has a configurable order delay.",
+    "th": "ระยะเวลาพักของ R001 (นาที) ก่อนอนุมัติอัตโนมัติ มีเฉพาะ R001 ที่ตั้งค่าดีเลย์ได้"
+  },
+  "delay_minutes_fixed_30": {
+    "en": "Non-R001 rules stay in review until order_timestamp + 30 minutes, then the scheduler may auto-approve. Delay is not configurable.",
+    "th": "กฎที่ไม่ใช่ R001 อยู่ในคิวจนถึงเวลาออเดอร์ + 30 นาที จากนั้นตัวจัดตารางอาจอนุมัติอัตโนมัติ ตั้งค่าดีเลย์ไม่ได้"
   },
   "delay_na_blacklist": {
     "en": "Delay N/A for blacklist rules (immediate reject).",

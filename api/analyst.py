@@ -9,9 +9,11 @@ from api.auth import get_current_session, require_page
 from auth.analyst_auth import PAGE_FRAUD_DASHBOARD
 from config import DB_CONFIG
 from fraud_engine.audit import fetch_order_audit_context, log_review_action
+from utils.app_logging import get_logger
 from utils.system_audit import actor_from_session, log_system_event
 
 router = APIRouter()
+logger = get_logger("api.analyst")
 
 
 class ApproveOrderRequest(BaseModel):
@@ -158,6 +160,7 @@ def approve_order(
                         status_code=409,
                         detail=f"Order {data.order_id} is no longer in the review queue.",
                     )
+                logger.info("Order %s approved by %s", data.order_id, reviewed_by)
                 log_system_event(
                     cur,
                     action="ORDER_APPROVE",
@@ -196,6 +199,12 @@ def reject_order(
                         status_code=409,
                         detail=f"Order {data.order_id} is no longer in the review queue.",
                     )
+                logger.info(
+                    "Order %s %s by %s",
+                    data.order_id,
+                    "marked_fraud" if data.is_fraud else "rejected",
+                    reviewed_by,
+                )
                 log_system_event(
                     cur,
                     action="ORDER_MARK_FRAUD" if data.is_fraud else "ORDER_REJECT",
@@ -300,6 +309,8 @@ def batch_reject(
             "processed": processed,
             "skipped": skipped,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
