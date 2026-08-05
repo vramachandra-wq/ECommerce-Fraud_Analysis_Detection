@@ -21,7 +21,7 @@ $ApiPort = 8000
 $ApiBase = "http://${ApiHost}:${ApiPort}"
 $PortalUrl = "$ApiBase/portal/"
 $ShopUrl = "$ApiBase/shop/"
-$HealthUrl = "$ApiBase/"
+$HealthUrl = "$ApiBase/health"
 $DocsUrl = "$ApiBase/docs"
 $ProjectUrls = @($PortalUrl, $ShopUrl)
 

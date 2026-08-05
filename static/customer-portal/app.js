@@ -7,17 +7,19 @@ import {
   curSym,
   languageToggleHtml,
   bindLanguageToggle,
-} from "./i18n.js?v=34";
+} from "./i18n.js?v=35";
 
 const NAV = [
   { route: "order", labelKey: "shop_browse", icon: "order" },
   { route: "cart", labelKey: "shop_cart", icon: "cart" },
+  { route: "orders", labelKey: "shop_orders", icon: "orders" },
   { route: "account", labelKey: "shop_account", icon: "account" },
 ];
 
 const NAV_ICONS = {
   order: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6h15l-1.5 9h-12z"/><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M6 6L5 3H2"/></svg>`,
   cart: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M3 3h2l2.4 12.3a2 2 0 002 1.7h7.4a2 2 0 001.9-1.5L21 8H7"/></svg>`,
+  orders: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg>`,
   success: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>`,
   account: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`,
 };
@@ -212,6 +214,10 @@ function initials(name) {
 function currentRoute() {
   const hash = location.hash.replace(/^#\/?/, "") || "order";
   return hash.split("/")[0];
+}
+
+function currentRouteParts() {
+  return location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
 }
 
 function navigate(route) {
@@ -1243,6 +1249,7 @@ function renderSuccess() {
             <strong>${esc(lastOrder.order_id)}</strong>
           </div>
           <button type="button" class="btn btn-primary success-cta" id="btn-another">${esc(t("place_another_order"))}</button>
+          <button type="button" class="btn btn-secondary success-cta" style="margin-top:0.65rem" id="btn-orders">${esc(t("view_order_history"))}</button>
           <button type="button" class="btn btn-secondary success-cta" style="margin-top:0.65rem" id="btn-cart">${esc(t("view_cart"))}</button>
         </div>
       </div>
@@ -1257,6 +1264,190 @@ function renderSuccess() {
     saveLastOrder(null);
     navigate("cart");
   };
+  document.getElementById("btn-orders")?.addEventListener("click", () => {
+    saveLastOrder(null);
+    navigate("orders");
+  });
+}
+
+async function renderOrders() {
+  const parts = currentRouteParts();
+  const detailId = parts[0] === "orders" && parts[1] ? parts[1] : "";
+
+  if (detailId) {
+    return renderOrderDetail(detailId);
+  }
+
+  document.getElementById("app").innerHTML = shell(
+    `${pageHead(t("shop_orders"), t("shop_orders_lede"))}
+     <div class="card"><p class="subtitle" style="margin:0">${esc(t("loading_orders"))}</p></div>`,
+    "orders",
+  );
+  bindShell();
+
+  try {
+    const data = await api("/shop/orders?limit=50&offset=0");
+    const orders = Array.isArray(data.orders) ? data.orders : [];
+    const total = Number(data.total) || orders.length;
+
+    let body;
+    if (!orders.length) {
+      body = `
+        <div class="card history-empty">
+          <p>${esc(t("shop_orders_empty"))}</p>
+          <a class="btn btn-primary" href="#/order">${esc(t("shop_browse"))}</a>
+        </div>`;
+    } else {
+      const rows = orders
+        .map((o) => {
+          const summary =
+            Number(o.item_count) > 1
+              ? t("shop_orders_items_summary", {
+                  name: o.product_name || o.order_id,
+                  count: o.item_count,
+                })
+              : o.product_name || "—";
+          return `
+          <tr class="history-row" data-order-id="${esc(o.order_id)}" tabindex="0" role="link">
+            <td><strong>${esc(o.order_id)}</strong></td>
+            <td>${esc(formatUtc(o.order_timestamp))}</td>
+            <td>${esc(summary)}</td>
+            <td>${esc(money(o.amount))}</td>
+            <td>${esc(o.quantity)}</td>
+            <td><a class="btn btn-secondary btn-sm" href="#/orders/${esc(o.order_id)}">${esc(t("view_order"))}</a></td>
+          </tr>`;
+        })
+        .join("");
+      body = `
+        <div class="card history-card">
+          <div class="history-meta">${esc(t("shop_orders_count", { count: total }))}</div>
+          <div class="table-wrap">
+            <table class="history-table">
+              <thead>
+                <tr>
+                  <th>${esc(t("your_order_id"))}</th>
+                  <th>${esc(t("order_date"))}</th>
+                  <th>${esc(t("label_product"))}</th>
+                  <th>${esc(t("label_amount"))}</th>
+                  <th>${esc(t("quantity"))}</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>`;
+    }
+
+    document.getElementById("app").innerHTML = shell(
+      `${pageHead(t("shop_orders"), t("shop_orders_lede"))}${body}`,
+      "orders",
+    );
+    bindShell();
+
+    document.querySelectorAll(".history-row").forEach((row) => {
+      const go = () => navigate(`orders/${row.dataset.orderId}`);
+      row.addEventListener("click", (ev) => {
+        if (ev.target.closest("a")) return;
+        go();
+      });
+      row.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          go();
+        }
+      });
+    });
+  } catch (ex) {
+    document.getElementById("app").innerHTML = shell(
+      `${pageHead(t("shop_orders"), t("shop_orders_lede"))}
+       <div class="card"><div class="alert alert-error">${esc(ex.message)}</div></div>`,
+      "orders",
+    );
+    bindShell();
+  }
+}
+
+async function renderOrderDetail(orderId) {
+  document.getElementById("app").innerHTML = shell(
+    `${pageHead(t("shop_order_detail"), t("shop_orders_lede"))}
+     <div class="card"><p class="subtitle" style="margin:0">${esc(t("loading_orders"))}</p></div>`,
+    "orders",
+  );
+  bindShell();
+
+  try {
+    const order = await api(`/shop/orders/${encodeURIComponent(orderId)}`);
+    const items = Array.isArray(order.items) ? order.items : [];
+    const itemsHtml = items.length
+      ? `<ul class="success-items">
+          ${items
+            .map(
+              (i) =>
+                `<li><span>${esc(i.product_name)} × ${esc(i.quantity)}</span><strong>${esc(money(i.line_amount))}</strong></li>`,
+            )
+            .join("")}
+        </ul>`
+      : `<p class="success-meta">${esc(order.product_name)} × ${esc(order.quantity)}</p>`;
+
+    const address =
+      order.delivery_address ||
+      [order.street, order.city, order.state, order.zip_code, order.country]
+        .map((x) => String(x || "").trim())
+        .filter(Boolean)
+        .join(", ") ||
+      order.address ||
+      "—";
+
+    const main = `
+      ${pageHead(
+        t("shop_order_detail"),
+        order.order_id,
+        `<a class="btn btn-secondary" href="#/orders">${esc(t("back_to_orders"))}</a>`,
+      )}
+      <div class="card history-detail">
+        <div class="history-detail-top">
+          <div>
+            <p class="section-kicker" style="margin:0 0 0.35rem">${esc(t("your_order_id"))}</p>
+            <h2 class="page-title" style="font-size:1.25rem;margin:0">${esc(order.order_id)}</h2>
+          </div>
+        </div>
+        <dl class="confirm-order-meta">
+          <div class="confirm-order-meta-row">
+            <dt>${esc(t("order_date"))}</dt>
+            <dd>${esc(formatUtc(order.order_timestamp))}</dd>
+          </div>
+          <div class="confirm-order-meta-row">
+            <dt>${esc(t("label_amount"))}</dt>
+            <dd>${esc(money(order.amount))}</dd>
+          </div>
+          <div class="confirm-order-meta-row">
+            <dt>${esc(t("quantity"))}</dt>
+            <dd>${esc(order.quantity)}</dd>
+          </div>
+          <div class="confirm-order-meta-row">
+            <dt>${esc(t("label_delivery_address"))}</dt>
+            <dd>${esc(address)}</dd>
+          </div>
+        </dl>
+        <p class="confirm-order-heading">${esc(t("order_summary"))}</p>
+        ${itemsHtml}
+      </div>`;
+
+    document.getElementById("app").innerHTML = shell(main, "orders");
+    bindShell();
+  } catch (ex) {
+    document.getElementById("app").innerHTML = shell(
+      `${pageHead(
+        t("shop_order_detail"),
+        "",
+        `<a class="btn btn-secondary" href="#/orders">${esc(t("back_to_orders"))}</a>`,
+      )}
+       <div class="card"><div class="alert alert-error">${esc(ex.message)}</div></div>`,
+      "orders",
+    );
+    bindShell();
+  }
 }
 
 function renderAccount() {
@@ -1347,6 +1538,7 @@ async function render() {
   if (route === "success") return renderSuccess();
   if (route === "account") return renderAccount();
   if (route === "cart") return renderCart();
+  if (route === "orders") return renderOrders();
   return renderOrder();
 }
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
@@ -18,6 +18,8 @@ from api.auth import (
     require_page,
     verify_session_token,
 )
+from api.cookie_utils import clear_portal_cookie, portal_cookie_kwargs
+from auth.login_guard import client_key, login_guard
 from config import (
     DB_CONFIG,
     PORTAL_TOKEN_TTL,
@@ -186,19 +188,61 @@ def _message_for_key(key: str) -> str:
     return entry.get("en") or key
 
 
+def _client_ip(request: Request) -> str:
+    forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    if forwarded:
+        return forwarded
+    if request.client and request.client.host:
+        return request.client.host
+    return ""
+
+
+def _raise_if_locked(guard_key: str) -> None:
+    status = login_guard.status(guard_key)
+    if status.locked:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "Too many failed login attempts. "
+                f"Try again in {status.retry_after_seconds} seconds."
+            ),
+            headers={"Retry-After": str(status.retry_after_seconds)},
+        )
+
+
 @router.post("/auth/login")
-def login(payload: LoginRequest):
-    session = authenticate_credentials(payload.username.strip(), payload.password)
+def login(payload: LoginRequest, request: Request):
+    username = payload.username.strip()
+    guard_key = client_key(username, _client_ip(request))
+    _raise_if_locked(guard_key)
+
+    session = authenticate_credentials(username, payload.password)
     if not session:
+        lock = login_guard.record_failure(guard_key)
         log_system_event(
             action="AUTH_LOGIN",
             actor_type="analyst",
-            actor_id=payload.username.strip(),
+            actor_id=username,
             outcome="failure",
-            details={"reason": "invalid_credentials"},
+            details={
+                "reason": "invalid_credentials",
+                "failure_count": lock.failure_count,
+                "locked": lock.locked,
+            },
             request_path="/auth/login",
         )
+        if lock.locked:
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    "Too many failed login attempts. "
+                    f"Try again in {lock.retry_after_seconds} seconds."
+                ),
+                headers={"Retry-After": str(lock.retry_after_seconds)},
+            )
         raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    login_guard.clear(guard_key)
     log_system_event(
         action="AUTH_LOGIN",
         **actor_from_session(session),
@@ -209,15 +253,12 @@ def login(payload: LoginRequest):
     response.set_cookie(
         key=PORTAL_SESSION_COOKIE,
         value=session["token"],
-        httponly=True,
-        samesite="lax",
-        max_age=PORTAL_TOKEN_TTL,
-        path="/",
+        **portal_cookie_kwargs(max_age=PORTAL_TOKEN_TTL),
     )
     # Password login must not keep a prior SSO id_token around; otherwise logout
     # would incorrectly redirect into Keycloak for a local session.
-    response.delete_cookie(KC_ID_COOKIE, path="/")
-    response.delete_cookie(SSO_HANDOFF_COOKIE, path="/")
+    clear_portal_cookie(response, KC_ID_COOKIE)
+    clear_portal_cookie(response, SSO_HANDOFF_COOKIE)
     return response
 
 
@@ -376,19 +417,13 @@ def sso_callback(
     response.set_cookie(
         key=SSO_HANDOFF_COOKIE,
         value=session["token"],
-        httponly=True,
-        samesite="lax",
-        max_age=SSO_HANDOFF_TTL_SECONDS,
-        path="/",
+        **portal_cookie_kwargs(max_age=SSO_HANDOFF_TTL_SECONDS),
     )
     if id_token:
         response.set_cookie(
             key=KC_ID_COOKIE,
             value=id_token,
-            httponly=True,
-            samesite="lax",
-            max_age=PORTAL_TOKEN_TTL,
-            path="/",
+            **portal_cookie_kwargs(max_age=PORTAL_TOKEN_TTL),
         )
     return response
 
@@ -423,12 +458,41 @@ def sso_complete(
     response.set_cookie(
         key=PORTAL_SESSION_COOKIE,
         value=token,
-        httponly=True,
-        samesite="lax",
-        max_age=PORTAL_TOKEN_TTL,
-        path="/",
+        **portal_cookie_kwargs(max_age=PORTAL_TOKEN_TTL),
     )
-    response.delete_cookie(SSO_HANDOFF_COOKIE, path="/")
+    clear_portal_cookie(response, SSO_HANDOFF_COOKIE)
+    return response
+
+
+def _clear_auth_cookies(response) -> None:
+    clear_portal_cookie(response, KC_ID_COOKIE)
+    clear_portal_cookie(response, PORTAL_SESSION_COOKIE)
+    clear_portal_cookie(response, SSO_HANDOFF_COOKIE)
+
+
+@router.get("/auth/logout")
+@router.post("/auth/logout")
+def logout(
+    return_to: Optional[str] = Query(None),
+    metro_cart_kc_id: Optional[str] = Cookie(None, alias=KC_ID_COOKIE),
+):
+    """
+    End the local portal session. If an SSO id_token cookie is present and
+    Keycloak is configured, also end the IdP session; otherwise redirect home.
+    """
+    destination = normalize_return_to(return_to or SSO_DEFAULT_RETURN_TO)
+
+    if sso_is_configured() and metro_cart_kc_id:
+        logout_url = build_logout_url(
+            post_logout_redirect_uri=destination,
+            id_token_hint=metro_cart_kc_id,
+        )
+        response = RedirectResponse(url=logout_url, status_code=302)
+        _clear_auth_cookies(response)
+        return response
+
+    response = RedirectResponse(url=destination, status_code=302)
+    _clear_auth_cookies(response)
     return response
 
 
@@ -438,27 +502,10 @@ def sso_logout(
     metro_cart_kc_id: Optional[str] = Cookie(None, alias=KC_ID_COOKIE),
 ):
     """
-    End the Keycloak SSO session (if any), then return to the portal login page.
-    Local app session must be cleared by the browser before calling this.
+    Backward-compatible alias for `/auth/logout` (SSO-aware cookie clear).
+    Local password sessions without a Keycloak id_token just redirect home.
     """
-    destination = normalize_return_to(return_to or SSO_DEFAULT_RETURN_TO)
-
-    if not sso_is_configured() or not metro_cart_kc_id:
-        response = RedirectResponse(url=destination, status_code=302)
-        response.delete_cookie(KC_ID_COOKIE, path="/")
-        response.delete_cookie(PORTAL_SESSION_COOKIE, path="/")
-        response.delete_cookie(SSO_HANDOFF_COOKIE, path="/")
-        return response
-
-    logout_url = build_logout_url(
-        post_logout_redirect_uri=destination,
-        id_token_hint=metro_cart_kc_id,
-    )
-    response = RedirectResponse(url=logout_url, status_code=302)
-    response.delete_cookie(KC_ID_COOKIE, path="/")
-    response.delete_cookie(PORTAL_SESSION_COOKIE, path="/")
-    response.delete_cookie(SSO_HANDOFF_COOKIE, path="/")
-    return response
+    return logout(return_to=return_to, metro_cart_kc_id=metro_cart_kc_id)
 
 
 @router.get("/auth/me")

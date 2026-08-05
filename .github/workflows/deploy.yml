@@ -30,13 +30,17 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.12"
+  APP_ENV: development
   DB_HOST: localhost
   DB_PORT: "5432"
   DB_NAME: fraud_detection
   DB_USER: postgres
   DB_PASSWORD: postgres
   GROQ_API_KEY: deploy-placeholder-not-used
-  PORTAL_SECRET: deploy-placeholder-change-in-target-env
+  PORTAL_SECRET: deploy-placeholder-at-least-32-characters-xx
+  COOKIE_SECURE: "false"
+  GROQ_SSL_VERIFY: "false"
+  SCHEMA_STRICT: "false"
 
 jobs:
   validate-and-build:
