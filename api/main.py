@@ -12,7 +12,7 @@ from api.analyst import router as analyst_router
 from api.portal import router as portal_router
 from api.customer_shop import router as customer_shop_router
 from api.scheduler import start_auto_approval_scheduler, stop_auto_approval_scheduler
-from config import CORS_ALLOW_ORIGINS
+from config import BACKLOG_ALERT_INTERVAL_MINUTES, CORS_ALLOW_ORIGINS
 
 PORTAL_DIR = Path(__file__).resolve().parent.parent / "static" / "analyst-portal"
 SHOP_DIR = Path(__file__).resolve().parent.parent / "static" / "customer-portal"
@@ -38,8 +38,10 @@ async def lifespan(app: FastAPI):
         # Startup should not crash if DB is briefly unavailable; place-order also ensures.
         pass
 
-    # Background job: auto-approve backlog orders that exceeded delay_minutes
-    start_auto_approval_scheduler(interval_seconds=1800)
+    # Background job: backlog email digest + auto-approve expired review-queue orders
+    start_auto_approval_scheduler(
+        interval_seconds=max(60, int(BACKLOG_ALERT_INTERVAL_MINUTES) * 60)
+    )
     yield
     stop_auto_approval_scheduler()
 

@@ -25,6 +25,7 @@ from database.order_items import (
 )
 from ui.i18n import TRANSLATIONS
 from fraud_engine.engine import evaluate_order_with_items
+from notifications.rejection import notify_order_rejected
 from utils.order_utils import calculate_total, generate_order_id
 from utils.queries import list_devices, list_products, list_programs
 from utils.time_utils import utcnow_naive
@@ -471,6 +472,12 @@ def shop_place_order(
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Order failed. Please try again.") from exc
+
+    if status == "REJECTED":
+        try:
+            notify_order_rejected(order_id)
+        except Exception:
+            pass
 
     return {
         "message": "Order created successfully",

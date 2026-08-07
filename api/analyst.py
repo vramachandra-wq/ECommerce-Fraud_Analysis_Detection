@@ -9,6 +9,7 @@ from api.auth import get_current_session, require_page
 from auth.analyst_auth import PAGE_FRAUD_DASHBOARD
 from config import DB_CONFIG
 from fraud_engine.audit import fetch_order_audit_context, log_review_action
+from notifications.rejection import notify_order_rejected, notify_orders_rejected
 from utils.system_audit import actor_from_session, log_system_event
 
 router = APIRouter()
@@ -205,6 +206,11 @@ def reject_order(
                     details={"comments": data.review_comments, "is_fraud": data.is_fraud},
                     request_path="/reject-order",
                 )
+        # After commit: notify customer (failures must not fail the API).
+        try:
+            notify_order_rejected(data.order_id)
+        except Exception:
+            pass
         return {"message": "Rejected"}
     except HTTPException:
         raise
@@ -295,6 +301,11 @@ def batch_reject(
                     },
                     request_path="/batch-reject",
                 )
+        if processed:
+            try:
+                notify_orders_rejected(processed)
+            except Exception:
+                pass
         return {
             "message": f"Batch Rejected {len(processed)} orders",
             "processed": processed,
