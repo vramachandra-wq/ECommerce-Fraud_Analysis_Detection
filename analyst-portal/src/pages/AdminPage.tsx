@@ -92,7 +92,9 @@ function statusColor(status: string, index: number) {
 }
 
 function statusLabel(status: string) {
-  return STATUS_LABELS[status] || status.replaceAll("_", " ");
+  return STATUS_LABELS[status] || status.replaceAll("_", " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export function AdminPage() {
@@ -341,7 +343,7 @@ function PermissionsTab({
               checked={!!selections[page]}
               onChange={(e) => setSelections((s) => ({ ...s, [page]: e.target.checked }))}
             />
-            {labels[page] ?? page}
+            {labels[page] ?? page.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())}
           </label>
         ))}
       </div>
@@ -398,26 +400,38 @@ function UserManagementTab({
     <div className="space-y-6">
       <Card title="Create New Analyst">
         <form onSubmit={submit} className="grid gap-3 md:grid-cols-2">
-          {(["analyst_id", "employee_name", "username", "password"] as const).map((field) => (
-            <input
-              key={field}
-              className="rounded-lg border border-border px-3 py-2 text-sm"
-              placeholder={field.replace("_", " ")}
-              value={form[field]}
-              onChange={(e) => setForm((s) => ({ ...s, [field]: e.target.value }))}
-              type={field === "password" ? "password" : "text"}
-              required
-            />
+          {(
+            [
+              { field: "analyst_id", label: "Analyst ID", placeholder: "e.g. A2" },
+              { field: "employee_name", label: "Employee Name", placeholder: "e.g. Jane Doe" },
+              { field: "username", label: "Username", placeholder: "e.g. jdoe" },
+              { field: "password", label: "Password", placeholder: "Temporary password" },
+            ] as const
+          ).map(({ field, label, placeholder }) => (
+            <label key={field} className="block text-sm">
+              <span className="mb-1 block font-medium">{label}</span>
+              <input
+                className="w-full rounded-lg border border-border px-3 py-2 text-sm"
+                placeholder={placeholder}
+                value={form[field]}
+                onChange={(e) => setForm((s) => ({ ...s, [field]: e.target.value }))}
+                type={field === "password" ? "password" : "text"}
+                required
+              />
+            </label>
           ))}
-          <select
-            className="rounded-lg border border-border px-3 py-2 text-sm md:col-span-2"
-            value={form.role}
-            onChange={(e) => setForm((s) => ({ ...s, role: e.target.value }))}
-          >
-            <option>Fraud Analyst</option>
-            <option>Senior Fraud Analyst</option>
-            {session?.analyst.role === "Admin" ? <option>Admin</option> : null}
-          </select>
+          <label className="block text-sm md:col-span-2">
+            <span className="mb-1 block font-medium">Role</span>
+            <select
+              className="w-full rounded-lg border border-border px-3 py-2 text-sm"
+              value={form.role}
+              onChange={(e) => setForm((s) => ({ ...s, role: e.target.value }))}
+            >
+              <option>Fraud Analyst</option>
+              <option>Senior Fraud Analyst</option>
+              {session?.analyst.role === "Admin" ? <option>Admin</option> : null}
+            </select>
+          </label>
           <label className="flex items-center gap-2 text-sm md:col-span-2">
             <input type="checkbox" checked={confirm} onChange={(e) => setConfirm(e.target.checked)} />
             I confirm that I want to create this analyst profile.

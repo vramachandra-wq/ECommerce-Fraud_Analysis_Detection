@@ -72,7 +72,86 @@ KEYS = [
 EXTRA = {
     "lang_english": {"en": "English", "th": "English"},
     "lang_thai": {"en": "ไทย", "th": "ไทย"},
+    "loading_sign_in": {"en": "Logging in…", "th": "กำลังเข้าสู่ระบบ..."},
     "shop_place_order": {"en": "Place Order", "th": "สั่งซื้อ"},
+    "shop_browse": {"en": "Shop", "th": "ร้านค้า"},
+    "shop_browse_lede": {
+        "en": "Browse products and add them to your cart.",
+        "th": "เลือกสินค้าและเพิ่มลงในตะกร้า",
+    },
+    "search": {"en": "Search", "th": "ค้นหา"},
+    "search_products": {"en": "Search products", "th": "ค้นหาสินค้า"},
+    "search_products_placeholder": {
+        "en": "Search by name, category, or product ID…",
+        "th": "ค้นหาด้วยชื่อ หมวดหมู่ หรือรหัสสินค้า…",
+    },
+    "clear_search": {"en": "Clear", "th": "ล้าง"},
+    "search_no_results": {
+        "en": "No products match your search.",
+        "th": "ไม่พบสินค้าที่ตรงกับการค้นหา",
+    },
+    "search_results_count": {
+        "en": "Showing {shown} of {total}",
+        "th": "แสดง {shown} จาก {total}",
+    },
+    "all_categories": {"en": "All", "th": "ทั้งหมด"},
+    "filter_by_category": {"en": "Category", "th": "หมวดหมู่"},
+    "shop_cat_electronics": {"en": "Electronics", "th": "อิเล็กทรอนิกส์"},
+    "shop_cat_appliances": {"en": "Appliances", "th": "เครื่องใช้ไฟฟ้า"},
+    "shop_cat_furniture": {"en": "Furniture", "th": "เฟอร์นิเจอร์"},
+    "shop_cat_vouchers": {"en": "Vouchers", "th": "บัตรของขวัญ"},
+    "shop_categories_label": {"en": "Categories", "th": "หมวดหมู่"},
+    "shop_vouchers_label": {"en": "Vouchers", "th": "บัตรของขวัญ"},
+    "shop_products_heading": {"en": "Products", "th": "สินค้า"},
+    "shop_vouchers": {"en": "Gift credit", "th": "เครดิตของขวัญ"},
+    "shop_vouchers_kicker": {"en": "Digital rewards", "th": "รางวัลดิจิทัล"},
+    "shop_vouchers_lede": {
+        "en": "Prepaid gift credit kept separate from physical products.",
+        "th": "เครดิตของขวัญแบบเติมเงิน แยกจากสินค้าทั่วไป",
+    },
+    "shop_voucher_note": {
+        "en": "Digital gift credit — delivered after order approval.",
+        "th": "เครดิตของขวัญดิจิทัล — ส่งมอบหลังอนุมัติคำสั่งซื้อ",
+    },
+    "pagination_page": {"en": "Page {page} of {pages}", "th": "หน้า {page} จาก {pages}"},
+    "pagination_prev": {"en": "Previous", "th": "ก่อนหน้า"},
+    "pagination_next": {"en": "Next", "th": "ถัดไป"},
+    "shop_cart": {"en": "Cart", "th": "ตะกร้า"},
+    "shop_cart_lede": {
+        "en": "Uncheck items you do not want right now, then place an order for the selected items.",
+        "th": "ยกเลิกเลือกสินค้าที่ไม่ต้องการตอนนี้ จากนั้นสั่งซื้อเฉพาะรายการที่เลือก",
+    },
+    "shop_cart_hint": {
+        "en": "Cart has {count} item(s).",
+        "th": "ตะกร้ามี {count} รายการ",
+    },
+    "add_to_cart": {"en": "Add to cart", "th": "เพิ่มลงตะกร้า"},
+    "added_to_cart": {
+        "en": "Added {name} × {qty} to cart.",
+        "th": "เพิ่ม {name} × {qty} ลงตะกร้าแล้ว",
+    },
+    "view_cart": {"en": "View cart", "th": "ดูตะกร้า"},
+    "view_details": {"en": "View details", "th": "ดูรายละเอียด"},
+    "continue_shopping": {"en": "Continue shopping", "th": "เลือกสินค้าต่อ"},
+    "your_cart": {"en": "Your cart", "th": "ตะกร้าของคุณ"},
+    "cart_empty": {
+        "en": "Your cart is empty. Add products from Shop.",
+        "th": "ตะกร้าว่าง เพิ่มสินค้าจากหน้าร้านค้า",
+    },
+    "cart_uncheck_hint": {
+        "en": "Use the checkbox to include or skip an item for this order. Unchecked items stay in your cart.",
+        "th": "ใช้ช่องทำเครื่องหมายเพื่อรวมหรือข้ามสินค้าในคำสั่งนี้ รายการที่ไม่ได้เลือกจะยังอยู่ในตะกร้า",
+    },
+    "include_in_order": {"en": "Order", "th": "สั่ง"},
+    "selected_items": {"en": "Selected items", "th": "รายการที่เลือก"},
+    "no_items_selected": {
+        "en": "Select at least one item to place an order.",
+        "th": "เลือกอย่างน้อยหนึ่งรายการเพื่อสั่งซื้อ",
+    },
+    "place_selected_order": {"en": "Place order", "th": "สั่งซื้อ"},
+    "unit_price": {"en": "Unit price", "th": "ราคาต่อหน่วย"},
+    "line_total": {"en": "Line total", "th": "ยอดรายการ"},
+    "remove": {"en": "Remove", "th": "ลบ"},
     "shop_confirmation": {"en": "Order Confirmation", "th": "ยืนยันคำสั่งซื้อ"},
     "shop_account": {"en": "My Account", "th": "บัญชีของฉัน"},
     "shop_section": {"en": "Shopping", "th": "ร้านค้า"},
@@ -228,8 +307,13 @@ export function setLang(lang) {{
 
 export function t(key, params = {{}}) {{
   const entry = TRANSLATIONS[key];
-  if (!entry) return key;
-  let text = entry[getLang()] || entry.en || key;
+  let text = entry ? (entry[getLang()] || entry.en || "") : "";
+  if (!text || text === key) {{
+    text = String(key || "")
+      .replaceAll("_", " ")
+      .trim()
+      .replace(/\\b\\w/g, (c) => c.toUpperCase());
+  }}
   if (params && typeof params === "object") {{
     for (const [k, v] of Object.entries(params)) {{
       text = text.replaceAll("{{" + k + "}}", String(v ?? ""));

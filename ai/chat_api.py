@@ -131,7 +131,7 @@ def _build_chart_payload(df: pd.DataFrame) -> Optional[Dict[str, Any]]:
             "label": col.replace("_", " ").title(),
             "value": _to_number(work[col].iloc[0]),
             "x_label": None,
-            "y_label": str(col),
+            "y_label": str(col).replace("_", " ").title(),
             "labels": [col.replace("_", " ").title()],
             "values": [_to_number(work[col].iloc[0])],
         }

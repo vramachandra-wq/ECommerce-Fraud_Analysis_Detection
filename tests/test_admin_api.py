@@ -32,9 +32,10 @@ def _mock_db(mock_connect):
     return mock_conn, mock_cursor
 
 
+@patch("api.admin.sync_keycloak_user", return_value=(True, None))
 @patch("api.admin.log_system_event")
 @patch("api.admin.psycopg2.connect")
-def test_create_analyst(mock_connect, mock_log):
+def test_create_analyst(mock_connect, mock_log, mock_sync_kc):
     _auth()
     try:
         _mock_db(mock_connect)
@@ -48,9 +49,38 @@ def test_create_analyst(mock_connect, mock_log):
         response = client.post("/create-analyst", json=payload)
         assert response.status_code == 200
         assert response.json()["message"] == "Analyst Vinay Created"
+        mock_sync_kc.assert_called_once_with(
+            username="vinay",
+            password="password",
+            employee_name="Vinay",
+        )
     finally:
         _clear()
 
+
+@patch("api.admin.sync_keycloak_user", return_value=(False, "keycloak down"))
+@patch("api.admin.log_system_event")
+@patch("api.admin.psycopg2.connect")
+def test_create_analyst_rolls_back_when_keycloak_sync_fails(
+    mock_connect, mock_log, mock_sync_kc
+):
+    _auth()
+    try:
+        mock_conn, _ = _mock_db(mock_connect)
+        payload = {
+            "analyst_id": "A002",
+            "employee_name": "Sam Analyst",
+            "username": "sam",
+            "password": "password123",
+            "role": "Fraud Analyst",
+        }
+        response = client.post("/create-analyst", json=payload)
+        assert response.status_code == 502
+        assert "Keycloak sync failed" in response.json()["detail"]
+        mock_conn.rollback.assert_called()
+        mock_sync_kc.assert_called_once()
+    finally:
+        _clear()
 
 @patch("api.admin.log_system_event")
 @patch("api.admin.psycopg2.connect")

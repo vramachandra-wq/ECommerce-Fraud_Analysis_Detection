@@ -7,12 +7,30 @@ const styles: Record<string, string> = {
   REJECTED: "bg-red-100 text-red-800",
 };
 
+const STATUS_LABELS: Record<string, string> = {
+  ON_HOLD: "On Hold",
+  PENDING_REVIEW: "Pending Review",
+  APPROVED: "Approved",
+  REJECTED: "Rejected",
+  COMPLETED: "Completed",
+  CANCELLED: "Cancelled",
+};
+
+function formatStatusLabel(status: string) {
+  const key = String(status || "").trim().toUpperCase();
+  if (STATUS_LABELS[key]) return STATUS_LABELS[key];
+  return key
+    .replaceAll("_", " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export function StatusBadge({ status }: { status: string }) {
   return (
     <span
       className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${styles[status] ?? "bg-slate-100 text-slate-700"}`}
     >
-      {status.replace("_", " ")}
+      {formatStatusLabel(status)}
     </span>
   );
 }

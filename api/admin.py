@@ -8,6 +8,7 @@ import psycopg2
 from api.auth import get_current_session, require_page
 from auth.analyst_auth import PAGE_ADMIN_PANEL, ROLE_ADMIN
 from auth.passwords import hash_password
+from auth.sso import sync_keycloak_user
 from config import DB_CONFIG
 from fraud_engine.engine import clear_metadata_cache
 from fraud_engine.rules import clear_interval_cache
@@ -125,6 +126,7 @@ def create_analyst(
 
     try:
         with psycopg2.connect(**DB_CONFIG) as conn:
+            conn.autocommit = False
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -140,6 +142,34 @@ def create_analyst(
                         data.role,
                     ),
                 )
+                synced, sync_error = sync_keycloak_user(
+                    username=data.username,
+                    password=data.password,
+                    employee_name=data.employee_name,
+                )
+                if not synced:
+                    conn.rollback()
+                    log_system_event(
+                        action="ANALYST_CREATE",
+                        **actor_from_session(session),
+                        resource_type="analyst",
+                        resource_id=data.analyst_id,
+                        outcome="failure",
+                        details={
+                            "username": data.username,
+                            "role": data.role,
+                            "reason": "keycloak_sync_failed",
+                            "error": sync_error,
+                        },
+                        request_path="/create-analyst",
+                    )
+                    raise HTTPException(
+                        status_code=502,
+                        detail=(
+                            "Analyst was not created because Keycloak sync failed: "
+                            f"{sync_error}"
+                        ),
+                    )
                 log_system_event(
                     cur,
                     action="ANALYST_CREATE",
@@ -150,10 +180,14 @@ def create_analyst(
                         "username": data.username,
                         "role": data.role,
                         "created_by": actor["analyst_id"],
+                        "keycloak_synced": True,
                     },
                     request_path="/create-analyst",
                 )
+                conn.commit()
         return {"message": f"Analyst {data.employee_name} Created"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

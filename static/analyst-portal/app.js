@@ -3,7 +3,7 @@ import {
   curSym,
   languageToggleHtml,
   bindLanguageToggle,
-} from "./i18n.js?v=63";
+} from "./i18n.js?v=64";
 
 const PAGE_LABEL_KEYS = {
   ADMIN_PANEL: "nav_admin_panel",
@@ -13,7 +13,12 @@ const PAGE_LABEL_KEYS = {
 };
 
 function pageLabel(page) {
-  return t(PAGE_LABEL_KEYS[page] || page);
+  const key = PAGE_LABEL_KEYS[page];
+  if (key) {
+    const translated = t(key);
+    if (translated && translated !== key) return translated;
+  }
+  return humanizeKey(page);
 }
 
 const PAGE_ROUTES = {
@@ -145,8 +150,13 @@ async function consumeSsoParamsFromUrl() {
   history.replaceState(null, "", clean);
 
   if (ssoError) {
-    pendingSsoError = ssoError;
+    pendingSsoError = humanizeKey(ssoError).replaceAll("+", " ");
     return;
+  }
+
+  const app = document.getElementById("app");
+  if (app) {
+    app.innerHTML = `<div class="login-wrap"><div class="login-card"><p class="subtitle login-busy" aria-live="polite">${busyLabelHtml(t("loading_sign_in"))}</p></div></div>`;
   }
 
   try {
@@ -160,7 +170,7 @@ async function consumeSsoParamsFromUrl() {
       window.location.hash = `#/${first}`;
     }
   } catch {
-    pendingSsoError = "sso_session_failed";
+    pendingSsoError = "SSO session could not be completed";
   }
 }
 
@@ -190,6 +200,10 @@ function esc(s) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function busyLabelHtml(label) {
+  return `<span class="btn-loading"><span class="login-spinner" aria-hidden="true"></span>${esc(label)}</span>`;
 }
 
 /** Format timestamps for display as UTC (naive values treated as UTC). */
@@ -290,8 +304,15 @@ function alertDialog({ title = t("success"), message, confirmLabel = t("ok") } =
   return confirmAction({ title, message, confirmLabel, alertOnly: true });
 }
 
+function humanizeKey(value) {
+  return String(value || "")
+    .replaceAll("_", " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function badge(status) {
-  return `<span class="badge badge-${esc(status)}">${esc(status.replaceAll("_", " "))}</span>`;
+  return `<span class="badge badge-${esc(status)}">${esc(humanizeKey(status))}</span>`;
 }
 
 function money(n) {
@@ -871,42 +892,44 @@ function shell(content, route) {
   const nav = pages
     .map((page) => {
       const r = PAGE_ROUTES[page];
-      return `<a href="#/${r}" class="nav-link ${route === r ? "active" : ""}">
+      const label = pageLabel(page);
+      return `<a href="#/${r}" class="nav-link ${route === r ? "active" : ""}" title="${esc(label)}" aria-label="${esc(label)}">
         ${NAV_ICONS[r] || NAV_ICONS.dashboard}
-        <span>${esc(pageLabel(page))}</span>
-        <span class="chev">›</span>
+        <span>${esc(label)}</span>
+        <span class="chev" aria-hidden="true">›</span>
       </a>`;
     })
     .join("");
 
   return `
+    <a class="skip-link" href="#main-content">${esc(t("skip_to_content"))}</a>
     <div class="app-frame">
       <aside class="sidebar">
         <div class="sidebar-brand">
-          <div class="sidebar-logo">M</div>
+          <div class="sidebar-logo" aria-hidden="true">M</div>
           <div class="sidebar-brand-name">${esc(t("internal_brand"))}</div>
         </div>
         <div class="sidebar-section">${esc(t("workspace"))}</div>
         ${nav}
         <div class="sidebar-footer">
-          <button class="btn btn-secondary" style="width:100%;margin-bottom:0.5rem" id="change-password-btn" type="button">${esc(t("change_password"))}</button>
+          <button class="btn btn-secondary btn-block" style="margin-bottom:0.5rem" id="change-password-btn" type="button">${esc(t("change_password"))}</button>
           <button class="btn btn-logout" id="logout-btn">${esc(t("log_out"))}</button>
         </div>
       </aside>
       <div class="main-wrap">
         <header class="topbar">
           <div class="topbar-left">
-            <span class="subtitle" style="margin:0">${esc(t("fraud_analyst_workspace"))}</span>
+            <span class="subtitle mt-0">${esc(t("fraud_analyst_workspace"))}</span>
           </div>
           <div class="topbar-right">
             ${languageToggleHtml({ id: "lang-select" })}
             <div class="user-chip" style="border-left:none;padding-left:0">
               <span class="user-chip-text">${esc(t("hi_user", { name: session.analyst.employee_name }))}</span>
-              <div class="user-avatar">${esc(initials(session.analyst.employee_name))}</div>
+              <div class="user-avatar" aria-hidden="true">${esc(initials(session.analyst.employee_name))}</div>
             </div>
           </div>
         </header>
-        <main class="content ${route === "chatbot" ? "content--chat" : ""}">${content}</main>
+        <main class="content ${route === "chatbot" ? "content--chat" : ""}" id="main-content">${content}</main>
       </div>
     </div>
   `;
@@ -933,7 +956,7 @@ async function renderLogin(mode = "login") {
 
   const ssoBlock = ssoEnabled
     ? `
-        <button class="btn btn-secondary" style="width:100%;margin-top:0.75rem" type="button" id="sso-btn">${esc(t("sign_in_sso"))}</button>
+        <button class="btn btn-secondary btn-block" style="margin-top:0.75rem" type="button" id="sso-btn">${esc(t("sign_in_sso"))}</button>
         <p class="subtitle" style="text-align:center;margin:0.85rem 0 0.25rem">${esc(t("or_continue_with_password"))}</p>
       `
     : "";
@@ -945,22 +968,22 @@ async function renderLogin(mode = "login") {
   if (isChange) {
     subtitle = t("password_change_login_hint");
     fields = `
-      <div class="field"><label>${esc(t("username"))}</label><input name="username" required autocomplete="username" /></div>
-      <div class="field"><label>${esc(t("current_password"))}</label><input name="current_password" type="password" required autocomplete="current-password" /></div>
-      <div class="field"><label>${esc(t("new_password"))}</label><input name="new_password" type="password" required autocomplete="new-password" /></div>
-      <div class="field"><label>${esc(t("confirm_new_password"))}</label><input name="confirm_password" type="password" required autocomplete="new-password" /></div>`;
+      <div class="field"><label for="login-username">${esc(t("username"))}</label><input id="login-username" name="username" required autocomplete="username" /></div>
+      <div class="field"><label for="login-current-password">${esc(t("current_password"))}</label><input id="login-current-password" name="current_password" type="password" required autocomplete="current-password" /></div>
+      <div class="field"><label for="login-new-password">${esc(t("new_password"))}</label><input id="login-new-password" name="new_password" type="password" required autocomplete="new-password" /></div>
+      <div class="field"><label for="login-confirm-password">${esc(t("confirm_new_password"))}</label><input id="login-confirm-password" name="confirm_password" type="password" required autocomplete="new-password" /></div>`;
     actions = `
-      <button class="btn btn-primary" style="width:100%" type="submit">${esc(t("update_password"))}</button>
-      <button type="button" class="btn btn-secondary" style="width:100%;margin-top:0.65rem" id="back-login">${esc(t("back_to_login"))}</button>`;
+      <button class="btn btn-primary btn-block" type="submit">${esc(t("update_password"))}</button>
+      <button type="button" class="btn btn-secondary btn-block" id="back-login">${esc(t("back_to_login"))}</button>`;
   } else {
     subtitle = t("analyst_login_subtitle");
     fields = `
       ${ssoBlock}
-      <div class="field"><label>${esc(t("username"))}</label><input name="username" required autocomplete="username" /></div>
-      <div class="field"><label>${esc(t("password"))}</label><input name="password" type="password" required autocomplete="current-password" /></div>`;
+      <div class="field"><label for="login-username">${esc(t("username"))}</label><input id="login-username" name="username" required autocomplete="username" /></div>
+      <div class="field"><label for="login-password">${esc(t("password"))}</label><input id="login-password" name="password" type="password" required autocomplete="current-password" /></div>`;
     actions = `
-      <button class="btn btn-primary" style="width:100%" type="submit">${esc(t("sign_in"))}</button>
-      <button type="button" class="btn btn-secondary" style="width:100%;margin-top:0.65rem" id="goto-change-password">${esc(t("change_password"))}</button>`;
+      <button class="btn btn-primary btn-block" type="submit">${esc(t("sign_in"))}</button>
+      <button type="button" class="btn btn-secondary btn-block" id="goto-change-password">${esc(t("change_password"))}</button>`;
   }
 
   app.innerHTML = `
@@ -968,10 +991,10 @@ async function renderLogin(mode = "login") {
       <div class="login-lang">${languageToggleHtml({ id: "lang-select-login" })}</div>
       <form class="login-card" id="login-form">
         <div class="login-logo-row">
-          <div class="sidebar-logo">M</div>
+          <div class="sidebar-logo" aria-hidden="true">M</div>
           <h1>${esc(isChange ? t("change_password") : t("internal_brand"))}</h1>
         </div>
-        <p class="subtitle" style="margin-top:0">${esc(subtitle)}</p>
+        <p class="subtitle mt-0">${esc(subtitle)}</p>
         <div id="login-error">${ssoErrorHtml}</div>
         ${fields}
         ${actions}
@@ -979,7 +1002,10 @@ async function renderLogin(mode = "login") {
     </div>
   `;
   bindLanguageToggle("lang-select-login", () => renderLogin(mode));
-  document.getElementById("sso-btn")?.addEventListener("click", () => {
+  document.getElementById("sso-btn")?.addEventListener("click", (ev) => {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+    btn.innerHTML = busyLabelHtml(t("loading_sign_in"));
     window.location.href = ssoLoginUrl();
   });
   document.getElementById("goto-change-password")?.addEventListener("click", () => {
@@ -992,7 +1018,17 @@ async function renderLogin(mode = "login") {
     e.preventDefault();
     const fd = new FormData(e.target);
     const err = document.getElementById("login-error");
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    const secondaryBtns = e.target.querySelectorAll('button[type="button"]');
+    const originalHtml = submitBtn ? submitBtn.innerHTML : "";
     err.innerHTML = "";
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = busyLabelHtml(isChange ? t("processing") : t("loading_sign_in"));
+    }
+    secondaryBtns.forEach((btn) => {
+      btn.disabled = true;
+    });
     try {
       if (isChange) {
         await api(
@@ -1025,6 +1061,13 @@ async function renderLogin(mode = "login") {
       navigate(first);
     } catch (ex) {
       err.innerHTML = `<div class="alert alert-error">${esc(ex.message || (isChange ? t("password_change_failed") : t("invalid_login_analyst")))}</div>`;
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalHtml;
+      }
+      secondaryBtns.forEach((btn) => {
+        btn.disabled = false;
+      });
     }
   };
 }
@@ -1282,13 +1325,13 @@ async function renderDashboard() {
         <div class="card">
           <div class="section-head" style="margin-bottom:0.75rem">
             <h3 style="margin:0">${esc(t("review_queue"))}</h3>
-            <p class="subtitle" style="margin:0">${filteredOrders.length}${chartFilterKey ? " filtered" : " total"} · ${QUEUE_PAGE_SIZE} rows per page · delay from rule_master</p>
+            <p class="subtitle" style="margin:0">${filteredOrders.length}${chartFilterKey ? " filtered" : " total"} · ${QUEUE_PAGE_SIZE} rows per page · delay from rule master</p>
           </div>
           ${filteredOrders.length ? `
             <table>
               <thead>
                 <tr>
-                  <th style="width:42px"><input type="checkbox" id="dq-select-all" title="Select all on this page" /></th>
+                  <th style="width:42px"><input type="checkbox" id="dq-select-all" title="${esc(t("select_all_page"))}" /></th>
                   <th>Order</th><th>Customer</th><th>Product</th><th>Amount</th><th>Status</th>
                   <th>Delay</th><th>Remaining</th><th>Rule</th><th>Placed</th>
                 </tr>
@@ -1649,7 +1692,7 @@ async function renderAdmin() {
       </div>
     </header>
 
-    <nav class="admin-nav" aria-label="Admin tools">
+    <nav class="admin-nav" aria-label="${esc(t("admin_tools"))}">
       <div class="admin-tabs" id="admin-tabs" role="tablist">
         ${adminTabs().map((tab) => `
           <button type="button" class="admin-tab tone-${esc(tab.tone)} ${adminActiveTab === tab.id ? "active" : ""}" data-tab="${esc(tab.id)}" role="tab" aria-selected="${adminActiveTab === tab.id}" title="${esc(tab.blurb)}">
@@ -1777,13 +1820,13 @@ async function renderAdminQueue(body) {
       <div class="card">
         <div class="section-head" style="margin-bottom:0.75rem">
           <h3 style="margin:0">${esc(t("review_queue"))}</h3>
-          <p class="subtitle" style="margin:0">${orders.length} total · ${QUEUE_PAGE_SIZE} rows per page · ON_HOLD / PENDING_REVIEW only</p>
+          <p class="subtitle" style="margin:0">${orders.length} total · ${QUEUE_PAGE_SIZE} rows per page · On Hold / Pending Review only</p>
         </div>
         ${orders.length ? `
           <table>
             <thead>
               <tr>
-                <th style="width:42px"><input type="checkbox" id="aq-select-all" title="Select all on this page" /></th>
+                <th style="width:42px"><input type="checkbox" id="aq-select-all" title="${esc(t("select_all_page"))}" /></th>
                 <th>Order</th><th>Customer</th><th>Product</th><th>Amount</th><th>Status</th>
                 <th>Delay</th><th>Remaining</th><th>Rule</th><th>Placed</th>
               </tr>
@@ -2594,7 +2637,7 @@ function statusChartColor(status, index) {
 }
 
 function statusDisplayName(status) {
-  return STATUS_LABELS[status] || String(status || "").replaceAll("_", " ");
+  return STATUS_LABELS[status] || humanizeKey(status);
 }
 
 function buildStatusDistribution(statusCounts) {
@@ -2660,7 +2703,7 @@ function buildStatusDistribution(statusCounts) {
     <div class="status-dist">
       <div class="status-dist-visual">
         <div class="analytics-donut status-dist-donut">
-          <svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img" aria-label="Order status distribution">
+          <svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img" aria-label="${esc(t("chart_status_distribution"))}">
             <circle cx="${size / 2}" cy="${size / 2}" r="${radius}" fill="transparent" stroke="#eef2f7" stroke-width="${stroke}"></circle>
             ${rings}
           </svg>
@@ -2724,7 +2767,7 @@ function buildDailyVolumeLine(trend) {
 
   return `
     <div class="analytics-line-wrap">
-      <svg viewBox="0 0 ${w} ${h}" class="analytics-line-svg" role="img" aria-label="Daily order volume line chart">
+      <svg viewBox="0 0 ${w} ${h}" class="analytics-line-svg" role="img" aria-label="${esc(t("chart_daily_volume"))}">
         ${gridYs}
         <path d="${area}" fill="rgba(25,118,210,0.12)" stroke="none"></path>
         <polyline fill="none" stroke="#1976d2" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" points="${line}"></polyline>
@@ -3163,7 +3206,7 @@ async function renderPowerBi() {
   bindShell();
   try {
     const data = await api("/portal/power-bi");
-    content = `<h1>Analytics Dashboards</h1><div class="pbi-frame"><iframe src="${esc(data.embed_url)}" title="Power BI" allowfullscreen></iframe></div>`;
+    content = `<div class="section-head"><div><p class="section-kicker">${esc(t("internal_brand"))}</p><h1 class="page-title">${esc(t("analytics_dashboards"))}</h1></div></div><div class="pbi-frame"><iframe src="${esc(data.embed_url)}" title="${esc(t("analytics_dashboards"))}" allowfullscreen></iframe></div>`;
   } catch (ex) {
     content = `<h1>Analytics Dashboards</h1><div class="alert alert-error">${esc(ex.message)}</div>`;
   }
@@ -3381,7 +3424,7 @@ async function renderChatbot() {
           </button>
           <form id="chat-form" class="gpt-composer">
             <textarea id="chat-input" rows="1" placeholder="${esc(t("chat_placeholder"))}" ></textarea>
-            <button class="gpt-send" type="submit" title="Send" aria-label="Send">
+            <button class="gpt-send" type="submit" title="${esc(t("chat_send"))}" aria-label="${esc(t("chat_send"))}">
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
             </button>
           </form>

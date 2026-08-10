@@ -214,6 +214,40 @@ def _admin_access_token() -> str:
     return token
 
 
+def _split_display_name(employee_name: str) -> Tuple[str, str]:
+    parts = [p for p in (employee_name or "").strip().split() if p]
+    if not parts:
+        return "", ""
+    if len(parts) == 1:
+        return parts[0], ""
+    return parts[0], " ".join(parts[1:])
+
+
+def _find_keycloak_user_id(client: httpx.Client, admin_token: str, username: str) -> Optional[str]:
+    users = client.get(
+        f"{admin_base_url()}/users",
+        params={"username": username, "exact": "true"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    users.raise_for_status()
+    matches = users.json()
+    if not matches:
+        return None
+    user_id = str(matches[0].get("id") or "").strip()
+    return user_id or None
+
+
+def _set_keycloak_password(
+    client: httpx.Client, admin_token: str, user_id: str, password: str
+) -> None:
+    reset = client.put(
+        f"{admin_base_url()}/users/{user_id}/reset-password",
+        json={"type": "password", "temporary": False, "value": password},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    reset.raise_for_status()
+
+
 def sync_keycloak_password(username: str, new_password: str) -> tuple[bool, Optional[str]]:
     """
     Best-effort sync of a local analyst password into Keycloak.
@@ -232,24 +266,87 @@ def sync_keycloak_password(username: str, new_password: str) -> tuple[bool, Opti
     try:
         admin_token = _admin_access_token()
         with httpx.Client(timeout=20.0) as client:
-            users = client.get(
-                f"{admin_base_url()}/users",
-                params={"username": username, "exact": "true"},
-                headers={"Authorization": f"Bearer {admin_token}"},
-            )
-            users.raise_for_status()
-            matches = users.json()
-            if not matches:
-                return True, None
-            user_id = str(matches[0].get("id") or "").strip()
+            user_id = _find_keycloak_user_id(client, admin_token, username)
             if not user_id:
-                return False, "keycloak_user_id_missing"
-            reset = client.put(
-                f"{admin_base_url()}/users/{user_id}/reset-password",
-                json={"type": "password", "temporary": False, "value": new_password},
-                headers={"Authorization": f"Bearer {admin_token}"},
-            )
-            reset.raise_for_status()
+                return True, None
+            _set_keycloak_password(client, admin_token, user_id, new_password)
+            return True, None
+    except (httpx.HTTPError, RuntimeError) as exc:
+        return False, str(exc)
+
+
+def sync_keycloak_user(
+    *,
+    username: str,
+    password: str,
+    employee_name: str = "",
+    email: Optional[str] = None,
+    enabled: bool = True,
+) -> tuple[bool, Optional[str]]:
+    """
+    Create or update a Keycloak user so admin-created analysts stay in sync for SSO.
+
+    Returns (True, None) when synced or not applicable, else (False, reason).
+    """
+    if not sso_is_configured():
+        return True, None
+    if not KEYCLOAK_ADMIN or not KEYCLOAK_ADMIN_PASSWORD:
+        return True, None
+    username = (username or "").strip()
+    if not username:
+        return False, "missing_username"
+    if not (password or "").strip():
+        return False, "missing_password"
+
+    first_name, last_name = _split_display_name(employee_name)
+    resolved_email = (email or "").strip() or f"{username}@metro-cart.local"
+
+    try:
+        admin_token = _admin_access_token()
+        headers = {"Authorization": f"Bearer {admin_token}"}
+        with httpx.Client(timeout=20.0) as client:
+            user_id = _find_keycloak_user_id(client, admin_token, username)
+            if user_id:
+                update = client.put(
+                    f"{admin_base_url()}/users/{user_id}",
+                    json={
+                        "id": user_id,
+                        "username": username,
+                        "enabled": enabled,
+                        "email": resolved_email,
+                        "emailVerified": True,
+                        "firstName": first_name,
+                        "lastName": last_name,
+                    },
+                    headers=headers,
+                )
+                update.raise_for_status()
+            else:
+                create = client.post(
+                    f"{admin_base_url()}/users",
+                    json={
+                        "username": username,
+                        "enabled": enabled,
+                        "email": resolved_email,
+                        "emailVerified": True,
+                        "firstName": first_name,
+                        "lastName": last_name,
+                        "credentials": [
+                            {
+                                "type": "password",
+                                "temporary": False,
+                                "value": password,
+                            }
+                        ],
+                    },
+                    headers=headers,
+                )
+                if create.status_code not in (201, 204):
+                    create.raise_for_status()
+                user_id = _find_keycloak_user_id(client, admin_token, username)
+                if not user_id:
+                    return False, "keycloak_user_create_missing_id"
+            _set_keycloak_password(client, admin_token, user_id, password)
             return True, None
     except (httpx.HTTPError, RuntimeError) as exc:
         return False, str(exc)

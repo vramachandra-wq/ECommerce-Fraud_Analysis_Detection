@@ -128,9 +128,37 @@ export const TRANSLATIONS = {
     "en": "Language",
     "th": "ภาษา"
   },
+  "skip_to_content": {
+    "en": "Skip to content",
+    "th": "ข้ามไปยังเนื้อหา"
+  },
+  "admin_tools": {
+    "en": "Admin tools",
+    "th": "เครื่องมือผู้ดูแล"
+  },
+  "chat_send": {
+    "en": "Send",
+    "th": "ส่ง"
+  },
+  "chart_status_distribution": {
+    "en": "Order status distribution",
+    "th": "การกระจายสถานะคำสั่งซื้อ"
+  },
+  "chart_daily_volume": {
+    "en": "Daily order volume line chart",
+    "th": "กราฟเส้นปริมาณคำสั่งซื้อรายวัน"
+  },
+  "analytics_dashboards": {
+    "en": "Analytics Dashboards",
+    "th": "แดชบอร์ดการวิเคราะห์"
+  },
   "processing": {
     "en": "Processing…",
     "th": "กำลังดำเนินการ..."
+  },
+  "loading_sign_in": {
+    "en": "Logging in…",
+    "th": "กำลังเข้าสู่ระบบ..."
   },
   "minutes_unit": {
     "en": "{n} min",
