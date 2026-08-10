@@ -14,7 +14,16 @@ from api.analyst import router as analyst_router
 from api.portal import router as portal_router
 from api.customer_shop import router as customer_shop_router
 from api.scheduler import start_auto_approval_scheduler, stop_auto_approval_scheduler
-from config import BACKLOG_ALERT_INTERVAL_MINUTES, CORS_ALLOW_ORIGINS
+from config import (
+    BACKLOG_ALERT_INTERVAL_MINUTES,
+    CORS_ALLOW_ORIGINS,
+    DB_CONFIG,
+    SCHEMA_STRICT,
+    log_security_posture,
+    validate_runtime_secrets,
+)
+
+logger = logging.getLogger(__name__)
 
 PORTAL_DIR = Path(__file__).resolve().parent.parent / "static" / "analyst-portal"
 SHOP_DIR = Path(__file__).resolve().parent.parent / "static" / "customer-portal"

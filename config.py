@@ -151,6 +151,48 @@ BACKLOG_ALERT_ROLES = tuple(
 BACKLOG_ALERT_INTERVAL_MINUTES = int(os.environ.get("BACKLOG_ALERT_INTERVAL_MINUTES", "60"))
 
 
+def validate_runtime_secrets(*, strict: bool | None = None) -> None:
+    """Refuse weak portal/SSO secrets in production (or when strict=True)."""
+    enforce = IS_PRODUCTION if strict is None else strict
+    weak_portal = _is_weak_secret(PORTAL_SECRET)
+    weak_kc = KEYCLOAK_ENABLED and _is_weak_secret(KEYCLOAK_CLIENT_SECRET)
+
+    if not enforce:
+        if weak_portal:
+            warnings.warn(
+                "PORTAL_SECRET is a weak/demo default. Set a long random value before production.",
+                UserWarning,
+                stacklevel=2,
+            )
+        return
+
+    problems = []
+    if weak_portal:
+        problems.append(
+            "PORTAL_SECRET must be set to a strong random value (>= 32 chars, not a demo placeholder)"
+        )
+    if weak_kc:
+        problems.append(
+            "KEYCLOAK_CLIENT_SECRET must be set to a strong random value when Keycloak is enabled"
+        )
+    if problems:
+        raise RuntimeError(
+            "Refusing to start with insecure secrets in "
+            f"{APP_ENV}: " + "; ".join(problems)
+        )
+
+
+def log_security_posture() -> None:
+    """Emit a short startup summary (no secret values)."""
+    _logger.info(
+        "Security posture: APP_ENV=%s COOKIE_SECURE=%s GROQ_SSL_VERIFY=%s SCHEMA_STRICT=%s",
+        APP_ENV,
+        COOKIE_SECURE,
+        GROQ_SSL_VERIFY,
+        SCHEMA_STRICT,
+    )
+
+
 def is_graph_mail_configured() -> bool:
     """True when Graph app credentials and sender mailbox are present."""
     return bool(AZURE_CLIENT_ID and AZURE_TENANT_ID and AZURE_CLIENT_SECRET and GRAPH_SENDER_EMAIL)
