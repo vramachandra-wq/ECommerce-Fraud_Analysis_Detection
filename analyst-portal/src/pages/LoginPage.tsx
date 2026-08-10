@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
-import { Shield } from "lucide-react";
+import { Loader2, Shield } from "lucide-react";
 import { api, ApiError, ssoLoginHref } from "../api";
 import { useAuth } from "../context/AuthContext";
 import { LanguageToggle, useI18n } from "../i18n";
@@ -8,6 +8,32 @@ import { PAGE_ROUTES } from "../types";
 import { Alert, Button } from "../components/ui";
 
 type LoginMode = "login" | "change_password";
+
+const SSO_ERROR_LABELS: Record<string, string> = {
+  sso_not_configured: "SSO is not configured",
+  invalid_sso_callback: "Invalid SSO callback",
+  sso_exchange_failed: "SSO token exchange failed",
+  no_local_analyst: "No matching local analyst account",
+  sso_session_failed: "SSO session could not be completed",
+};
+
+function humanizeSsoError(code: string) {
+  const key = String(code || "").trim();
+  if (SSO_ERROR_LABELS[key]) return SSO_ERROR_LABELS[key];
+  return key
+    .replaceAll("_", " ")
+    .replaceAll("+", " ")
+    .trim();
+}
+
+function BusyLabel({ label }: { label: string }) {
+  return (
+    <span className="inline-flex items-center justify-center gap-2">
+      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+      <span>{label}</span>
+    </span>
+  );
+}
 
 export function LoginPage() {
   const { session, login, completeSsoLogin } = useAuth();
@@ -47,7 +73,7 @@ export function LoginPage() {
     setSearchParams(next, { replace: true });
 
     if (ssoError) {
-      setError(`${t("sso_login_failed")}: ${ssoError}`);
+      setError(`${t("sso_login_failed")}: ${humanizeSsoError(ssoError)}`);
       setSsoBootstrapping(false);
       return;
     }
@@ -120,7 +146,10 @@ export function LoginPage() {
         {error ? <Alert tone="error">{error}</Alert> : null}
         {success ? <Alert tone="success">{success}</Alert> : null}
         {ssoBootstrapping ? (
-          <p className="text-sm text-muted">{t("processing")}</p>
+          <p className="mb-4 flex items-center justify-center gap-2 text-sm text-muted" aria-live="polite">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            {t("loading_sign_in")}
+          </p>
         ) : null}
 
         {mode === "login" && ssoEnabled ? (
@@ -131,10 +160,15 @@ export function LoginPage() {
               variant="secondary"
               disabled={loading || ssoBootstrapping}
               onClick={() => {
+                setLoading(true);
                 window.location.href = ssoLoginHref();
               }}
             >
-              {t("sign_in_sso")}
+              {loading || ssoBootstrapping ? (
+                <BusyLabel label={t("loading_sign_in")} />
+              ) : (
+                t("sign_in_sso")
+              )}
             </Button>
             <p className="text-center text-xs text-muted">{t("or_continue_with_password")}</p>
           </div>
@@ -201,11 +235,15 @@ export function LoginPage() {
             </>
           )}
           <Button type="submit" className="w-full" disabled={loading || ssoBootstrapping}>
-            {loading
-              ? t("processing")
-              : mode === "change_password"
-                ? t("update_password")
-                : t("log_in")}
+            {loading ? (
+              <BusyLabel
+                label={mode === "change_password" ? t("processing") : t("loading_sign_in")}
+              />
+            ) : mode === "change_password" ? (
+              t("update_password")
+            ) : (
+              t("log_in")
+            )}
           </Button>
           {mode === "login" ? (
             <Button

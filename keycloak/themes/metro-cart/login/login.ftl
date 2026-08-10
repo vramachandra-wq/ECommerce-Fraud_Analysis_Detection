@@ -12,7 +12,7 @@
         <div id="kc-form">
           <div id="kc-form-wrapper">
             <#if realm.password>
-                <form id="kc-form-login" onsubmit="login.disabled = true; return true;" action="${url.loginAction}" method="post">
+                <form id="kc-form-login" action="${url.loginAction}" method="post">
                     <#if !usernameHidden??>
                         <div class="${properties.kcFormGroupClass!}">
                             <label for="username" class="${properties.kcLabelClass!}"><#if !realm.loginWithEmailAllowed>${msg("username")}<#elseif !realm.registrationEmailAsUsername>${msg("usernameOrEmail")}<#else>${msg("email")}</#if></label>
@@ -78,13 +78,37 @@
 
                       <div id="kc-form-buttons" class="${properties.kcFormGroupClass!}">
                           <input type="hidden" id="id-hidden-input" name="credentialId" <#if auth.selectedCredential?has_content>value="${auth.selectedCredential}"</#if>/>
-                          <input tabindex="7" class="${properties.kcButtonClass!} ${properties.kcButtonPrimaryClass!} ${properties.kcButtonBlockClass!} ${properties.kcButtonLargeClass!}" name="login" id="kc-login" type="submit" value="${msg("doLogIn")}"/>
+                          <input type="hidden" name="login" value=""/>
+                          <button tabindex="7" class="${properties.kcButtonClass!} ${properties.kcButtonPrimaryClass!} ${properties.kcButtonBlockClass!} ${properties.kcButtonLargeClass!} mc-login-btn" id="kc-login" type="submit">
+                            <span id="kc-login-label">${msg("doLogIn")}</span>
+                            <span id="kc-login-busy" class="mc-login-busy" hidden>
+                              <span class="mc-login-spinner" aria-hidden="true"></span>
+                              ${msg("loadingSignIn")}
+                            </span>
+                          </button>
                       </div>
                 </form>
             </#if>
             </div>
         </div>
         <script type="module" src="${url.resourcesPath}/js/passwordVisibility.js"></script>
+        <script>
+          (function () {
+            var form = document.getElementById("kc-form-login");
+            if (!form) return;
+            form.addEventListener("submit", function () {
+              var btn = document.getElementById("kc-login");
+              var label = document.getElementById("kc-login-label");
+              var busy = document.getElementById("kc-login-busy");
+              if (btn) {
+                btn.setAttribute("aria-busy", "true");
+                btn.style.pointerEvents = "none";
+              }
+              if (label) label.hidden = true;
+              if (busy) busy.hidden = false;
+            });
+          })();
+        </script>
     <#elseif section = "info" >
         <#if realm.password && realm.registrationAllowed && !registrationDisabled??>
             <div id="kc-registration-container">

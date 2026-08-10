@@ -218,7 +218,7 @@ Passwords are stored as **bcrypt** hashes.
 
 Keycloak login uses the custom **`metro-cart`** theme (same look as the analyst portal login: portal background, white card, blue accent). Theme files live in `keycloak/themes/metro-cart/` and are mounted into the Keycloak container.
 
-**Password authority model:** local username/password login remains available alongside SSO. Changing an analyst password in the portal updates the local Metro Cart hash and, when Keycloak admin credentials are configured, syncs the matching Keycloak user password. If Keycloak admin credentials are missing, local password change still succeeds (SSO sync is skipped).
+**Password authority model:** local username/password login remains available alongside SSO. Changing an analyst password in the portal updates the local Metro Cart hash and, when Keycloak admin credentials are configured, syncs the matching Keycloak user password. Creating an analyst in Admin Panel writes the local DB row and syncs a matching Keycloak user (create or update + password). If Keycloak admin credentials are missing, local create/password change still succeeds (SSO sync is skipped). If Keycloak admin credentials are configured and sync fails, the local create/password change is rolled back.
 
 ## Environment
 
@@ -242,7 +242,7 @@ Copy `.env.example` → `.env` and set at least:
 | `KEYCLOAK_URL` / `KEYCLOAK_REALM` / `KEYCLOAK_CLIENT_*` | OIDC client settings for analyst SSO |
 | `KEYCLOAK_REDIRECT_URI` | Must match Keycloak client redirect URI |
 | `SSO_DEFAULT_RETURN_TO` | Where browsers land after SSO (default `/portal/`) |
-| `KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD` | Optional; required only to sync portal password changes into Keycloak |
+| `KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD` | Optional; required to sync admin-created analysts and portal password changes into Keycloak |
 | `KEYCLOAK_START_MODE` | `start-dev` for laptop demos; use `start` + `KC_HOSTNAME` outside local POCs |
 | `KC_HOSTNAME` / `KC_PROXY_HEADERS` | Required when Keycloak runs in non-dev (`start`) mode |
 | `SYSTEM_AUDIT_LOG_PATH` | Optional path for JSONL file backup of system audit events |

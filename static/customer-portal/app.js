@@ -7,7 +7,7 @@ import {
   curSym,
   languageToggleHtml,
   bindLanguageToggle,
-} from "./i18n.js?v=35";
+} from "./i18n.js?v=80";
 
 const NAV = [
   { route: "order", labelKey: "shop_browse", icon: "order" },
@@ -183,6 +183,10 @@ function esc(s) {
     .replaceAll('"', "&quot;");
 }
 
+function busyLabelHtml(label) {
+  return `<span class="btn-loading"><span class="login-spinner" aria-hidden="true"></span>${esc(label)}</span>`;
+}
+
 /** Format timestamps for display as UTC (naive values treated as UTC). */
 function formatUtc(value) {
   if (value == null || value === "") return "—";
@@ -200,6 +204,12 @@ function formatUtc(value) {
 
 function money(n) {
   return `${curSym()}${Number(n).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`;
+}
+
+/** Random IPv4 for checkout simulation; field stays editable. */
+function randomIpAddress() {
+  const octet = () => Math.floor(Math.random() * 254) + 1;
+  return `${octet()}.${octet()}.${octet()}.${octet()}`;
 }
 
 function initials(name) {
@@ -254,13 +264,19 @@ function confirmAction(opts) {
     document.body.appendChild(overlay);
     const finish = (v) => {
       overlay.remove();
+      document.removeEventListener("keydown", onKey);
       resolve(v);
     };
+    const onKey = (e) => {
+      if (e.key === "Escape") finish(false);
+    };
+    document.addEventListener("keydown", onKey);
     overlay.querySelector('[data-confirm="no"]').onclick = () => finish(false);
     overlay.querySelector('[data-confirm="yes"]').onclick = () => finish(true);
     overlay.addEventListener("click", (e) => {
       if (e.target === overlay) finish(false);
     });
+    overlay.querySelector('[data-confirm="yes"]')?.focus();
   });
 }
 
@@ -304,24 +320,26 @@ function shell(content, route) {
   const count = cartCount();
   const nav = items
     .map((item) => {
+      const label = t(item.labelKey);
       const badge =
         item.route === "cart" && count > 0
-          ? `<span class="nav-badge" aria-label="${esc(count)} items in cart">${esc(count > 99 ? "99+" : count)}</span>`
+          ? `<span class="nav-badge" aria-label="${esc(t("cart_items_aria", { count }))}">${esc(count > 99 ? "99+" : count)}</span>`
           : "";
       return `
-      <a href="#/${item.route}" class="nav-link ${route === item.route ? "active" : ""}">
+      <a href="#/${item.route}" class="nav-link ${route === item.route ? "active" : ""}" title="${esc(label)}" aria-label="${esc(label)}">
         ${NAV_ICONS[item.icon] || NAV_ICONS.order}
-        <span class="nav-link-text">${esc(t(item.labelKey))}${badge}</span>
-        <span class="chev">›</span>
+        <span class="nav-link-text">${esc(label)}${badge}</span>
+        <span class="chev" aria-hidden="true">›</span>
       </a>`;
     })
     .join("");
 
   return `
+    <a class="skip-link" href="#main-content">${esc(t("skip_to_content"))}</a>
     <div class="app-frame">
       <aside class="sidebar">
         <div class="sidebar-brand">
-          <div class="sidebar-logo">M</div>
+          <div class="sidebar-logo" aria-hidden="true">M</div>
           <div class="sidebar-brand-name">${esc(t("customer_app_title"))}</div>
         </div>
         <div class="sidebar-section">${esc(t("shop_section"))}</div>
@@ -333,22 +351,22 @@ function shell(content, route) {
       <div class="main-wrap">
         <header class="topbar">
           <div class="topbar-left">
-            <span class="subtitle" style="margin:0">${esc(t("customer_login_subtitle"))}</span>
+            <span class="subtitle mt-0">${esc(t("customer_login_subtitle"))}</span>
           </div>
           <div class="topbar-right">
             ${languageToggleHtml({ id: "lang-select" })}
-            <a href="#/cart" class="cart-chip" title="${esc(t("shop_cart"))}">
+            <a href="#/cart" class="cart-chip" title="${esc(t("shop_cart_hint", { count }))}">
               ${NAV_ICONS.cart}
               <span>${esc(t("shop_cart"))}</span>
-              ${count > 0 ? `<span class="nav-badge">${esc(count)}</span>` : ""}
+              ${count > 0 ? `<span class="nav-badge" aria-hidden="true">${esc(count)}</span>` : ""}
             </a>
             <div class="user-chip">
               <span class="user-chip-text">${esc(t("hi_user", { name: customer.customer_name }))}</span>
-              <div class="user-avatar">${esc(initials(customer.customer_name))}</div>
+              <div class="user-avatar" aria-hidden="true">${esc(initials(customer.customer_name))}</div>
             </div>
           </div>
         </header>
-        <main class="content">${content}</main>
+        <main class="content" id="main-content">${content}</main>
       </div>
     </div>`;
 }
@@ -378,6 +396,11 @@ function pageHead(title, subtitle, trailing = "") {
     </div>`;
 }
 
+function fieldHtml(label, inputAttrs) {
+  const id = inputAttrs.match(/\bid="([^"]+)"/)?.[1] || inputAttrs.match(/\bname="([^"]+)"/)?.[1];
+  return `<div class="field"><label for="${esc(id)}">${esc(label)}</label><input ${inputAttrs} /></div>`;
+}
+
 async function renderLogin(mode = "login") {
   const isForgot = mode === "forgot_password";
   const isChange = mode === "change_password";
@@ -391,36 +414,36 @@ async function renderLogin(mode = "login") {
     title = t("forgot_password");
     subtitle = t("password_reset_hint");
     fields = `
-      <div class="field"><label>${esc(t("user_id"))}</label><input name="user_id" required autocomplete="username" /></div>
-      <div class="field"><label>${esc(t("email"))}</label><input name="email" type="email" required autocomplete="email" /></div>
-      <div class="field"><label>${esc(t("new_password"))}</label><input name="new_password" type="password" required autocomplete="new-password" /></div>
-      <div class="field"><label>${esc(t("confirm_new_password"))}</label><input name="confirm_password" type="password" required autocomplete="new-password" /></div>`;
+      ${fieldHtml(t("user_id"), 'id="login-user-id" name="user_id" required autocomplete="username"')}
+      ${fieldHtml(t("email"), 'id="login-email" name="email" type="email" required autocomplete="email"')}
+      ${fieldHtml(t("new_password"), 'id="login-new-password" name="new_password" type="password" required autocomplete="new-password"')}
+      ${fieldHtml(t("confirm_new_password"), 'id="login-confirm-password" name="confirm_password" type="password" required autocomplete="new-password"')}`;
     actions = `
-      <button class="btn btn-primary" style="width:100%" type="submit">${esc(t("update_password"))}</button>
-      <button type="button" class="btn btn-secondary" style="width:100%;margin-top:0.65rem" id="back-login">${esc(t("back_to_login"))}</button>`;
+      <button class="btn btn-primary btn-block" type="submit">${esc(t("update_password"))}</button>
+      <button type="button" class="btn btn-secondary btn-block" id="back-login">${esc(t("back_to_login"))}</button>`;
   } else if (isChange) {
     title = t("change_password");
     subtitle = t("password_change_login_hint");
     fields = `
-      <div class="field"><label>${esc(t("user_id"))}</label><input name="user_id" required autocomplete="username" /></div>
-      <div class="field"><label>${esc(t("current_password"))}</label><input name="current_password" type="password" required autocomplete="current-password" /></div>
-      <div class="field"><label>${esc(t("new_password"))}</label><input name="new_password" type="password" required autocomplete="new-password" /></div>
-      <div class="field"><label>${esc(t("confirm_new_password"))}</label><input name="confirm_password" type="password" required autocomplete="new-password" /></div>`;
+      ${fieldHtml(t("user_id"), 'id="login-user-id" name="user_id" required autocomplete="username"')}
+      ${fieldHtml(t("current_password"), 'id="login-current-password" name="current_password" type="password" required autocomplete="current-password"')}
+      ${fieldHtml(t("new_password"), 'id="login-new-password" name="new_password" type="password" required autocomplete="new-password"')}
+      ${fieldHtml(t("confirm_new_password"), 'id="login-confirm-password" name="confirm_password" type="password" required autocomplete="new-password"')}`;
     actions = `
-      <button class="btn btn-primary" style="width:100%" type="submit">${esc(t("update_password"))}</button>
-      <button type="button" class="btn btn-secondary" style="width:100%;margin-top:0.65rem" id="back-login">${esc(t("back_to_login"))}</button>`;
+      <button class="btn btn-primary btn-block" type="submit">${esc(t("update_password"))}</button>
+      <button type="button" class="btn btn-secondary btn-block" id="back-login">${esc(t("back_to_login"))}</button>`;
   } else {
     title = t("customer_app_title");
     subtitle = t("customer_login_subtitle");
     fields = `
-      <div class="field"><label>${esc(t("user_id"))}</label><input name="user_id" required autocomplete="username" /></div>
-      <div class="field"><label>${esc(t("password"))}</label><input name="password" type="password" required autocomplete="current-password" /></div>
+      ${fieldHtml(t("user_id"), 'id="login-user-id" name="user_id" required autocomplete="username"')}
+      ${fieldHtml(t("password"), 'id="login-password" name="password" type="password" required autocomplete="current-password"')}
       <div class="login-links">
         <button type="button" class="link-btn" id="goto-forgot-password">${esc(t("forgot_password"))}</button>
       </div>`;
     actions = `
-      <button class="btn btn-primary" style="width:100%" type="submit">${esc(t("sign_in"))}</button>
-      <button type="button" class="btn btn-secondary" style="width:100%;margin-top:0.65rem" id="goto-change-password">${esc(t("change_password"))}</button>`;
+      <button class="btn btn-primary btn-block" type="submit">${esc(t("sign_in"))}</button>
+      <button type="button" class="btn btn-secondary btn-block" id="goto-change-password">${esc(t("change_password"))}</button>`;
   }
 
   document.getElementById("app").innerHTML = `
@@ -428,10 +451,10 @@ async function renderLogin(mode = "login") {
       <div class="login-lang">${languageToggleHtml({ id: "lang-select-login" })}</div>
       <form class="login-card" id="login-form">
         <div class="login-logo-row">
-          <div class="sidebar-logo">M</div>
+          <div class="sidebar-logo" aria-hidden="true">M</div>
           <h1>${esc(title)}</h1>
         </div>
-        <p class="subtitle" style="margin-top:0">${esc(subtitle)}</p>
+        <p class="subtitle mt-0">${esc(subtitle)}</p>
         <div id="login-error"></div>
         ${fields}
         ${actions}
@@ -447,7 +470,19 @@ async function renderLogin(mode = "login") {
     e.preventDefault();
     const fd = new FormData(e.target);
     const err = document.getElementById("login-error");
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    const secondaryBtns = e.target.querySelectorAll('button[type="button"]');
+    const originalHtml = submitBtn ? submitBtn.innerHTML : "";
     err.innerHTML = "";
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = busyLabelHtml(
+        isForgot || isChange ? t("processing") : t("loading_sign_in"),
+      );
+    }
+    secondaryBtns.forEach((btn) => {
+      btn.disabled = true;
+    });
     try {
       if (isForgot) {
         await api(
@@ -502,6 +537,13 @@ async function renderLogin(mode = "login") {
     } catch (ex) {
       const fallback = isForgot || isChange ? "password_change_failed" : "invalid_login";
       err.innerHTML = `<div class="alert alert-error">${esc(ex.message || t(fallback))}</div>`;
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalHtml;
+      }
+      secondaryBtns.forEach((btn) => {
+        btn.disabled = false;
+      });
     }
   };
 }
@@ -658,7 +700,7 @@ function shopVouchersButtonHtml(active) {
 function paginationHtml(page, totalPages) {
   if (totalPages <= 1) return "";
   return `
-    <nav class="shop-pagination" aria-label="Pagination">
+    <nav class="shop-pagination" aria-label="${esc(t("pagination_nav"))}">
       <button type="button" class="btn btn-secondary" id="shop-page-prev" ${
         page <= 1 ? "disabled" : ""
       }>${esc(t("pagination_prev"))}</button>
@@ -671,7 +713,7 @@ function paginationHtml(page, totalPages) {
 
 function productCardsHtml(products) {
   if (!products.length) {
-    return `<div class="card"><p class="subtitle" style="margin:0">${esc(t("search_no_results"))}</p></div>`;
+    return `<div class="card"><p class="subtitle mt-0">${esc(t("search_no_results"))}</p></div>`;
   }
   return products
     .map((p) => {
@@ -740,19 +782,22 @@ async function renderOrder() {
         <div class="shop-top-bar">
           <form class="shop-search" id="shop-search-form" role="search">
             <label class="sr-only" for="shop-search-input">${esc(t("search_products"))}</label>
-            <input
-              id="shop-search-input"
-              type="search"
-              placeholder="${esc(t("search_products_placeholder"))}"
-              value="${esc(shopSearchQuery)}"
-              autocomplete="off"
-            />
+            <div class="shop-search-field">
+              <input
+                id="shop-search-input"
+                type="search"
+                class="${shopSearchQuery ? "has-clear" : ""}"
+                placeholder="${esc(t("search_products_placeholder"))}"
+                value="${esc(shopSearchQuery)}"
+                autocomplete="off"
+              />
+              ${
+                shopSearchQuery
+                  ? `<button type="button" class="shop-search-clear" id="shop-search-clear" aria-label="${esc(t("clear_search"))}">×</button>`
+                  : ""
+              }
+            </div>
             <button type="submit" class="btn btn-primary">${esc(t("search"))}</button>
-            ${
-              shopSearchQuery
-                ? `<button type="button" class="btn btn-secondary" id="shop-search-clear">${esc(t("clear_search"))}</button>`
-                : ""
-            }
           </form>
         </div>
         <p class="shop-results-count" id="shop-results-count">${esc(
@@ -821,14 +866,16 @@ async function renderOrder() {
       syncCategoryChips();
 
       const clearBtn = document.getElementById("shop-search-clear");
-      const form = document.getElementById("shop-search-form");
-      if (shopSearchQuery && !clearBtn && form) {
+      const field = document.querySelector(".shop-search-field");
+      if (searchInput) searchInput.classList.toggle("has-clear", !!shopSearchQuery);
+      if (shopSearchQuery && !clearBtn && field) {
         const btn = document.createElement("button");
         btn.type = "button";
-        btn.className = "btn btn-secondary";
+        btn.className = "shop-search-clear";
         btn.id = "shop-search-clear";
-        btn.textContent = t("clear_search");
-        form.appendChild(btn);
+        btn.setAttribute("aria-label", t("clear_search"));
+        btn.textContent = "×";
+        field.appendChild(btn);
         btn.addEventListener("click", () => {
           if (searchInput) searchInput.value = "";
           applySearch("", { refocus: true });
@@ -1017,7 +1064,7 @@ async function renderCart() {
                   t("sim_caption"),
                   `
             <div class="form-grid-3">
-              <div class="field"><label>${esc(t("ip_address"))}</label><input id="f-ip" placeholder="e.g. 203.0.113.111" /></div>
+              <div class="field"><label for="f-ip">${esc(t("ip_address"))}</label><input id="f-ip" value="${esc(randomIpAddress())}" placeholder="e.g. 203.0.113.111" autocomplete="off" /></div>
               <div class="field">
                 <label>${esc(t("program_track"))}</label>
                 <select id="f-program">
@@ -1314,7 +1361,7 @@ async function renderOrders() {
             <td>${esc(summary)}</td>
             <td>${esc(money(o.amount))}</td>
             <td>${esc(o.quantity)}</td>
-            <td><a class="btn btn-secondary btn-sm" href="#/orders/${esc(o.order_id)}">${esc(t("view_order"))}</a></td>
+            <td><a class="btn btn-secondary btn-sm" href="#/orders/${esc(o.order_id)}">${esc(t("view_details"))}</a></td>
           </tr>`;
         })
         .join("");

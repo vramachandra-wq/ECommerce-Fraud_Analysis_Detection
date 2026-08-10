@@ -127,6 +127,10 @@
     "en": "Processing…",
     "th": "กำลังดำเนินการ..."
   },
+  "loading_sign_in": {
+    "en": "Logging in…",
+    "th": "กำลังเข้าสู่ระบบ..."
+  },
   "minutes_unit": {
     "en": "{n} min",
     "th": "{n} นาที"

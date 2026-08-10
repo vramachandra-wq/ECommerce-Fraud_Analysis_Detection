@@ -53,18 +53,46 @@ jobs:
         run: python -m pytest -m "not integration and not live_groq" -q --tb=short
 
   portal-static:
-    name: Analyst portal static assets
+    name: Static portal assets
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Verify static analyst portal
         run: |
+          set -euo pipefail
           test -f static/analyst-portal/index.html
           test -f static/analyst-portal/app.js
           test -f static/analyst-portal/styles.css
           test -f static/analyst-portal/i18n.js
-          test -f static/analyst-portal/assets/portal-bg.png
+          test -f static/analyst-portal/assets/portal-bg.jpg
+          # Background must be the compressed JPEG (PNG was removed).
+          test ! -f static/analyst-portal/assets/portal-bg.png
+          grep -q 'portal-bg\.jpg' static/analyst-portal/styles.css
+          ! grep -q 'portal-bg\.png' static/analyst-portal/styles.css
+
+      - name: Verify static customer portal
+        run: |
+          set -euo pipefail
+          test -f static/customer-portal/index.html
+          test -f static/customer-portal/app.js
+          test -f static/customer-portal/styles.css
+          test -f static/customer-portal/i18n.js
+          # Shop loads shared Matx shell from /portal/styles.css (analyst styles).
+          grep -q '/portal/styles.css' static/customer-portal/index.html
+
+      - name: Verify Keycloak compose env (no empty proxy headers)
+        run: |
+          set -euo pipefail
+          # Empty KC_PROXY_HEADERS="" crashes Keycloak 26.
+          if grep -E '^\s*KC_PROXY_HEADERS:' podman-compose.yaml; then
+            echo "KC_PROXY_HEADERS must not be set in compose (omit for local start-dev)." >&2
+            exit 1
+          fi
+          if grep -E '^\s*KC_HOSTNAME:' podman-compose.yaml; then
+            echo "KC_HOSTNAME must not be set empty in compose; set only in production .env." >&2
+            exit 1
+          fi
 
   integration-tests:
     name: Integration tests (PostgreSQL)

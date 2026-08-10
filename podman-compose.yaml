@@ -38,8 +38,10 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
       KC_HTTP_ENABLED: ${KC_HTTP_ENABLED:-true}
       KC_HOSTNAME_STRICT: ${KC_HOSTNAME_STRICT:-false}
-      KC_HOSTNAME: ${KC_HOSTNAME:-}
-      KC_PROXY_HEADERS: ${KC_PROXY_HEADERS:-}
+      # Do not pass empty KC_HOSTNAME / KC_PROXY_HEADERS — Keycloak 26 rejects "".
+      # For production (KEYCLOAK_START_MODE=start), set them in .env, e.g.:
+      #   KC_HOSTNAME=sso.example.com
+      #   KC_PROXY_HEADERS=xforwarded
       KC_HEALTH_ENABLED: "true"
     ports:
       - "${KEYCLOAK_PORT:-8080}:8080"

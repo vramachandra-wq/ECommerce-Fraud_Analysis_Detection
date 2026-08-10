@@ -11,6 +11,7 @@ from auth.sso import (
     normalize_return_to,
     parse_oauth_state,
     sync_keycloak_password,
+    sync_keycloak_user,
     username_from_userinfo,
 )
 
@@ -241,3 +242,73 @@ def test_sync_keycloak_password_skips_when_admin_missing():
         ok, reason = sync_keycloak_password("analyst", "newpass99")
     assert ok is True
     assert reason is None
+
+
+def test_sync_keycloak_user_skips_when_admin_missing():
+    with patch("auth.sso.sso_is_configured", return_value=True), patch(
+        "auth.sso.KEYCLOAK_ADMIN", ""
+    ), patch("auth.sso.KEYCLOAK_ADMIN_PASSWORD", ""):
+        ok, reason = sync_keycloak_user(
+            username="sam",
+            password="secure1234",
+            employee_name="Sam Analyst",
+        )
+    assert ok is True
+    assert reason is None
+
+
+def test_sync_keycloak_user_creates_when_missing():
+    class FakeResponse:
+        def __init__(self, status_code=200, payload=None):
+            self.status_code = status_code
+            self._payload = payload or {}
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError(f"http {self.status_code}")
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            self.calls = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get(self, url, params=None, headers=None):
+            self.calls.append(("GET", url, params))
+            if len([c for c in self.calls if c[0] == "GET"]) == 1:
+                return FakeResponse(payload=[])
+            return FakeResponse(payload=[{"id": "kc-user-1"}])
+
+        def post(self, url, json=None, headers=None):
+            self.calls.append(("POST", url, json))
+            return FakeResponse(status_code=201)
+
+        def put(self, url, json=None, headers=None):
+            self.calls.append(("PUT", url, json))
+            return FakeResponse(status_code=204)
+
+    fake_client = FakeClient()
+    with patch("auth.sso.sso_is_configured", return_value=True), patch(
+        "auth.sso.KEYCLOAK_ADMIN", "admin"
+    ), patch("auth.sso.KEYCLOAK_ADMIN_PASSWORD", "admin"), patch(
+        "auth.sso._admin_access_token", return_value="token"
+    ), patch("auth.sso.httpx.Client", return_value=fake_client):
+        ok, reason = sync_keycloak_user(
+            username="sam",
+            password="secure1234",
+            employee_name="Sam Analyst",
+        )
+
+    assert ok is True
+    assert reason is None
+    assert any(call[0] == "POST" for call in fake_client.calls)
+    assert any(
+        call[0] == "PUT" and "/reset-password" in call[1] for call in fake_client.calls
+    )

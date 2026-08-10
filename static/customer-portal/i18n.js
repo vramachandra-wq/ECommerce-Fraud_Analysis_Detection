@@ -44,6 +44,18 @@ export const TRANSLATIONS = {
     "en": "Language",
     "th": "ภาษา"
   },
+  "skip_to_content": {
+    "en": "Skip to content",
+    "th": "ข้ามไปยังเนื้อหา"
+  },
+  "cart_items_aria": {
+    "en": "{count} items in cart",
+    "th": "มีสินค้าในตะกร้า {count} รายการ"
+  },
+  "pagination_nav": {
+    "en": "Pagination",
+    "th": "การแบ่งหน้า"
+  },
   "welcome_back": {
     "en": "Welcome back, {name}!",
     "th": "ยินดีต้อนรับกลับ {name}!"
@@ -137,8 +149,8 @@ export const TRANSLATIONS = {
     "th": "กำลังดำเนินการสั่งซื้อจากเมโทรคาร์ท..."
   },
   "order_summary": {
-    "en": "Order summary",
-    "th": "สรุปคำสั่งซื้อ"
+    "en": "Order Summary — Metro Cart",
+    "th": "สรุปคำสั่งซื้อ — เมโทรคาร์ท"
   },
   "confirm_place_order": {
     "en": "Confirm Order",
@@ -236,6 +248,10 @@ export const TRANSLATIONS = {
     "en": "ไทย",
     "th": "ไทย"
   },
+  "loading_sign_in": {
+    "en": "Logging in…",
+    "th": "กำลังเข้าสู่ระบบ..."
+  },
   "shop_place_order": {
     "en": "Place Order",
     "th": "สั่งซื้อ"
@@ -257,8 +273,8 @@ export const TRANSLATIONS = {
     "th": "ค้นหาสินค้า"
   },
   "search_products_placeholder": {
-    "en": "Search by name, category, or product ID…",
-    "th": "ค้นหาด้วยชื่อ หมวดหมู่ หรือรหัสสินค้า…"
+    "en": "Search Products",
+    "th": "ค้นหาสินค้า"
   },
   "clear_search": {
     "en": "Clear",
@@ -359,6 +375,10 @@ export const TRANSLATIONS = {
   "view_cart": {
     "en": "View cart",
     "th": "ดูตะกร้า"
+  },
+  "view_details": {
+    "en": "View details",
+    "th": "ดูรายละเอียด"
   },
   "continue_shopping": {
     "en": "Continue shopping",
@@ -500,7 +520,6 @@ export const TRANSLATIONS = {
     "en": "Confirm your details, pick a product, and place the order in one flow.",
     "th": "ยืนยันข้อมูล เลือกสินค้า และสั่งซื้อในขั้นตอนเดียว"
   },
-
   "shop_success_lede": {
     "en": "Your order is in the system. Fraud checks may hold or approve it automatically.",
     "th": "คำสั่งซื้อเข้าสู่ระบบแล้ว การตรวจสอบอาจระงับหรืออนุมัติอัตโนมัติ"
@@ -609,8 +628,13 @@ export function setLang(lang) {
 
 export function t(key, params = {}) {
   const entry = TRANSLATIONS[key];
-  if (!entry) return key;
-  let text = entry[getLang()] || entry.en || key;
+  let text = entry ? (entry[getLang()] || entry.en || "") : "";
+  if (!text || text === key) {
+    text = String(key || "")
+      .replaceAll("_", " ")
+      .trim()
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  }
   if (params && typeof params === "object") {
     for (const [k, v] of Object.entries(params)) {
       text = text.replaceAll("{" + k + "}", String(v ?? ""));
