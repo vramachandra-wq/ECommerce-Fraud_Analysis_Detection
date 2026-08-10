@@ -803,3 +803,70 @@
   overflow-wrap: anywhere;
   line-height: 1.4;
 }
+
+/* Order history */
+.history-card { overflow: hidden; }
+.history-meta {
+  margin: 0 0 0.85rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.history-empty {
+  display: grid;
+  gap: 1rem;
+  justify-items: start;
+}
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.history-table th,
+.history-table td {
+  padding: 0.75rem 0.65rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+  font-size: 0.9rem;
+}
+.history-table th {
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 700;
+}
+.history-row { cursor: pointer; }
+.history-row:hover { background: var(--accent-soft, rgba(25, 118, 210, 0.06)); }
+.history-detail-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  background: #eceff1;
+  color: #37474f;
+}
+.status-approved { background: #e8f5e9; color: #2e7d32; }
+.status-pending_review { background: #fff8e1; color: #f57f17; }
+.status-on_hold { background: #e3f2fd; color: #1565c0; }
+.status-rejected { background: #ffebee; color: #c62828; }
+.btn-sm {
+  padding: 0.35rem 0.7rem;
+  font-size: 0.8rem;
+}
+
+@media (max-width: 720px) {
+  .history-table th:nth-child(3),
+  .history-table td:nth-child(3) { display: none; }
+}
+

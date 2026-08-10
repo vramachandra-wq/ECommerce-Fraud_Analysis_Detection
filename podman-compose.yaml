@@ -31,12 +31,15 @@ services:
     image: quay.io/keycloak/keycloak:26.0.8
     container_name: metro_cart_keycloak
     restart: unless-stopped
+    # Local default: start-dev. Production: KEYCLOAK_START_MODE=start + KC_HOSTNAME.
     command: ["${KEYCLOAK_START_MODE:-start-dev}", "--import-realm"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
-      KC_HTTP_ENABLED: "true"
-      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: ${KC_HTTP_ENABLED:-true}
+      KC_HOSTNAME_STRICT: ${KC_HOSTNAME_STRICT:-false}
+      KC_HOSTNAME: ${KC_HOSTNAME:-}
+      KC_PROXY_HEADERS: ${KC_PROXY_HEADERS:-}
       KC_HEALTH_ENABLED: "true"
     ports:
       - "${KEYCLOAK_PORT:-8080}:8080"
@@ -54,6 +57,39 @@ services:
       timeout: 5s
       retries: 12
       start_period: 30s
+    networks:
+      - fraud_net
+
+  # Optional: podman compose --profile app up -d
+  api:
+    profiles: ["app"]
+    build: .
+    container_name: metro_cart_api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      DB_HOST: ecommerce_fraud
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      KEYCLOAK_URL: ${KEYCLOAK_URL:-http://keycloak:8080}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      GROQ_SSL_VERIFY: ${GROQ_SSL_VERIFY:-true}
+      SCHEMA_STRICT: ${SCHEMA_STRICT:-true}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      ecommerce_fraud:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 40s
     networks:
       - fraud_net
 

@@ -19,13 +19,17 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.12"
+  APP_ENV: development
   DB_HOST: localhost
   DB_PORT: "5432"
   DB_NAME: fraud_detection
   DB_USER: postgres
   DB_PASSWORD: postgres
   GROQ_API_KEY: ci-placeholder-not-used
-  PORTAL_SECRET: ci-test-secret
+  PORTAL_SECRET: ci-test-secret-at-least-32-characters-long
+  COOKIE_SECURE: "false"
+  GROQ_SSL_VERIFY: "false"
+  SCHEMA_STRICT: "false"
 
 jobs:
   unit-tests:

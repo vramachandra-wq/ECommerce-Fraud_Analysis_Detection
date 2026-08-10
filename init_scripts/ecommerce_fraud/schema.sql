@@ -183,6 +183,53 @@ CREATE TABLE IF NOT EXISTS master.order_review_audit (
     created_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Multi-item order support + per-line rule outcomes
+CREATE TABLE IF NOT EXISTS master.order_items (
+    order_item_id BIGSERIAL PRIMARY KEY,
+    order_id      VARCHAR(20)  NOT NULL,
+    line_no       INTEGER      NOT NULL,
+    product_id    VARCHAR(64)  NOT NULL,
+    product_name  VARCHAR(255) NOT NULL,
+    category      VARCHAR(128),
+    quantity      INTEGER      NOT NULL CHECK (quantity >= 1),
+    unit_price    NUMERIC(12, 2) NOT NULL,
+    line_amount   NUMERIC(12, 2) NOT NULL,
+    line_status   VARCHAR(32),
+    flagged_reason TEXT,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_order_items_order_id
+    ON master.order_items (order_id);
+
+-- System-wide audit trail (logins, orders, rules, blacklists, permissions, …)
+CREATE TABLE IF NOT EXISTS master.system_audit_log (
+    audit_id       BIGSERIAL PRIMARY KEY,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actor_type     VARCHAR(32)  NOT NULL DEFAULT 'system',
+    actor_id       VARCHAR(128),
+    actor_name     VARCHAR(255),
+    action         VARCHAR(64)  NOT NULL,
+    resource_type  VARCHAR(64),
+    resource_id    VARCHAR(128),
+    outcome        VARCHAR(32)  NOT NULL DEFAULT 'success',
+    details        JSONB,
+    ip_address     VARCHAR(64),
+    request_path   VARCHAR(512)
+);
+
+CREATE INDEX IF NOT EXISTS idx_system_audit_created_at
+    ON master.system_audit_log (created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_system_audit_action
+    ON master.system_audit_log (action);
+
+-- Tracks applied files under database/migrations/ (runtime migrator).
+CREATE TABLE IF NOT EXISTS master.schema_migrations (
+    filename   VARCHAR(255) PRIMARY KEY,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- Backlog / queue query support
 CREATE INDEX IF NOT EXISTS idx_orders_status_timestamp
     ON master.orders (order_status, order_timestamp)

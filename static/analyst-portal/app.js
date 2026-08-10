@@ -126,7 +126,7 @@ async function restoreSessionFromCookie() {
 async function logoutFully() {
   clearSession();
   const returnTo = `${window.location.origin}/portal/#/login`;
-  window.location.href = `/auth/sso/logout?return_to=${encodeURIComponent(returnTo)}`;
+  window.location.href = `/auth/logout?return_to=${encodeURIComponent(returnTo)}`;
 }
 
 let pendingSsoError = "";

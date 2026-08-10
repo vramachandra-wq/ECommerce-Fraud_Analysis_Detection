@@ -57,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(null);
     const apiOrigin = import.meta.env.VITE_API_ORIGIN ?? "http://127.0.0.1:8000";
     const returnTo = new URL("login", PORTAL_BASE_URL).toString();
-    window.location.href = `${apiOrigin}/auth/sso/logout?return_to=${encodeURIComponent(returnTo)}`;
+    window.location.href = `${apiOrigin}/auth/logout?return_to=${encodeURIComponent(returnTo)}`;
   }, []);
 
   const hasPage = useCallback(
