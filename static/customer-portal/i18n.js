@@ -428,6 +428,66 @@ export const TRANSLATIONS = {
     "en": "Status",
     "th": "สถานะ"
   },
+  "order_status_approved": {
+    "en": "Approved",
+    "th": "อนุมัติแล้ว"
+  },
+  "order_status_pending_review": {
+    "en": "Pending review",
+    "th": "รอตรวจสอบ"
+  },
+  "order_status_on_hold": {
+    "en": "On hold",
+    "th": "ระงับชั่วคราว"
+  },
+  "order_status_rejected": {
+    "en": "Rejected",
+    "th": "ปฏิเสธ"
+  },
+  "shop_orders": {
+    "en": "My Orders",
+    "th": "คำสั่งซื้อของฉัน"
+  },
+  "shop_orders_lede": {
+    "en": "Review past purchases and their current status.",
+    "th": "ดูประวัติการสั่งซื้อและสถานะปัจจุบัน"
+  },
+  "shop_orders_empty": {
+    "en": "You have not placed any orders yet.",
+    "th": "คุณยังไม่มีคำสั่งซื้อ"
+  },
+  "shop_orders_count": {
+    "en": "{count} order(s)",
+    "th": "{count} คำสั่งซื้อ"
+  },
+  "shop_orders_items_summary": {
+    "en": "{name} · {count} items",
+    "th": "{name} · {count} รายการ"
+  },
+  "shop_order_detail": {
+    "en": "Order detail",
+    "th": "รายละเอียดคำสั่งซื้อ"
+  },
+  "loading_orders": {
+    "en": "Loading orders…",
+    "th": "กำลังโหลดคำสั่งซื้อ…"
+  },
+  "view_order": {
+    "en": "View",
+    "th": "ดู"
+  },
+  "view_order_history": {
+    "en": "View order history",
+    "th": "ดูประวัติคำสั่งซื้อ"
+  },
+  "back_to_orders": {
+    "en": "Back to orders",
+    "th": "กลับไปคำสั่งซื้อ"
+  },
+  "order_date": {
+    "en": "Date",
+    "th": "วันที่"
+  },
   "customer_login_subtitle": {
     "en": "Customer purchase portal",
     "th": "พอร์ทัลสั่งซื้อสำหรับลูกค้า"

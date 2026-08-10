@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 import psycopg2
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from psycopg2.extras import execute_batch
 
@@ -486,6 +486,107 @@ def shop_place_order(
     }
 
 
+def _serialize_shop_order_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize DB order fields for the customer shop JSON API."""
+    out = dict(row)
+    out["amount"] = float(out["amount"]) if out.get("amount") is not None else 0.0
+    out["quantity"] = int(out.get("quantity") or 0)
+    out["item_count"] = int(out.get("item_count") or 0)
+    if out.get("order_timestamp") is not None and hasattr(out["order_timestamp"], "isoformat"):
+        out["order_timestamp"] = out["order_timestamp"].isoformat()
+    return out
+
+
+def _format_delivery_address(order: Dict[str, Any]) -> str:
+    """Build a single-line delivery address from order fields."""
+    parts = [
+        str(order.get("street") or "").strip(),
+        str(order.get("city") or "").strip(),
+        str(order.get("state") or "").strip(),
+        str(order.get("zip_code") or "").strip(),
+        str(order.get("country") or "").strip(),
+    ]
+    composed = ", ".join(p for p in parts if p)
+    if composed:
+        return composed
+    return str(order.get("address") or "").strip()
+
+
+@router.get("/shop/orders")
+def shop_list_orders(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    customer: Dict[str, Any] = Depends(get_current_customer),
+):
+    """Order history for the signed-in customer (newest first)."""
+    try:
+        with psycopg2.connect(**DB_CONFIG) as conn:
+            with conn.cursor() as cur:
+                ensure_order_items_table(cur)
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM master.orders WHERE user_id = %s
+                    """,
+                    (customer["user_id"],),
+                )
+                total = int(cur.fetchone()[0] or 0)
+
+                cur.execute(
+                    """
+                    SELECT
+                        o.order_id,
+                        o.product_id,
+                        o.product_name,
+                        o.category,
+                        o.quantity,
+                        o.amount,
+                        o.order_status,
+                        o.order_timestamp,
+                        COALESCE(oi.item_count, 0) AS item_count
+                    FROM master.orders o
+                    LEFT JOIN (
+                        SELECT order_id, COUNT(*)::int AS item_count
+                        FROM master.order_items
+                        GROUP BY order_id
+                    ) oi ON oi.order_id = o.order_id
+                    WHERE o.user_id = %s
+                    ORDER BY o.order_timestamp DESC NULLS LAST, o.order_id DESC
+                    LIMIT %s OFFSET %s
+                    """,
+                    (customer["user_id"], limit, offset),
+                )
+                cols = [
+                    "order_id",
+                    "product_id",
+                    "product_name",
+                    "category",
+                    "quantity",
+                    "amount",
+                    "order_status",
+                    "order_timestamp",
+                    "item_count",
+                ]
+                orders = [
+                    _serialize_shop_order_row(dict(zip(cols, row)))
+                    for row in cur.fetchall()
+                ]
+                # Older single-SKU rows may have no order_items yet.
+                for order in orders:
+                    if order["item_count"] <= 0 and order.get("product_id"):
+                        order["item_count"] = 1
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Failed to load orders.") from exc
+
+    return {
+        "orders": orders,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
 @router.get("/shop/orders/{order_id}")
 def shop_get_order(
     order_id: str,
@@ -503,7 +604,8 @@ def shop_get_order(
                 cur.execute(
                     """
                     SELECT order_id, user_id, product_id, product_name, category,
-                           quantity, amount, order_status, flagged_reason, order_timestamp
+                           quantity, amount, order_status, flagged_reason, order_timestamp,
+                           street, city, state, zip_code, country, address
                     FROM master.orders
                     WHERE order_id = %s
                     """,
@@ -523,14 +625,18 @@ def shop_get_order(
                     "order_status",
                     "flagged_reason",
                     "order_timestamp",
+                    "street",
+                    "city",
+                    "state",
+                    "zip_code",
+                    "country",
+                    "address",
                 ]
                 order = dict(zip(cols, row))
                 if order["user_id"] != customer["user_id"]:
                     raise HTTPException(status_code=404, detail="Order not found")
-                order["amount"] = float(order["amount"]) if order["amount"] is not None else 0.0
-                order["quantity"] = int(order["quantity"] or 0)
-                if order.get("order_timestamp") is not None:
-                    order["order_timestamp"] = order["order_timestamp"].isoformat()
+                order = _serialize_shop_order_row(order)
+                order["delivery_address"] = _format_delivery_address(order)
                 items = fetch_order_items(cur, oid)
                 # Backfill: older single-product orders may have no order_items rows yet.
                 if not items and order.get("product_id"):

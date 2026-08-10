@@ -1,0 +1,12 @@
+.venv
+.git
+.run
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+analyst-portal/node_modules
+*.md
+.env
+.run/

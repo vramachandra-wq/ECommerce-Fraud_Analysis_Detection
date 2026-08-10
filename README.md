@@ -232,13 +232,19 @@ Copy `.env.example` → `.env` and set at least:
 | `API_BASE_URL` | Default `http://127.0.0.1:8000` |
 | `CORS_ALLOW_ORIGINS` | Browser origins allowed to call the API |
 | `POWER_BI_EMBED_URL` | Optional Power BI embed |
-| `PORTAL_SECRET` | Signs analyst portal session cookies / tokens (set a strong random value) |
+| `PORTAL_SECRET` | Signs analyst portal session cookies / tokens (set a strong random value; required when `APP_ENV=production`) |
+| `APP_ENV` | `development` (default) / `staging` / `production` — production refuses weak secrets and enables Secure cookies + Groq TLS verify by default |
+| `COOKIE_SECURE` | Override Secure cookie flag (`true` behind HTTPS) |
+| `GROQ_SSL_VERIFY` | TLS verify for Groq; defaults off in development, on in production |
+| `LOGIN_MAX_ATTEMPTS` / `LOGIN_LOCKOUT_SECONDS` | Analyst login brute-force lockout |
+| `SCHEMA_STRICT` | Abort startup on migration failure (default on in production) |
 | `KEYCLOAK_ENABLED` | `true` to show SSO on analyst login (default `true`) |
 | `KEYCLOAK_URL` / `KEYCLOAK_REALM` / `KEYCLOAK_CLIENT_*` | OIDC client settings for analyst SSO |
 | `KEYCLOAK_REDIRECT_URI` | Must match Keycloak client redirect URI |
 | `SSO_DEFAULT_RETURN_TO` | Where browsers land after SSO (default `/portal/`) |
 | `KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD` | Optional; required only to sync portal password changes into Keycloak |
-| `KEYCLOAK_START_MODE` | `start-dev` for laptop demos; use a non-dev mode outside local POCs |
+| `KEYCLOAK_START_MODE` | `start-dev` for laptop demos; use `start` + `KC_HOSTNAME` outside local POCs |
+| `KC_HOSTNAME` / `KC_PROXY_HEADERS` | Required when Keycloak runs in non-dev (`start`) mode |
 | `SYSTEM_AUDIT_LOG_PATH` | Optional path for JSONL file backup of system audit events |
 | `SYSTEM_AUDIT_FILE_BACKUP` | `true` (default) to also append audit events to the JSONL file; DB is source of truth |
 
@@ -246,7 +252,9 @@ Copy `.env.example` → `.env` and set at least:
 
 Compose mounts `init_scripts/ecommerce_fraud/` → `/docker-entrypoint-initdb.d`.
 
-Postgres runs `schema.sql` **once** when the data volume is empty.
+Postgres runs `schema.sql` **once** when the data volume is empty. That base schema includes `master.order_items`, `master.system_audit_log`, and `master.schema_migrations`.
+
+On API startup the migrator also applies any pending files under `database/migrations/` (tracked in `schema_migrations`) and idempotently ensures those tables exist. Failures are logged; with `SCHEMA_STRICT=true` (production default) startup aborts instead of continuing silently.
 
 Rebuild DB from scratch:
 

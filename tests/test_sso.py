@@ -152,6 +152,37 @@ def test_sso_logout_redirects_to_keycloak():
     assert build_logout.call_args.kwargs["id_token_hint"] == "id.token.value"
     assert "metro_cart_kc_id=" in (response.headers.get("set-cookie") or "")
 
+
+def test_password_login_sets_secure_cookie_attrs_when_enabled():
+    fake = {
+        "analyst": {
+            "analyst_id": "A0",
+            "employee_name": "Admin",
+            "username": "admin",
+            "role": "Admin",
+        },
+        "granted_pages": ["ADMIN_PANEL"],
+        "is_admin": True,
+        "token": "tok",
+    }
+    with patch("api.portal.authenticate_credentials", return_value=fake), patch(
+        "api.portal.log_system_event"
+    ), patch("api.cookie_utils.COOKIE_SECURE", True), patch(
+        "api.portal.login_guard"
+    ) as guard:
+        guard.status.return_value.locked = False
+        response = client.post(
+            "/auth/login", json={"username": "admin", "password": "admin123"}
+        )
+    assert response.status_code == 200
+    set_cookie = (response.headers.get("set-cookie") or "").lower()
+    assert "metro_cart_session=tok" in set_cookie or "metro_cart_session=tok;" in (
+        response.headers.get("set-cookie") or ""
+    ).lower()
+    # Starlette may emit Secure as a flag token.
+    assert "secure" in set_cookie
+
+
 def test_oauth_state_roundtrip_and_return_to_allowlist():
     state = create_oauth_state(
         "http://127.0.0.1:8000/portal/", code_verifier="abc"
