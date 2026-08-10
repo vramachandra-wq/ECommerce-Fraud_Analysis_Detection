@@ -15,6 +15,7 @@ from api.portal import router as portal_router
 from api.customer_shop import router as customer_shop_router
 from api.scheduler import start_auto_approval_scheduler, stop_auto_approval_scheduler
 from config import (
+    BACKLOG_ALERT_INTERVAL_MINUTES,
     CORS_ALLOW_ORIGINS,
     DB_CONFIG,
     SCHEMA_STRICT,
@@ -68,8 +69,10 @@ async def lifespan(app: FastAPI):
         if SCHEMA_STRICT:
             raise
 
-    # Background job: auto-approve backlog orders that exceeded delay_minutes
-    start_auto_approval_scheduler(interval_seconds=1800)
+    # Background job: backlog email digest + auto-approve expired review-queue orders
+    start_auto_approval_scheduler(
+        interval_seconds=max(60, int(BACKLOG_ALERT_INTERVAL_MINUTES) * 60)
+    )
     yield
     stop_auto_approval_scheduler()
 

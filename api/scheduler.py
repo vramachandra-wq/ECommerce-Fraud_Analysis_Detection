@@ -10,12 +10,13 @@ from typing import Any, Optional
 
 import psycopg2
 
-from config import DB_CONFIG
+from config import BACKLOG_ALERT_INTERVAL_MINUTES, DB_CONFIG, EMAIL_ALERTS_ENABLED
 from fraud_engine.auto_approval import sync_expired_holds
+from notifications.backlog_digest import send_backlog_digest
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_INTERVAL_SECONDS = 1800  # 30 minutes
+_DEFAULT_INTERVAL_SECONDS = max(60, int(BACKLOG_ALERT_INTERVAL_MINUTES) * 60)
 _stop_event = threading.Event()
 _thread: Optional[threading.Thread] = None
 _status_lock = threading.Lock()
@@ -70,7 +71,26 @@ def get_auto_approval_status() -> dict[str, Any]:
 
 
 def _run_once() -> int:
+    """
+    One scheduler cycle:
+      1) Email backlog digest (before auto-approve, so overdue rows are visible)
+      2) Auto-approve expired review-queue orders
+    """
     with psycopg2.connect(**DB_CONFIG) as conn:
+        if EMAIL_ALERTS_ENABLED:
+            try:
+                digest = send_backlog_digest(conn)
+                if not digest.get("skipped"):
+                    logger.info(
+                        "Backlog digest result: sent=%s recipients=%s total=%s",
+                        digest.get("sent"),
+                        digest.get("recipients"),
+                        digest.get("total_backlog"),
+                    )
+            except Exception:
+                # Never block auto-approval on email failure.
+                logger.exception("Backlog digest email failed.")
+
         with conn.cursor() as cur:
             updated = sync_expired_holds(conn, cur)
         conn.commit()
@@ -79,7 +99,9 @@ def _run_once() -> int:
 
 def _loop(interval_seconds: int) -> None:
     logger.info(
-        "Auto-approval scheduler started (interval=%ss).", interval_seconds
+        "Auto-approval / backlog-alert scheduler started (interval=%ss, email_alerts=%s).",
+        interval_seconds,
+        EMAIL_ALERTS_ENABLED,
     )
     _set_status(
         running=True,

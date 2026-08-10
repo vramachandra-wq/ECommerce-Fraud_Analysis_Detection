@@ -7,6 +7,7 @@ import psycopg2
 
 from api.auth import get_current_session
 from config import DB_CONFIG
+from notifications.rejection import notify_order_rejected
 from utils.system_audit import actor_from_session, log_system_event
 
 router = APIRouter()
@@ -114,6 +115,12 @@ def create_order(
                     },
                     request_path="/create-order",
                 )
+
+        if str(data.order_status).upper() == "REJECTED":
+            try:
+                notify_order_rejected(data.order_id)
+            except Exception:
+                pass
 
         return {"message": "Order Created successfully"}
 

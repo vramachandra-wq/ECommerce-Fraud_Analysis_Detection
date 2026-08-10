@@ -130,6 +130,26 @@ SSO_DEFAULT_RETURN_TO = _get_env_str(
     f"{API_BASE_URL.rstrip('/')}/portal/",
 )
 
+# Microsoft Graph email alerts (application Mail.Send).
+_email_alerts_flag = os.environ.get("EMAIL_ALERTS_ENABLED", "false").strip().lower()
+EMAIL_ALERTS_ENABLED = _email_alerts_flag in {"1", "true", "yes", "on"}
+# Prefer AZURE_* names; fall back to the IT-issued Application_ID / Tenent_ID keys.
+AZURE_CLIENT_ID = _get_env_str("AZURE_CLIENT_ID") or _get_env_str("Application_ID")
+AZURE_TENANT_ID = (
+    _get_env_str("AZURE_TENANT_ID")
+    or _get_env_str("Tenant_ID")
+    or _get_env_str("Tenent_ID")
+)
+AZURE_CLIENT_SECRET = _get_env_str("AZURE_CLIENT_SECRET") or _get_env_str("Secret_Value")
+GRAPH_SENDER_EMAIL = _get_env_str("GRAPH_SENDER_EMAIL", "sudayasurriyan@aziro.com")
+GRAPH_SENDER_NAME = _get_env_str("GRAPH_SENDER_NAME", "Fraud Portal Alerts")
+# Comma-separated analyst roles that receive backlog digests.
+_backlog_roles = _get_env_str("BACKLOG_ALERT_ROLES", "Admin")
+BACKLOG_ALERT_ROLES = tuple(
+    role.strip() for role in _backlog_roles.split(",") if role.strip()
+)
+BACKLOG_ALERT_INTERVAL_MINUTES = int(os.environ.get("BACKLOG_ALERT_INTERVAL_MINUTES", "60"))
+
 
 def validate_runtime_secrets(*, strict: bool | None = None) -> None:
     """Refuse weak portal/SSO secrets in production (or when strict=True)."""
@@ -171,3 +191,8 @@ def log_security_posture() -> None:
         GROQ_SSL_VERIFY,
         SCHEMA_STRICT,
     )
+
+
+def is_graph_mail_configured() -> bool:
+    """True when Graph app credentials and sender mailbox are present."""
+    return bool(AZURE_CLIENT_ID and AZURE_TENANT_ID and AZURE_CLIENT_SECRET and GRAPH_SENDER_EMAIL)
